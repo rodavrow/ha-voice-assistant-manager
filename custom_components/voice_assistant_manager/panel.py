@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 
+from . import announcement_look
 from .chat_show import ChatLimits
 from .const import DOMAIN
 
@@ -57,6 +58,8 @@ class PanelState:
     chat_defaults: ChatLimits | None = None
     # The player each satellite plays favorites on: device id -> media_player entity id.
     speaker_overrides: dict[str, str] = field(default_factory=dict)
+    # Whether the speaking assistant's character is chosen on devices that offer one.
+    announcement_look: bool = True
 
 
 def _register(hass: HomeAssistant, state: PanelState, *, update: bool) -> None:
@@ -179,6 +182,8 @@ def _data(state: PanelState) -> dict[str, Any]:
     data: dict[str, Any] = {"sidebar": state.sidebar, "guide": state.guide}
     if state.speaker_overrides:
         data["speaker_overrides"] = state.speaker_overrides
+    if not state.announcement_look:
+        data["announcement_look"] = False
     if state.chat_defaults is not None:
         data["chat_defaults"] = asdict(state.chat_defaults)
     return data
@@ -266,7 +271,12 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         guide=_stored_guide(stored),
         chat_defaults=_stored_chat_defaults(stored),
         speaker_overrides=_stored_speaker_overrides(stored),
+        # On unless someone switched it off.
+        announcement_look=not (
+            isinstance(stored, dict) and stored.get("announcement_look") is False
+        ),
     )
+    announcement_look.set_enabled(hass, state.announcement_look)
     hass.data.setdefault(DOMAIN, {})["panel"] = state
     await hass.http.async_register_static_paths(
         [
@@ -276,6 +286,15 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
     )
     _register(hass, state, update=False)
     _register_mine(hass, f"{MINE_SCRIPT_URL}?v={integration.version}")
+
+
+async def async_set_announcement_look(hass: HomeAssistant, on: bool) -> bool:
+    """Switch choosing the speaking assistant's character on or off, for every assistant."""
+    state = panel_state(hass)
+    state.announcement_look = on
+    announcement_look.set_enabled(hass, on)
+    await state.store.async_save(_data(state))
+    return on
 
 
 async def async_set_sidebar(hass: HomeAssistant, show: bool) -> bool:

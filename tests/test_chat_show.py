@@ -1381,3 +1381,94 @@ async def test_the_state_before_any_chat(hass, show):
 
 async def test_there_is_one_manager_per_home_assistant(hass, show):
     assert get_manager(hass) is show.manager
+
+
+# Showing which assistant speaks, on devices with a character select.
+
+LOOK = "select.kitchen_satellite_next_announcement_assistant"
+
+
+def add_look_select(hass: HomeAssistant, show: SimpleNamespace) -> None:
+    """A character select on the satellite's device; select_option calls go into `order`."""
+    er.async_get(hass).async_get_or_create(
+        "select",
+        "test",
+        "kitchen-look",
+        device_id=show.device,
+        suggested_object_id=LOOK.removeprefix("select."),
+    )
+    hass.states.async_set(LOOK, "Default", {"options": ["Default", "Assistant 1", "Assistant 2"]})
+
+    async def select_option(call: ServiceCall) -> None:
+        show.speakers.order.append(f"select {call.data['option']}")
+
+    hass.services.async_register("select", "select_option", select_option)
+
+
+@pytest.fixture
+def ada_on_the_second_wake_word(show: SimpleNamespace):
+    slots = {show.jeeves.entry_id: 0, show.ada.entry_id: 1}
+    with patch.object(
+        chat_show.announcement_look,
+        "wake_slot",
+        lambda hass, satellite, entry: slots.get(entry.entry_id),
+    ):
+        yield
+
+
+async def test_each_line_first_shows_the_assistant_that_speaks_it(
+    hass, show, ada_on_the_second_wake_word
+):
+    add_look_select(hass, show)
+
+    await run_chat(hass, show)
+
+    assert show.speakers.order == [
+        "select Assistant 1",
+        "announce",
+        "select Assistant 2",
+        "announce",
+    ] * 2
+
+
+async def test_a_line_that_listens_also_shows_its_assistant_first(
+    hass, show, router_pipeline, ada_on_the_second_wake_word
+):
+    listening_speaker(hass)
+    add_look_select(hass, show)
+
+    await run_chat(hass, show, limits=ChatLimits(max_lines=3, pause=0, listen=True))
+
+    assert show.speakers.order == [
+        "select Assistant 1",
+        "announce",
+        "select Assistant 2",
+        "start_conversation",
+        "select Assistant 1",
+        "announce",
+    ]
+
+
+async def test_switched_off_the_chat_never_touches_the_character(
+    hass, show, ada_on_the_second_wake_word
+):
+    add_look_select(hass, show)
+    chat_show.announcement_look.set_enabled(hass, False)
+
+    await run_chat(hass, show)
+
+    assert show.speakers.order == ["announce"] * 4
+
+
+async def test_a_failing_character_select_does_not_stop_the_chat(hass, show):
+    add_look_select(hass, show)
+
+    async def broken(call: ServiceCall) -> None:
+        raise HomeAssistantError("device went away")
+
+    hass.services.async_register("select", "select_option", broken)
+
+    await run_chat(hass, show)
+
+    assert show.speakers.order == ["announce"] * 4
+    assert show.manager.state()["ended"] == "chat_done"

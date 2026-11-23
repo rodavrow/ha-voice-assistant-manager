@@ -38,6 +38,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
+from . import announcement_look
 from .announce import writer_agent
 from .const import DOMAIN
 from .memory import clean_text
@@ -937,6 +938,8 @@ class ChatShowManager:
                 return ""
             if not await self._async_wait_idle(chat.speaker):
                 return self._not_idle_reason(chat.speaker)
+            # Just before the line: the device's choice holds for one announcement only.
+            await announcement_look.async_show_assistant(self.hass, chat.speaker, entry)
             watch = _ListenWatch()
             unwatch = async_track_state_change_event(self.hass, [chat.speaker], watch.changed)
             chat.line_listens, chat.line_audible, chat.line_woken = listen, False, False

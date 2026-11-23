@@ -511,3 +511,90 @@ async def test_an_admin_user_composes_a_line(hass: HomeAssistant, hass_admin_use
     )
 
     assert response == {"text": "Alex, the boiler."}
+
+
+# Showing which assistant speaks, on devices with a character select.
+
+
+@pytest.fixture
+def shown(hass: HomeAssistant):
+    """Records whom announcement_look was asked to show, by entry id (None: the default)."""
+    calls: list[tuple[str, str | None]] = []
+
+    async def show(hass, satellite, entry):
+        calls.append((satellite, entry.entry_id if entry is not None else None))
+
+    with patch.object(announce.announcement_look, "async_show_assistant", show):
+        yield calls
+
+
+async def test_a_written_line_shows_the_assistant_that_wrote_it(hass: HomeAssistant, shown):
+    _, ada, pipelines = await two_routers(hass)
+
+    await compose(hass, pipelines, FakeAgents(writer_reply="Alex, the boiler."), assistant="ada")
+
+    assert shown == [(SATELLITE, ada.entry_id)]
+
+
+async def test_no_line_shows_nothing(hass: HomeAssistant, shown):
+    _, _, pipelines = await two_routers(hass)
+
+    await compose(hass, pipelines, FakeAgents(writer_reply=""), assistant="ada")
+
+    assert shown == []
+
+
+async def prepare(hass: HomeAssistant, context: Context | None = None, **data) -> None:
+    await hass.services.async_call(
+        DOMAIN,
+        "prepare_announcement",
+        {"satellite": SATELLITE, **data},
+        blocking=True,
+        context=context,
+    )
+
+
+async def test_prepare_shows_the_named_assistant(hass: HomeAssistant, shown):
+    _, ada, _ = await two_routers(hass)
+
+    await prepare(hass, assistant="Ada")
+
+    assert shown == [(SATELLITE, ada.entry_id)]
+
+
+@pytest.mark.parametrize("data", [{}, {"assistant": ""}, {"assistant": "nobody"}])
+async def test_prepare_without_a_known_assistant_shows_the_default(
+    hass: HomeAssistant, shown, data
+):
+    await two_routers(hass)
+
+    await prepare(hass, **data)
+
+    assert shown == [(SATELLITE, None)]
+
+
+async def test_regression_security_a_non_admin_user_cannot_prepare_an_announcement(
+    hass: HomeAssistant, hass_read_only_user, shown
+):
+    await two_routers(hass)
+
+    with pytest.raises(Unauthorized):
+        await prepare(hass, Context(user_id=hass_read_only_user.id), assistant="Ada")
+
+    assert shown == []
+
+
+async def test_regression_look_a_slow_character_select_never_costs_the_line(hass: HomeAssistant):
+    """Review: choosing the character must not count against the time to write the line."""
+    _, _, pipelines = await two_routers(hass)
+
+    async def slow(hass, satellite, entry):
+        await asyncio.sleep(0.2)
+
+    with (
+        patch.object(announce, "COMPOSE_TIMEOUT", 0.1),
+        patch.object(announce.announcement_look, "async_show_assistant", slow),
+    ):
+        response = await compose(hass, pipelines, FakeAgents(writer_reply="Alex, the boiler."))
+
+    assert response == {"text": "Alex, the boiler."}

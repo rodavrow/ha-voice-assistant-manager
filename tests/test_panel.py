@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import MockConfigEntry
 
+from custom_components.voice_assistant_manager import announcement_look
 from custom_components.voice_assistant_manager.calendar_watch import get_watcher
 from custom_components.voice_assistant_manager.const import DOMAIN
 from custom_components.voice_assistant_manager.memory import async_get_memory, entry_key, global_key
@@ -206,6 +207,45 @@ async def test_a_stored_choice_to_hide_the_page_is_used_at_the_start(hass, hass_
     assert hass.data[frontend.DATA_PANELS][PANEL_URL].show_in_sidebar is False
 
 
+
+# Showing which assistant speaks on devices that can.
+
+
+async def test_showing_the_speaking_assistant_is_on_by_default(hass, page):
+    await add_router(hass)
+
+    assert (await page.ok("get"))["announcement_look"] is True
+    assert announcement_look.is_enabled(hass) is True
+
+
+async def test_switching_off_showing_the_speaking_assistant(hass, page, hass_storage):
+    await add_router(hass)
+
+    result = await page.ok("set_announcement_look", on=False)
+
+    assert result == {"announcement_look": False}
+    assert announcement_look.is_enabled(hass) is False
+    assert hass_storage[f"{DOMAIN}.panel"]["data"]["announcement_look"] is False
+
+
+async def test_switched_off_it_stays_off_after_a_restart(hass, hass_storage):
+    hass_storage[f"{DOMAIN}.panel"] = {"version": 1, "data": {"announcement_look": False}}
+
+    await add_router(hass)
+
+    assert announcement_look.is_enabled(hass) is False
+
+
+async def test_switching_it_back_on_leaves_nothing_in_the_store(hass, page, hass_storage):
+    await add_router(hass)
+    await page.ok("set_announcement_look", on=False)
+
+    await page.ok("set_announcement_look", on=True)
+
+    assert "announcement_look" not in hass_storage[f"{DOMAIN}.panel"]["data"]
+    assert announcement_look.is_enabled(hass) is True
+
+
 # Who may use it.
 
 
@@ -214,6 +254,7 @@ async def test_a_stored_choice_to_hide_the_page_is_used_at_the_start(hass, hass_
     [
         ("get", {}),
         ("set_sidebar", {"show": False}),
+        ("set_announcement_look", {"on": False}),
         ("save_settings", {"entry_id": "x", "settings": {}}),
         ("save_calendar", {"entry_id": "x", "row": {}}),
         ("save_memory", {"entry_id": "x", "key": "k", "shown": [], "lines": []}),
