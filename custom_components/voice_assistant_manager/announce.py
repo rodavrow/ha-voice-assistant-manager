@@ -28,6 +28,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 from homeassistant.helpers.service import async_register_admin_service
 
+from . import announcement_look
 from .const import DOMAIN, REPLY_AGENT_TIMEOUT
 from .memory import clean_text, router_agent_ids
 from .reminders import HOUSEHOLD, assistant_aliases, for_whom
@@ -35,6 +36,7 @@ from .reminders import HOUSEHOLD, assistant_aliases, for_whom
 _LOGGER = logging.getLogger(__name__)
 
 SERVICE_COMPOSE_ANNOUNCEMENT = "compose_announcement"
+SERVICE_PREPARE_ANNOUNCEMENT = "prepare_announcement"
 KIND_REMINDER = "reminder"
 COMPOSE_TIMEOUT = REPLY_AGENT_TIMEOUT
 MAX_REMINDER_LENGTH = 500
@@ -47,6 +49,13 @@ SERVICE_SCHEMA = vol.Schema(
         vol.Required("kind"): vol.In([KIND_REMINDER]),
         vol.Required("text"): cv.string,
         vol.Required("recipient"): cv.string,
+        vol.Optional("assistant", default=""): cv.string,
+    }
+)
+
+PREPARE_SCHEMA = vol.Schema(
+    {
+        vol.Required("satellite"): cv.entity_domain("assist_satellite"),
         vol.Optional("assistant", default=""): cv.string,
     }
 )
@@ -274,7 +283,7 @@ async def _compose(
             language = None
     if entry is None:
         return ""
-    return await _write_line(
+    line = await _write_line(
         hass,
         entry,
         recipient,
@@ -282,6 +291,10 @@ async def _compose(
         lambda names: ANNOUNCE_INSTRUCTIONS.format(names=names),
         language,
     )
+    if line:
+        # The caller announces the line straight after, as this assistant.
+        await announcement_look.async_show_assistant(hass, satellite, entry)
+    return line
 
 
 async def _write_line(
@@ -362,6 +375,20 @@ def async_register_services(hass: HomeAssistant) -> None:
         compose_announcement,
         SERVICE_SCHEMA,  # type: ignore[arg-type]
         SupportsResponse.ONLY,
+    )
+
+    async def prepare_announcement(call: ServiceCall) -> None:
+        assistant = call.data.get("assistant", "")
+        entry = _entry_for_assistant(hass, assistant) if for_whom(assistant) else None
+        await announcement_look.async_show_assistant(hass, call.data["satellite"], entry)
+
+    # Who may call it: as compose_announcement. An unknown assistant shows the default.
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_PREPARE_ANNOUNCEMENT,
+        prepare_announcement,
+        PREPARE_SCHEMA,  # type: ignore[arg-type]
     )
 
 

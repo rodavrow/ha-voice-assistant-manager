@@ -731,6 +731,20 @@
           "description": "The assistant that took the reminder, by its assistant name. Decides the style. When empty, the satellite's primary assistant is used."
         }
       }
+    },
+    "prepare_announcement": {
+      "name": "Prepare announcement",
+      "description": "On a satellite that can show which assistant speaks, shows the given assistant for the next announcement only. Call it just before assist_satellite.announce. Does nothing on other satellites, or when it is switched off on the Voice Manager page. Automations and scripts keep working; a person who is not an administrator is refused.",
+      "fields": {
+        "satellite": {
+          "name": "Satellite",
+          "description": "The satellite that will speak."
+        },
+        "assistant": {
+          "name": "Assistant",
+          "description": "The assistant that will speak, by its assistant name. When empty or unknown, the device shows its default character."
+        }
+      }
     }
   }
 }

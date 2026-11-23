@@ -32,6 +32,20 @@ compose_announcement:
       selector:
         text:
 
+prepare_announcement:
+  fields:
+    satellite:
+      required: true
+      example: assist_satellite.kitchen_satellite
+      selector:
+        entity:
+          domain: assist_satellite
+    assistant:
+      required: false
+      example: jeeves
+      selector:
+        text:
+
 start_chat:
   fields:
     a:
