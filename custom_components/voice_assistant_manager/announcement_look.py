@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Show which assistant speaks, on devices that offer a character select.
 
-Some satellites (EchoLocal 0.0.16 and later) have a select whose entity id ends in
+Some satellite firmware offers a select whose entity id ends in
 `_next_announcement_assistant`, with the options "Default", "Assistant 1", "Assistant 2".
 The option chosen applies to the next announcement only. Before a line is spoken here, the
 speaking assistant's wake-word slot on that satellite picks the option. Devices without the

@@ -7,9 +7,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
-- **Satellites that can show which assistant is talking now do.** On EchoLocal 0.0.16 and
-  later, and any device with a select ending in `_next_announcement_assistant`, each Chat
-  show line and each line from `compose_announcement` shows the assistant that speaks it.
+- **Satellites that can show which assistant is talking now do.** On a satellite whose
+  firmware offers a select ending in `_next_announcement_assistant`, each Chat show line and each line from `compose_announcement` shows the assistant that speaks it.
   The new `prepare_announcement` action does the same for any other announcement, such as
   calendar events. Other speakers are never touched. Switch it off with **Show which
   assistant is speaking** on the Voice Manager page.

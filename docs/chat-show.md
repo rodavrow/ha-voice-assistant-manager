@@ -56,14 +56,14 @@ Example for Ada:
 
 ## Showing who speaks
 
-Some satellites can show which assistant is talking: EchoLocal 0.0.16 and later, and any device with a select whose entity id ends in `_next_announcement_assistant`. Before every line, that select is set to the assistant about to speak:
+Some satellites can show which assistant is talking: those whose firmware offers a select whose entity id ends in `_next_announcement_assistant`, with the options **Default**, **Assistant 1** and **Assistant 2**. Before every line, that select is set to the assistant about to speak:
 
 - the assistant on the satellite's first wake word shows as **Assistant 1**, the one on the second as **Assistant 2**
 - an assistant on neither wake word shows the device's **Default**
 
 The choice holds for that one line, so it is made again for each line. The text of the line is sent along, so the device can show it too. If the select cannot be set, the line is still spoken, with the default character.
 
-Speakers without such a select, and media players, are never touched. To stop it everywhere, switch off **Show which assistant is speaking** at the bottom of the Voice Manager page; the device's own **Animate announcements** switch also turns the animation off. Either way, when a line listens afterwards the satellite listens with its first wake word's assistant, whichever character was shown.
+Speakers without such a select, and media players, are never touched. To stop it everywhere, switch off **Show which assistant is speaking** at the bottom of the Voice Manager page; a device may also have a switch of its own for this. Either way, when a line listens afterwards the satellite listens with its first wake word's assistant, whichever character was shown.
 
 ## Limits
 

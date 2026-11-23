@@ -1053,7 +1053,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         ),
         this._plainSwitch(
           "Show which assistant is speaking",
-          "On speakers that can show a character (EchoLocal 0.0.16 or later), chat lines, reminders and prepare_announcement show the assistant that speaks. Speakers without this are never touched. When off, they show their default. This applies to all assistants.",
+          "On satellites whose firmware can show a character (a select ending in _next_announcement_assistant), chat lines, reminders and prepare_announcement show the assistant that speaks. Speakers without this are never touched. When off, they show their default. This applies to all assistants.",
           this._data.announcement_look !== false,
           (on) => this._setAnnouncementLook(on)
         )
