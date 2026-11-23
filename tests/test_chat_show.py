@@ -1472,3 +1472,11 @@ async def test_a_failing_character_select_does_not_stop_the_chat(hass, show):
 
     assert show.speakers.order == ["announce"] * 4
     assert show.manager.state()["ended"] == "chat_done"
+
+
+def test_the_assistants_are_told_a_guest_is_someone_unknown():
+    rules = chat_instructions("Jeeves", "Ada", 30)
+
+    assert f'"{chat_show.GUEST}"' in rules
+    assert "do not assume who" in rules
+

@@ -3,6 +3,7 @@
 """Tests for joining in and stopping a chat by voice, through any router."""
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import timedelta
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from homeassistant.helpers.chat_session import async_get_chat_session
 from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.voice_assistant_manager.chat_show import (
+    GUEST,
     REPLY_GRACE,
     SELF_WAKE_TTL,
     ChatLimits,
@@ -117,7 +119,7 @@ async def test_a_person_joins_in_and_nothing_else_answers(hass, show):
 
     result = await ask(hass, show.jeeves, "I think cats are better", device_id=show.device)
 
-    assert result.response.speech["plain"]["speech"] == "Mm-hm."
+    assert result.response.speech["plain"]["speech"] == ""
     assert [line["text"] for line in person_lines(show)] == ["I think cats are better"]
     assert show.manager.state()["ended"] == ""
     assert nothing_else_answered(show)
@@ -128,23 +130,97 @@ async def test_a_person_joins_in_and_nothing_else_answers(hass, show):
 async def test_a_person_line_is_capped_at_200_characters(hass, show):
     await chatting(show)
 
-    await ask(hass, show.jeeves, "x" * 300, device_id=show.device)
+    long_turn = "cats are better " * 30
 
-    assert person_lines(show)[0]["text"] == "x" * 200
+    await ask(hass, show.jeeves, long_turn, device_id=show.device)
+
+    assert person_lines(show)[0]["text"] == long_turn.strip()[:200]
     show.release.set()
     await hass.async_block_till_done(wait_background_tasks=True)
 
 
-async def test_an_unknown_voice_is_refused_and_the_chat_goes_on(hass, show):
+def guest_lines(show: SimpleNamespace) -> list[str]:
+    return [line["text"] for line in show.manager.state()["lines"] if line["who"] == GUEST]
+
+
+async def test_an_unknown_voice_joins_in_as_a_guest(hass, show):
     third = await add_router(hass, options_with(advanced={"no_helper_role": "stranger"}))
     await chatting(show)
 
-    result = await ask(hass, third, "tell me a secret", device_id=show.device)
+    result = await ask(hass, third, "Can I say something too?", device_id=show.device)
 
-    assert result.response.speech["plain"]["speech"] == REFUSAL
+    assert result.response.speech["plain"]["speech"] == ""
+    assert guest_lines(show) == ["Can I say something too?"]
     assert person_lines(show) == []
     assert show.manager.state()["ended"] == ""
     assert nothing_else_answered(show)
+    show.release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_a_guest_never_gets_the_stranger_reply(hass, show):
+    third = await add_router(hass, options_with(advanced={"no_helper_role": "stranger"}))
+    await chatting(show)
+    calls_before = len(show.agents.calls)
+
+    await ask(hass, third, "Guys, am I part of it?", device_id=show.device)
+
+    assert len(show.agents.calls) == calls_before
+    show.release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_after_the_grace_an_unknown_voice_gets_the_stranger_rules_again(
+    hass, show, freezer
+):
+    third = await add_router(hass, options_with(advanced={"no_helper_role": "stranger"}))
+    await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+    freezer.tick(timedelta(seconds=REPLY_GRACE + 1))
+
+    result = await ask(hass, third, "Can I say something too?", device_id=show.device)
+
+    assert result.response.speech["plain"]["speech"] == REFUSAL
+    assert nothing_else_answered(show)
+
+
+@pytest.mark.parametrize(
+    "text", ["I'm", "Hey Ada, I'm", "Jeeves, and the", "Well I think the", "Hey Ada."]
+)
+async def test_a_fragment_is_dropped_and_the_chat_goes_on(hass, show, text):
+    await chatting(show)
+
+    result = await ask(hass, show.jeeves, text, device_id=show.device)
+
+    assert result.response.speech["plain"]["speech"] == ""
+    assert person_lines(show) == []
+    assert show.manager.state()["ended"] == ""
+    assert nothing_else_answered(show)
+    show.release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+@pytest.mark.parametrize("text", ["No way.", "Hey Ada, I disagree.", "Me too!"])
+async def test_a_short_complete_turn_joins_in(hass, show, text):
+    await chatting(show)
+
+    await ask(hass, show.jeeves, text, device_id=show.device)
+
+    assert [line["text"] for line in person_lines(show)] == [text]
+    show.release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_each_turn_is_logged_by_kind_without_what_was_said(hass, show, caplog):
+    third = await add_router(hass, options_with(advanced={"no_helper_role": "stranger"}))
+    await chatting(show)
+
+    with caplog.at_level(logging.INFO):
+        await ask(hass, third, "Can I say something too?", device_id=show.device)
+        await ask(hass, show.jeeves, "Hey Ada, I'm", device_id=show.device)
+
+    assert "joined as a guest" in caplog.text
+    assert "fragment dropped" in caplog.text
+    assert "say something" not in caplog.text
     show.release.set()
     await hass.async_block_till_done(wait_background_tasks=True)
 
@@ -169,7 +245,7 @@ async def test_it_works_through_a_third_router_that_is_not_in_the_chat(hass, sho
 
     result = await ask(hass, third, "hello there", device_id=show.device)
 
-    assert result.response.speech["plain"]["speech"] == "Mm-hm."
+    assert result.response.speech["plain"]["speech"] == ""
     assert [line["text"] for line in person_lines(show)] == ["hello there"]
     assert nothing_else_answered(show)
     show.release.set()
@@ -183,7 +259,7 @@ async def test_without_a_chat_the_request_goes_to_the_main_agent(hass, show):
     assert len(show.agents.calls_to(MAIN_AGENT)) == 1
 
 
-async def test_regression_chat_unknown_speaker_during_a_chat_is_refused(hass, show):
+async def test_a_failed_lookup_during_a_chat_joins_as_a_guest(hass, show):
     await chatting(show)
 
     with patch.object(
@@ -191,8 +267,8 @@ async def test_regression_chat_unknown_speaker_during_a_chat_is_refused(hass, sh
     ):
         result = await ask(hass, show.jeeves, "turn on the lights", device_id=show.device)
 
-    assert result.response.speech["plain"]["speech"] == LAST_RESORT_REPLY
-    assert person_lines(show) == []
+    assert result.response.speech["plain"]["speech"] == ""
+    assert guest_lines(show) == ["turn on the lights"]
     assert show.manager.state()["ended"] == ""
     assert nothing_else_answered(show)
     show.release.set()
@@ -221,7 +297,7 @@ async def test_regression_chat_a_late_reply_after_the_chat_ended_never_reaches_t
 
     result = await ask(hass, show.jeeves, "turn on the lights", device_id=show.device)
 
-    assert result.response.speech["plain"]["speech"] == "Mm-hm."
+    assert result.response.speech["plain"]["speech"] == ""
     assert person_lines(show) == []
     assert nothing_else_answered(show)
 
@@ -298,7 +374,7 @@ async def test_regression_chat_a_new_chat_elsewhere_keeps_the_grace_of_the_last_
     reply = await ask(hass, show.jeeves, "turn on the lights", device_id=show.device)
     stop = await ask(hass, show.ada, "stop", device_id=show.device)
 
-    assert reply.response.speech["plain"]["speech"] == "Mm-hm."
+    assert reply.response.speech["plain"]["speech"] == ""
     assert stop.response.speech["plain"]["speech"] == "Okay."
     # Neither touches the chat in the office.
     assert show.manager.state()["speaker"] == OFFICE
@@ -683,7 +759,7 @@ async def test_regression_chat_self_wake_check_still_lets_a_person_join_in_the_p
 
     result = await ask(hass, show.jeeves, "I think cats are better", device_id=show.device)
 
-    assert speech(result) == "Mm-hm."
+    assert speech(result) == ""
     assert [line["text"] for line in person_lines(show)] == ["I think cats are better"]
     assert nothing_else_answered(show)
     set_satellite(hass, "idle")
@@ -730,7 +806,7 @@ async def test_regression_chat_self_wake_ignores_one_request_only(hass, show):
     second = await ask(hass, show.jeeves, "I like cheese", device_id=show.device)
 
     assert speech(first) == ""
-    assert speech(second) == "Mm-hm."
+    assert speech(second) == ""
     satellite.release.set()
     await finish(hass)
 
@@ -777,7 +853,7 @@ async def test_regression_chat_self_wake_check_lets_a_reply_after_a_listening_li
 
     await run_chat(hass, show, limits=ChatLimits(max_lines=3, pause=0, listen=True))
 
-    assert [speech(answer) for answer in answers] == ["Mm-hm."]
+    assert [speech(answer) for answer in answers] == [""]
     assert [line["text"] for line in person_lines(show)] == ["Tell me more!"]
 
 
@@ -832,7 +908,7 @@ async def test_regression_chat_self_wake_mark_expires(hass, show, request):
 
     result = await ask(hass, show.jeeves, "I think cats are better", device_id=show.device)
 
-    assert speech(result) == "Mm-hm."
+    assert speech(result) == ""
     assert [line["text"] for line in person_lines(show)] == ["I think cats are better"]
     satellite.release.set()
     await finish(hass)
@@ -846,7 +922,7 @@ async def test_regression_chat_self_wake_mark_is_cleared_by_a_person_waking_in_t
 
     result = await ask(hass, show.jeeves, "I think cats are better", device_id=show.device)
 
-    assert speech(result) == "Mm-hm."
+    assert speech(result) == ""
     assert [line["text"] for line in person_lines(show)] == ["I think cats are better"]
     set_satellite(hass, "idle")
     await show.manager.async_stop()
