@@ -975,7 +975,9 @@ class ChatShowManager:
             if not await self._async_wait_idle(chat.speaker):
                 return self._not_idle_reason(chat.speaker)
             # Just before the line: the device's choice holds for one announcement only.
-            await announcement_look.async_show_assistant(self.hass, chat.speaker, entry)
+            await announcement_look.async_show_assistant(
+                self.hass, chat.speaker, entry, self._other_router(chat, entry)
+            )
             watch = _ListenWatch()
             unwatch = async_track_state_change_event(self.hass, [chat.speaker], watch.changed)
             chat.line_listens, chat.line_audible, chat.line_woken = listen, False, False
@@ -1024,6 +1026,11 @@ class ChatShowManager:
                 if listen:
                     self._note_listened_line(chat.speaker, line)
         return "chat_speaker_busy"
+
+    def _other_router(self, chat: _Chat, entry: ConfigEntry) -> ConfigEntry | None:
+        """The assistant the speaking one chats with, if it is still loaded."""
+        other = next((key for key in chat.routers if key != entry.entry_id), None)
+        return _loaded_router(self.hass, other) if other is not None else None
 
     async def _async_wait_listened(self, satellite: str, watch: "_ListenWatch") -> None:
         """Wait for the satellite to start listening (briefly), then to be idle again."""
