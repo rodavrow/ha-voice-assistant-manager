@@ -79,6 +79,7 @@ from .panel import (
     GUIDE_STATES,
     GUIDE_STEPS,
     STARTED,
+    async_set_announcement_look,
     async_set_chat_defaults,
     async_set_guide,
     async_set_sidebar,
@@ -214,6 +215,7 @@ async def ws_get(
         msg["id"],
         {
             "sidebar": panel_state(hass).sidebar,
+            "announcement_look": panel_state(hass).announcement_look,
             "strings": await _strings(hass),
             "users": [
                 {"id": user_id, "name": name} for user_id, name in await login_users(hass)
@@ -232,6 +234,18 @@ async def ws_set_sidebar(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     connection.send_result(msg["id"], {"sidebar": await async_set_sidebar(hass, msg["show"])})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{PREFIX}/set_announcement_look", vol.Required("on"): bool}
+)
+@websocket_api.async_response
+async def ws_set_announcement_look(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    on = await async_set_announcement_look(hass, msg["on"])
+    connection.send_result(msg["id"], {"announcement_look": on})
 
 
 @websocket_api.require_admin
@@ -1025,6 +1039,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     for command in (
         ws_get,
         ws_set_sidebar,
+        ws_set_announcement_look,
         ws_save_settings,
         ws_save_calendar,
         ws_save_memory,

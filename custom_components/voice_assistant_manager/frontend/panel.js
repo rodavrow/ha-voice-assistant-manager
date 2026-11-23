@@ -661,6 +661,18 @@ class VoicePersonaRouterPanel extends HTMLElement {
     this._render();
   }
 
+  async _setAnnouncementLook(on) {
+    try {
+      this._data.announcement_look = (
+        await this._call("set_announcement_look", { on })
+      ).announcement_look;
+      this._toast(on ? "Speaking assistant is shown" : "Speaking assistant is not shown");
+    } catch (err) {
+      this._toast((err && err.message) || "That did not work.");
+    }
+    this._render();
+  }
+
   _go(section) {
     if (section === "chat" && this._section !== "chat") this._chat.stale = true;
     if (section === "favorites" && this._section !== "favorites") this._fav.stale = true;
@@ -1038,6 +1050,12 @@ class VoicePersonaRouterPanel extends HTMLElement {
           "When off, the page stays reachable at /voice-assistant-manager. This applies to all assistants.",
           this._data.sidebar,
           (show) => this._setSidebar(show)
+        ),
+        this._plainSwitch(
+          "Show which assistant is speaking",
+          "On speakers that can show a character (EchoLocal 0.0.16 or later), chat lines, reminders and prepare_announcement show the assistant that speaks. Speakers without this are never touched. When off, they show their default. This applies to all assistants.",
+          this._data.announcement_look !== false,
+          (on) => this._setAnnouncementLook(on)
         )
       ),
     ];
