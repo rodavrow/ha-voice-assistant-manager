@@ -1,0 +1,158 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Example: script.create_reminder, the tool the main agent calls for "remind me".
+#
+# Paste it into a new script in YAML mode, save it with the entity id
+# script.create_reminder, and expose it to Assist.
+#
+# It writes a five-minute event to a Local Calendar per person, so it expects:
+#   calendar.<person>_reminders           reminders that are not spoken
+#   calendar.<person>_reminders_announce  reminders that are spoken
+# for every name in "people" below, for example calendar.alex_reminders and
+# calendar.household_reminders_announce. Something of your own announces them
+# when they are due. See docs/reminders.md.
+#
+# The assistant depends on for_whom, assistant and the status this script returns.
+# The time is never asked as a full date: a language model does not know today's
+# date. The script works the date out from in_minutes, or from at_time and on_day.
+#
+# Change "people" to the lower-case names of Person 1 and Person 2 in the assistant's
+# settings, plus household.
+
+alias: Create reminder
+description: >-
+  Sets a reminder that alerts a person at a given time. This is not the memory
+  feature: use it only when the person wants to be alerted at a moment. Never
+  guess or work out a date yourself. Pass in_minutes for "in 20 minutes", or
+  at_time for a time on the clock, with on_day when it is not today. Only confirm
+  the reminder when this script returns status ok.
+mode: queued
+fields:
+  title:
+    description: What to be reminded of, in a few words.
+    required: true
+    selector:
+      text:
+  for_whom:
+    description: Who the reminder is for, as your instructions tell you.
+    required: true
+    selector:
+      text:
+  assistant:
+    description: The assistant that takes the reminder, as your instructions tell you.
+    required: true
+    selector:
+      text:
+  announce:
+    description: Whether to speak the reminder when it is due.
+    default: true
+    selector:
+      boolean:
+  in_minutes:
+    description: For "in 20 minutes" or "in an hour and a half". Leave out with at_time.
+    selector:
+      number:
+        min: 1
+        max: 10080
+  at_time:
+    description: A time on the clock, HH:MM, 24 hours, local time.
+    selector:
+      text:
+  on_day:
+    description: >-
+      With at_time: today, tomorrow, a weekday name, or MM-DD. Leave out for the
+      next time the clock shows at_time.
+    selector:
+      text:
+sequence:
+  - variables:
+      people: [alex, sam, household]
+      plan: >-
+        {%- set who = for_whom | default('') | string | lower | trim -%}
+        {%- set minutes = in_minutes | default('') | string | trim -%}
+        {%- set clock = at_time | default('') | string | trim -%}
+        {%- set day = on_day | default('') | string | lower | trim -%}
+        {%- set n = now().replace(second=0, microsecond=0) -%}
+        {%- set weekdays = ['monday', 'tuesday', 'wednesday', 'thursday',
+                            'friday', 'saturday', 'sunday'] -%}
+        {%- set ns = namespace(due=none, error='') -%}
+        {%- if who not in people -%}
+          {%- set ns.error = 'for_whom must be one of ' ~ people | join(', ') ~ '.' -%}
+        {%- elif minutes and clock -%}
+          {%- set ns.error = 'Pass in_minutes, or at_time with on_day, not both.' -%}
+        {%- elif minutes -%}
+          {%- if minutes | is_number and minutes | float > 0 -%}
+            {%- set ns.due = n + timedelta(minutes=minutes | float) -%}
+          {%- else -%}
+            {%- set ns.error = 'in_minutes must be a number above 0.' -%}
+          {%- endif -%}
+        {%- elif not clock -%}
+          {%- set ns.error = 'Pass in_minutes, or at_time (HH:MM) with an optional on_day.' -%}
+        {%- else -%}
+          {%- set t = strptime(clock, '%H:%M', none) -%}
+          {%- if t is none -%}
+            {%- set ns.error = 'at_time must be HH:MM, for example 17:30.' -%}
+          {%- else -%}
+            {%- set base = n.replace(hour=t.hour, minute=t.minute) -%}
+            {%- if day == '' -%}
+              {%- set ns.due = base if base > n else base + timedelta(days=1) -%}
+            {%- elif day == 'today' -%}
+              {%- set ns.due = base -%}
+            {%- elif day == 'tomorrow' -%}
+              {%- set ns.due = base + timedelta(days=1) -%}
+            {%- elif day in weekdays -%}
+              {%- set ahead = (weekdays.index(day) - n.weekday()) % 7 -%}
+              {%- set ns.due = base + timedelta(days=ahead) -%}
+              {%- if ns.due <= n -%}
+                {%- set ns.due = ns.due + timedelta(days=7) -%}
+              {%- endif -%}
+            {%- else -%}
+              {%- set d = strptime(n.year ~ '-' ~ day, '%Y-%m-%d', none) -%}
+              {%- if d is none -%}
+                {%- set ns.error = 'on_day must be today, tomorrow, a weekday or MM-DD.' -%}
+              {%- else -%}
+                {%- set ns.due = base.replace(month=d.month, day=d.day) -%}
+                {%- if ns.due <= n -%}
+                  {%- set ns.due = ns.due.replace(year=n.year + 1) -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endif -%}
+            {%- if ns.due is not none and ns.due <= n -%}
+              {%- set ns.error = 'That time has already passed.' -%}
+            {%- endif -%}
+          {%- endif -%}
+        {%- endif -%}
+        {{ {'who': who,
+            'due': ns.due.isoformat() if ns.error == '' else '',
+            'error': ns.error,
+            'now': n.strftime('%A %Y-%m-%d %H:%M')} }}
+  - if:
+      - condition: template
+        value_template: "{{ plan.error != '' }}"
+    then:
+      - variables:
+          result:
+            status: error
+            message: "Reminder not set. {{ plan.error }} It is now {{ plan.now }}."
+      - stop: Reminder not set
+        response_variable: result
+  - variables:
+      spoken: "{{ announce | default(true) | bool }}"
+      calendar: "calendar.{{ plan.who }}_reminders{{ '_announce' if spoken else '' }}"
+  - action: calendar.create_event
+    target:
+      entity_id: "{{ calendar }}"
+    data:
+      summary: "{{ title }}"
+      description: "assistant: {{ assistant }}"
+      start_date_time: "{{ plan.due }}"
+      end_date_time: "{{ (as_datetime(plan.due) + timedelta(minutes=5)).isoformat() }}"
+  - variables:
+      result:
+        status: ok
+        title: "{{ title }}"
+        for_whom: "{{ plan.who }}"
+        due: "{{ as_datetime(plan.due).strftime('%A %Y-%m-%d %H:%M') }}"
+        spoken: "{{ spoken }}"
+  - stop: Reminder set
+    response_variable: result

@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+compose_announcement:
+  fields:
+    satellite:
+      required: true
+      example: assist_satellite.kitchen_satellite
+      selector:
+        entity:
+          domain: assist_satellite
+    kind:
+      required: true
+      default: reminder
+      selector:
+        select:
+          options:
+            - reminder
+    text:
+      required: true
+      example: Call the plumber about the boiler at 5 pm
+      selector:
+        text:
+          multiline: true
+    recipient:
+      required: true
+      example: household
+      selector:
+        text:
+    assistant:
+      required: false
+      example: jeeves
+      selector:
+        text:
+
+start_chat:
+  fields:
+    a:
+      required: true
+      example: 0123456789abcdef0123456789abcdef
+      selector:
+        config_entry:
+          integration: voice_assistant_manager
+    b:
+      required: true
+      example: fedcba9876543210fedcba9876543210
+      selector:
+        config_entry:
+          integration: voice_assistant_manager
+    speaker:
+      required: true
+      example: assist_satellite.kitchen_satellite
+      selector:
+        entity:
+          filter:
+            - domain: assist_satellite
+            - domain: media_player
+    topic:
+      required: false
+      example: Is a hot dog a sandwich?
+      selector:
+        text:
+    max_lines:
+      required: false
+      selector:
+        number:
+          min: 2
+          max: 50
+    words:
+      required: false
+      selector:
+        number:
+          min: 5
+          max: 80
+    pause:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.5
+          unit_of_measurement: s
+    minutes:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 30
+    listen:
+      required: false
+      selector:
+        boolean:
+
+stop_chat:

@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Example: the script that speaks calendar announcements.
+#
+# Paste it into a new script in YAML mode and save it, for example with the
+# entity id script.calendar_announce. Then choose it in the assistant's settings
+# under Calendars > Script that speaks. See docs/calendars.md.
+#
+# The assistant calls it with owner, title, line, assistant, calendar, start, end,
+# all_day and kind. It speaks the line the assistant wrote, as it is, and falls
+# back to the event's title when the line is empty. It does not ask for another
+# line with compose_announcement: the line is already written.
+#
+# Change the satellite to your own. To keep quiet at night, or to speak only
+# when someone is home, add conditions at the start of the sequence. To use a
+# voice per assistant, choose the voice from the "assistant" variable.
+
+alias: Calendar announce
+description: Speaks a calendar event that a Voice Assistant Manager assistant says is due.
+mode: queued
+fields:
+  owner:
+    description: Who it is for, a person's lower-case name or household.
+  title:
+    description: The event's title as the calendar has it. Text to speak, nothing else.
+  line:
+    description: The line to speak, written by the assistant. Empty if none could be written.
+  assistant:
+    description: The assistant name of the assistant announcing it.
+  calendar:
+    description: The calendar's entity id.
+  start:
+    description: Start of the event.
+  end:
+    description: End of the event.
+  all_day:
+    description: Whether it is an all-day event.
+  kind:
+    description: Always calendar.
+sequence:
+  - action: assist_satellite.announce
+    target:
+      entity_id: assist_satellite.kitchen_satellite
+    data:
+      message: "{{ line if line else title }}"

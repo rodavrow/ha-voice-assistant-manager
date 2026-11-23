@@ -1,0 +1,546 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""What a signed-in person may ask for about their own assistant, over the websocket.
+
+These commands are open to every user, so each one works out who is asking from the
+connection alone and refuses anything that is not that person's own router, persona,
+facts or reminders. Nothing here takes a role or a user from the page.
+"""
+
+import logging
+import re
+from datetime import date
+from typing import Any, Literal
+
+import voluptuous as vol
+
+from homeassistant.components import websocket_api
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
+
+from .config_flow import (
+    current_settings,
+    memory_list_choices,
+    settings_error,
+    settings_to_save,
+)
+from .favorites import (
+    HOUSEHOLD,
+    MAX_NAME_LENGTH,
+    ListKey,
+    async_get_favorites,
+    own_list,
+)
+from .memory import (
+    MAX_LINE_SCHEMA_LENGTH,
+    MAX_MAX_ITEMS,
+    LineTooLongError,
+    TooManyItemsError,
+    async_get_memory,
+    entry_key,
+    global_key,
+)
+from .mine import (
+    MyRouter,
+    ReminderRefused,
+    async_add_reminder,
+    async_delete_reminder,
+    async_list_reminders,
+    can_add_reminders,
+    my_router,
+    my_routers,
+    owns_global_list,
+)
+from .panel_api import (
+    LINE_PREVIEW_LENGTH,
+    _error_text,
+    _refused,
+    _strings,
+    favorites_change,
+    favorites_search,
+)
+from .reminders import assistant_name
+
+_LOGGER = logging.getLogger(__name__)
+
+PREFIX = "voice_assistant_manager/me"
+MAX_PERSONA_LENGTH = 2000
+MAX_TITLE_LENGTH = 200
+TIME_OF_DAY = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9]")
+# The days the page offers (DAYS in frontend/mine.js), or a date as MM-DD.
+DAYS = (
+    "today",
+    "tomorrow",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
+MONTH_DAY = re.compile(r"([0-9]{2})-([0-9]{2})")
+LEAP_YEAR = 2000  # so that 02-29 counts as a day that exists
+
+
+def _is_day(on_day: str) -> bool:
+    """Whether `on_day` is one of the page's days or a date that exists, as MM-DD."""
+    if on_day in DAYS:
+        return True
+    found = MONTH_DAY.fullmatch(on_day)
+    if found is None:
+        return False
+    try:
+        date(LEAP_YEAR, int(found.group(1)), int(found.group(2)))
+    except ValueError:
+        return False
+    return True
+
+
+def _persona(settings: dict[str, Any], mine: MyRouter) -> str:
+    return str((settings.get(mine["role"]) or {}).get("persona") or "")
+
+
+def _calendar_rows(hass: HomeAssistant, settings: dict[str, Any], mine: MyRouter) -> list[Any]:
+    """The watched calendars announced for this person or for everyone, nothing else."""
+    rows = []
+    for row in settings.get("calendar_rows") or []:
+        if not isinstance(row, dict) or not row.get("calendar"):
+            continue
+        who = row.get("for") or "household"
+        if who not in (mine["role"], "household"):
+            continue
+        state = hass.states.get(row["calendar"])
+        name = state.attributes.get("friendly_name") if state else None
+        rows.append(
+            {
+                "calendar": row["calendar"],
+                "name": str(name or row["calendar"]),
+                "for": who,
+                "when": {
+                    "all_day_time": row.get("all_day_time"),
+                    "all_day_day": row.get("all_day_day"),
+                    "lead_minutes": row.get("lead_minutes") or 0,
+                },
+            }
+        )
+    return rows
+
+
+def _memory_keys(hass: HomeAssistant, user_id: str, mine: MyRouter) -> tuple[str, ...]:
+    """The only lists of facts this person may read or change.
+
+    The "all assistants" list is shared by everyone holding this role in any router, so it
+    is offered only while this user is the one holding it everywhere.
+    """
+    own = entry_key(mine["entry_id"], mine["memory_person"])
+    if owns_global_list(hass, user_id, mine["memory_person"]):
+        return (own, global_key(mine["memory_person"]))
+    return (own,)
+
+
+async def _router_view(
+    hass: HomeAssistant, user_id: str, mine: MyRouter
+) -> dict[str, Any] | None:
+    entry = hass.config_entries.async_get_entry(mine["entry_id"])
+    if entry is None:
+        return None
+    # config_flow.current_settings has no annotations yet
+    settings: dict[str, Any] = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+    memory = await async_get_memory(hass)
+    keys = _memory_keys(hass, user_id, mine)
+    return {
+        "entry_id": mine["entry_id"],
+        "title": mine["title"],
+        "role": mine["role"],
+        "name": mine["name"],
+        "assistant": assistant_name(
+            mine["title"], (settings.get("reminders") or {}).get("assistant")
+        ),
+        "persona": _persona(settings, mine),
+        "strangers_mode": (settings.get("strangers") or {}).get("mode", "ai"),
+        "calendars": _calendar_rows(hass, settings, mine),
+        # Without the script the page hides its add form instead of offering one that fails.
+        "can_add": can_add_reminders(hass),
+        "memory": [
+            {"key": key, "label": label, "items": memory.items(key)}
+            for key, label in memory_list_choices(memory, mine["entry_id"], settings)
+            if key in keys
+        ],
+    }
+
+
+async def _own_router(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> MyRouter | None:
+    """The asking user's role in the router the page named, or None after answering."""
+    mine = my_router(hass, connection.user.id, msg["entry_id"])
+    if mine is None:
+        connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_not_yours")))
+    return mine
+
+
+async def _failed(hass: HomeAssistant, mine: MyRouter, err: Exception) -> dict[str, Any]:
+    _LOGGER.error("My assistant action failed for assistant %s: %s", mine["entry_id"], err)
+    return _refused(await _error_text(hass, "mine_failed", reason=str(err)))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{PREFIX}/get"})
+@websocket_api.async_response
+async def ws_get(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The routers this person is in, with only their own persona, facts and calendars."""
+    strings = {
+        key: text
+        for key, text in (await _strings(hass)).items()
+        if key.startswith(("mine.", "error."))
+    }
+    user_id = connection.user.id
+    views = [await _router_view(hass, user_id, mine) for mine in my_routers(hass, user_id)]
+    routers = [view for view in views if view is not None]
+    connection.send_result(msg["id"], {"routers": routers, "strings": strings})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/save_persona",
+        vol.Required("entry_id"): str,
+        vol.Required("persona"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_save_persona(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Save this person's persona and nothing else, by the rules of the other settings forms."""
+    mine = await _own_router(hass, connection, msg)
+    if mine is None:
+        return
+    persona = msg["persona"].strip()
+    if len(persona) > MAX_PERSONA_LENGTH:
+        text = await _error_text(hass, "mine_persona_too_long")
+        connection.send_result(msg["id"], _refused(text))
+        return
+    entry = hass.config_entries.async_get_entry(mine["entry_id"])
+    if entry is None:
+        connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_not_yours")))
+        return
+    # config_flow.current_settings has no annotations yet
+    current: dict[str, Any] = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+    role = mine["role"]
+    settings = {**current, role: {**(current.get(role) or {}), "persona": persona}}
+    error = settings_error(hass, entry, settings)
+    if error is not None:
+        # Only the persona changed, so what is wrong is in settings only an administrator
+        # can change, such as an agent that gained tools after it was saved. The reason
+        # stays in the log: it can name other routers, agents and calendars. Nothing is saved.
+        _LOGGER.warning(
+            "A persona for assistant %s was not saved, its settings are refused: %s",
+            entry.entry_id,
+            error,
+        )
+        text = await _error_text(hass, "mine_settings_need_admin")
+        connection.send_result(msg["id"], _refused(text))
+        return
+    options = settings_to_save(entry, settings)
+    hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/save_memory",
+        vol.Required("entry_id"): str,
+        vol.Required("key"): str,
+        vol.Required("shown"): vol.All(
+            [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
+        ),
+        vol.Required("lines"): vol.All(
+            [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
+        ),
+    }
+)
+@websocket_api.async_response
+async def ws_save_memory(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Save one edited list of this person's own facts: the page may only name theirs."""
+    mine = await _own_router(hass, connection, msg)
+    if mine is None:
+        return
+    key = msg["key"]
+    if key not in _memory_keys(hass, connection.user.id, mine):
+        connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_not_yours")))
+        return
+    memory = await async_get_memory(hass)
+    shown_ids = set(msg["shown"])
+    shown = [item for item in memory.items(key) if item["id"] in shown_ids]
+    try:
+        await memory.async_apply_edit(key, shown, msg["lines"])
+    except LineTooLongError as err:
+        preview = f"{err.line[:LINE_PREVIEW_LENGTH]}…"
+        text = await _error_text(hass, "line_too_long", line=preview)
+        connection.send_result(msg["id"], _refused(text))
+        return
+    except TooManyItemsError:
+        text = await _error_text(hass, "too_many_facts")
+        connection.send_result(msg["id"], _refused(text))
+        return
+    connection.send_result(msg["id"], {"ok": True, "items": memory.items(key)})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{PREFIX}/reminders", vol.Required("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_reminders(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """This person's own and the household's reminders in the next 30 days."""
+    mine = await _own_router(hass, connection, msg)
+    if mine is None:
+        return
+    connection.send_result(msg["id"], await async_list_reminders(hass, mine, dt_util.utcnow()))
+
+
+async def _reminder_error(
+    hass: HomeAssistant,
+    scope: str,
+    title: str,
+    in_minutes: int | None,
+    at_time: str | None,
+    on_day: str | None,
+) -> str | None:
+    """The text for why these fields cannot make a reminder, None when they can."""
+    key: str | None = None
+    if scope not in ("me", "household"):
+        key = "mine_scope_invalid"
+    elif not title or len(title) > MAX_TITLE_LENGTH:
+        key = "mine_title_invalid"
+    elif isinstance(in_minutes, bool) or (in_minutes is None) == (at_time is None):
+        key = "mine_time_invalid"
+    elif in_minutes is not None and (in_minutes < 1 or on_day is not None):
+        key = "mine_time_invalid"
+    elif at_time is not None and not TIME_OF_DAY.fullmatch(at_time):
+        key = "mine_time_invalid"
+    elif on_day is not None and not _is_day(on_day):
+        key = "mine_time_invalid"
+    return await _error_text(hass, key) if key else None
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/add_reminder",
+        vol.Required("entry_id"): str,
+        vol.Required("scope"): str,
+        vol.Required("title"): str,
+        vol.Required("announce"): bool,
+        vol.Optional("in_minutes"): int,
+        vol.Optional("at_time"): str,
+        vol.Optional("on_day"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_add_reminder(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Add a reminder through the script that makes them, for this person or the household."""
+    mine = await _own_router(hass, connection, msg)
+    if mine is None:
+        return
+    title = msg["title"].strip()
+    in_minutes: int | None = msg.get("in_minutes")
+    at_time: str | None = msg.get("at_time")
+    on_day: str | None = msg.get("on_day")
+    refusal = await _reminder_error(hass, msg["scope"], title, in_minutes, at_time, on_day)
+    if refusal is not None:
+        connection.send_result(msg["id"], _refused(refusal))
+        return
+    scope: Literal["me", "household"] = "me" if msg["scope"] == "me" else "household"
+    try:
+        response = await async_add_reminder(
+            hass, mine, scope, title, msg["announce"], in_minutes, at_time, on_day
+        )
+    except ReminderRefused as err:
+        connection.send_result(msg["id"], _refused(await _error_text(hass, err.key)))
+        return
+    except (HomeAssistantError, vol.Invalid) as err:
+        connection.send_result(msg["id"], await _failed(hass, mine, err))
+        return
+    connection.send_result(msg["id"], response)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/delete_reminder",
+        vol.Required("entry_id"): str,
+        vol.Required("calendar"): str,
+        vol.Required("uid"): str,
+        vol.Optional("recurrence_id"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def ws_delete_reminder(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Delete one reminder, only from this person's own or the household's calendars."""
+    mine = await _own_router(hass, connection, msg)
+    if mine is None:
+        return
+    try:
+        await async_delete_reminder(
+            hass, mine, msg["calendar"], msg["uid"], msg.get("recurrence_id")
+        )
+    except ReminderRefused as err:
+        connection.send_result(msg["id"], _refused(await _error_text(hass, err.key)))
+        return
+    except (HomeAssistantError, vol.Invalid) as err:
+        connection.send_result(msg["id"], await _failed(hass, mine, err))
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+# Favorites: the person's own list and the household's, never the other person's.
+
+ListChoice = Literal["own", "household"]
+LIST_CHOICES: tuple[ListChoice, ...] = ("own", "household")
+
+
+async def _is_linked(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> bool:
+    """Whether the asking user is a person in any assistant; answers the page when not."""
+    if my_routers(hass, connection.user.id):
+        return True
+    text = await _error_text(hass, "mine_favorites_not_linked")
+    connection.send_result(msg["id"], _refused(text))
+    return False
+
+
+async def _chosen_list(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> ListKey | None:
+    """The list the page chose, if this user may change it; else None after answering."""
+    if not await _is_linked(hass, connection, msg):
+        return None
+    if msg["list"] == "household":
+        return HOUSEHOLD
+    state, own = own_list(hass, connection.user.id)
+    if own is None:
+        key = "mine_favorites_conflict" if state == "conflict" else "mine_favorites_off"
+        connection.send_result(msg["id"], _refused(await _error_text(hass, key)))
+    return own
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{PREFIX}/favorites/get"})
+@websocket_api.async_response
+async def ws_favorites_get(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """This person's own favorites and the household's.
+
+    `own_state` says whether there is an own list: "ok"; "conflict" while the assistants
+    with favorites on disagree who holds this person's role; "off" when this person holds
+    no role in an assistant with favorites on. `conflict` is True only for "conflict".
+    """
+    if not await _is_linked(hass, connection, msg):
+        return
+    store = await async_get_favorites(hass)
+    state, own = own_list(hass, connection.user.id)
+    connection.send_result(
+        msg["id"],
+        {
+            "own": store.items(own) if own is not None else None,
+            "own_state": state,
+            "conflict": state == "conflict",
+            "household": store.items(HOUSEHOLD),
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/favorites/add",
+        vol.Required("list"): vol.In(LIST_CHOICES),
+        vol.Required("data"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_favorites_add(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Add a favorite to this person's own list or the household's."""
+    key = await _chosen_list(hass, connection, msg)
+    if key is not None:
+        connection.send_result(msg["id"], await favorites_change(hass, key, "add", msg))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/favorites/update",
+        vol.Required("list"): vol.In(LIST_CHOICES),
+        vol.Required("favorite_id"): str,
+        vol.Required("data"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_favorites_update(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Change one favorite of this person's own list or the household's."""
+    key = await _chosen_list(hass, connection, msg)
+    if key is not None:
+        connection.send_result(msg["id"], await favorites_change(hass, key, "update", msg))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/favorites/remove",
+        vol.Required("list"): vol.In(LIST_CHOICES),
+        vol.Required("favorite_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_favorites_remove(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Remove one favorite from this person's own list or the household's."""
+    key = await _chosen_list(hass, connection, msg)
+    if key is not None:
+        connection.send_result(msg["id"], await favorites_change(hass, key, "remove", msg))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/favorites/search",
+        vol.Required("name"): vol.All(str, vol.Length(max=MAX_NAME_LENGTH)),
+    }
+)
+@websocket_api.async_response
+async def ws_favorites_search(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Search Music Assistant for something to save as a favorite."""
+    if await _is_linked(hass, connection, msg):
+        connection.send_result(msg["id"], await favorites_search(hass, msg["name"]))
+
+
+@callback
+def async_register_mine_commands(hass: HomeAssistant) -> None:
+    """Register the commands of the My assistant page. Called once per start."""
+    for command in (
+        ws_get,
+        ws_save_persona,
+        ws_save_memory,
+        ws_reminders,
+        ws_add_reminder,
+        ws_delete_reminder,
+        ws_favorites_get,
+        ws_favorites_add,
+        ws_favorites_update,
+        ws_favorites_remove,
+        ws_favorites_search,
+    ):
+        websocket_api.async_register_command(hass, command)

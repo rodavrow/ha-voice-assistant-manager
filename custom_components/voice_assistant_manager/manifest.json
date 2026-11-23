@@ -1,0 +1,25 @@
+{
+  "domain": "voice_assistant_manager",
+  "name": "Voice Assistant Manager",
+  "after_dependencies": [
+    "assist_pipeline",
+    "assist_satellite",
+    "calendar",
+    "frontend",
+    "script"
+  ],
+  "codeowners": [
+    "@rodavrow"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "conversation",
+    "http",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/rodavrow/ha-voice-assistant-manager",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/rodavrow/ha-voice-assistant-manager/issues",
+  "version": "0.5.0"
+}

@@ -1,0 +1,736 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a voice assistant",
+        "description": "The assistant sits in front of a conversation agent and changes its persona depending on who is speaking. After adding it, open Voice Manager in the sidebar: a setup guide takes you through the rest.",
+        "data": {
+          "name": "Name",
+          "agent": "Main agent"
+        },
+        "data_description": {
+          "name": "Shown as the name of the new conversation agent, for example Kitchen assistant (by speaker).",
+          "agent": "The agent that answers the people who live here."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Voice Assistant Manager",
+        "menu_options": {
+          "settings": "Settings",
+          "calendars": "Calendars",
+          "memory": "Memory"
+        }
+      },
+      "settings": {
+        "title": "Voice persona settings",
+        "description": "Who is speaking comes from the voice_speaker helper of each satellite (owner, partner or stranger). Requests from the phone app or browser can be matched to the logged-in Home Assistant user instead. Changes apply to the next request, no restart needed.",
+        "sections": {
+          "agents": {
+            "name": "Agents",
+            "data": {
+              "agent": "Main agent"
+            },
+            "data_description": {
+              "agent": "Answers Person 1 and Person 2, with its normal tools."
+            }
+          },
+          "local": {
+            "name": "Built-in commands",
+            "description": "Home Assistant's own quick commands, such as turn off the kitchen lights. They are only tried for Person 1 and Person 2, never for an unknown voice. For this to be the only way in, switch off Prefer handling commands locally on the Home Assistant voice assistants (pipelines) that use this assistant.",
+            "data": {
+              "enabled": "Try built-in commands first",
+              "leave_questions": "Leave questions and music searches to the main agent"
+            },
+            "data_description": {
+              "enabled": "A request that matches a built-in command exactly is carried out at once, without the main agent. Anything else goes to the main agent.",
+              "leave_questions": "State questions such as is the door closed, and play music requests, go to the main agent even when a built-in command matches."
+            }
+          },
+          "memory": {
+            "name": "Memory",
+            "description": "Lets this assistant remember what Person 1 and Person 2 tell it. It is never used for an unknown voice. View and edit the facts under Memory in the Configure menu.",
+            "data": {
+              "enabled": "Remember things about the people who live here",
+              "agent": "Agent that decides what to save",
+              "auto_save": "Save important facts without being asked",
+              "max_items": "Most facts kept per list",
+              "use_global": "Use the lists shared by all assistants",
+              "shared": "Share what each person tells it with the other person"
+            },
+            "data_description": {
+              "enabled": "Needs an agent chosen below.",
+              "agent": "Reads each exchange after the reply has been given, so it never slows an answer down. Pick a cheap, fast agent with no tool providers. It may not be the main agent or this assistant.",
+              "auto_save": "When off, only remember and forget requests change the memory.",
+              "max_items": "Also the most facts shown to the main agent. When a list is full, the oldest facts saved without being asked are dropped first.",
+              "use_global": "Facts are kept per assistant unless the person asks for all assistants to remember them.",
+              "shared": "Like a person would, the assistant knows what either of you told it, whoever is speaking, so one of you can leave a message for the other. Facts a person asks to keep private are only used when that person speaks. When off, each person's facts are only used when that person speaks."
+            }
+          },
+          "reminders": {
+            "name": "Reminders",
+            "description": "For a Home Assistant set up with a create_reminder script exposed to the main agent. Tells the main agent how to use it, keeps reminders out of memory, and writes spoken reminder lines in this assistant's style.",
+            "data": {
+              "enabled": "The main agent can set reminders",
+              "assistant": "Assistant name",
+              "agent": "Announcement agent (no tools)",
+              "persona": "Extra instructions for announcements",
+              "failure_line": "Line spoken when a reminder could not be set",
+              "owner_calendars": "Reminder calendars of Person 1",
+              "partner_calendars": "Reminder calendars of Person 2",
+              "household_calendars": "Reminder calendars of the household"
+            },
+            "data_description": {
+              "enabled": "Adds reminder rules to the main agent's prompt, including who is speaking, and replaces a reply that says a reminder is set when the create_reminder tool did not set one.",
+              "agent": "Writes every line this assistant announces: spoken reminders (the compose_announcement action) and calendar events. Must have no tool providers, and may not be the main agent or an assistant. When empty, the agent that writes the refusal is used.",
+              "persona": "Used for spoken reminders and for calendar events alike, whoever they are for. The place for this assistant's character. Added after the recipient's persona and in front of the built-in announcement instructions. Not used for normal conversations.",
+              "failure_line": "When empty, a plain line is used.",
+              "owner_calendars": "My assistant lists Person 1's reminders from these calendars. A calendar can belong to one Home Assistant user only, so Person 1 needs a Home Assistant user under People.",
+              "partner_calendars": "My assistant lists Person 2's reminders from these calendars. A calendar can belong to one Home Assistant user only, so Person 2 needs a Home Assistant user under People.",
+              "household_calendars": "My assistant lists these calendars' reminders for everyone. A calendar listed here cannot also be a personal one, but several assistants may list the same household calendar.",
+              "assistant": "The name this assistant goes by in reminders, for example jeeves. The main agent passes it to create_reminder, and compose_announcement uses it to find this assistant. When empty, the first word of the assistant's name is used."
+            }
+          },
+          "favorites": {
+            "name": "Favorites",
+            "description": "Named radio stations, podcasts and playlists that Person 1 and Person 2 can play by voice. Never used for an unknown voice.",
+            "data": {
+              "enabled": "Play favorites by name"
+            },
+            "data_description": {
+              "enabled": "A request such as play Radio 2, or play Radio 2 on the Denon, that names a favorite exactly plays it at once, before the built-in commands and without the main agent. Person 1's and Person 2's own favorites are shared by every assistant with this switched on."
+            }
+          },
+          "chat": {
+            "name": "Chat show",
+            "description": "Used only when this assistant talks with another one in a chat show, never in normal conversations. A chat line is written by the announcement agent, which has no tools, so this assistant can only talk, never control the home.",
+            "data": {
+              "character": "Character for chats",
+              "tts_engine": "Voice for chats: text-to-speech engine",
+              "voice": "Voice for chats: voice"
+            },
+            "data_description": {
+              "character": "How this assistant behaves in a chat, for example: a dry, put-upon butler. A good start is to copy the personality part of the main agent's prompt, and leave out everything about controlling the home or using tools. At most 2000 characters. When empty, Extra instructions for announcements under Reminders is used.",
+              "tts_engine": "The engine that speaks this assistant's chat lines. When empty, the voice of the speaker that hosts the chat is used.",
+              "voice": "The name or id of a voice of that engine, for example jeeves. When empty, the engine's default voice is used."
+            }
+          },
+          "calendars": {
+            "name": "Calendars",
+            "description": "For announcing events from calendars. Which calendars are watched is set under Configure > Calendars. These settings apply to all of them.",
+            "data": {
+              "script": "Script that speaks",
+              "all_day_time": "All-day events are announced at",
+              "catch_up_hours": "Catch up after a restart for at most"
+            },
+            "data_description": {
+              "script": "Called for every event that is due, with the variables owner, title, line, assistant, calendar, start, end, all_day and kind. When empty, only the voice_assistant_manager_calendar_due event is fired.",
+              "all_day_time": "Used for a calendar that has no time of its own.",
+              "catch_up_hours": "After a restart, events that became due while Home Assistant was off are still announced when they are less than this late. Later ones are dropped."
+            }
+          },
+          "owner": {
+            "name": "Person 1",
+            "description": "Used when the voice_speaker helper says owner, or when this person's Home Assistant user sends a typed request.",
+            "data": {
+              "name": "Name",
+              "user": "Home Assistant user",
+              "persona": "Persona"
+            },
+            "data_description": {
+              "name": "Put in front of this person's messages in the shared history, for example Alex.",
+              "user": "Every typed request made while logged in as this user counts as this person: from the phone app, the browser or the REST API, even one that names a satellite. Once any user is chosen, other logged-in users count as an unknown voice. Voice requests from a satellite go by its voice_speaker helper.",
+              "persona": "Instructions added to the main agent's prompt when this person speaks."
+            }
+          },
+          "partner": {
+            "name": "Person 2",
+            "description": "Used when the voice_speaker helper says partner, or when this person's Home Assistant user sends a typed request.",
+            "data": {
+              "name": "Name",
+              "user": "Home Assistant user",
+              "persona": "Persona"
+            },
+            "data_description": {
+              "name": "Put in front of this person's messages in the shared history, for example Sam.",
+              "user": "Every typed request made while logged in as this user counts as this person: from the phone app, the browser or the REST API, even one that names a satellite. Once any user is chosen, other logged-in users count as an unknown voice. Voice requests from a satellite go by its voice_speaker helper.",
+              "persona": "Instructions added to the main agent's prompt when this person speaks."
+            }
+          },
+          "strangers": {
+            "name": "Unknown voices",
+            "description": "An unknown voice never reaches the main agent or any tool, and the exchange is kept out of the shared history.",
+            "data": {
+              "mode": "How to answer",
+              "reply_agent": "Agent that writes the refusal",
+              "persona": "Instructions for the refusal",
+              "fixed_replies": "Fixed lines"
+            },
+            "data_description": {
+              "reply_agent": "Must be an agent with no tool providers that exists. It may not be the main agent or another assistant of Voice Assistant Manager. It may not be able to control the home.",
+              "persona": "What the refusal agent is told about the person speaking.",
+              "fixed_replies": "One line per row. One is picked at random when fixed lines are chosen, or when the refusal agent fails or is slow."
+            }
+          },
+          "near_miss": {
+            "name": "Almost recognised",
+            "description": "For an unknown voice whose match score came close. The answer is still a refusal without tools, but it asks them to try again.",
+            "data": {
+              "enabled": "Ask to try again on a near miss",
+              "min_score": "Lowest score that counts as a near miss",
+              "persona": "Instructions for the try again reply",
+              "fixed_replies": "Fixed try again lines"
+            },
+            "data_description": {
+              "min_score": "Compared with the Last speaker score sensor of the satellite. Scores from this value up to the satellite's own recognition level get the try again reply.",
+              "fixed_replies": "One line per row. Used when fixed lines are chosen above, or when the refusal agent fails or is slow."
+            }
+          },
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "rule": "Shared history rule",
+              "wait_seconds": "Wait for the voice match",
+              "no_helper_role": "A device without speaker recognition is"
+            },
+            "data_description": {
+              "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
+              "wait_seconds": "How long to wait while the helper says pending. If no match arrives in time, the voice counts as unknown.",
+              "no_helper_role": "Used for a request that neither a voice_speaker helper nor a Home Assistant user decides: a typed request when no user is chosen under Person 1 or Person 2, or a request from a device that has no helper and no user."
+            }
+          }
+        }
+      },
+      "memory": {
+        "title": "Memory",
+        "description": "Pick the list of remembered facts to view or edit. Each assistant keeps its own list per person. The lists for all assistants are shared by every assistant.",
+        "data": {
+          "list": "List"
+        }
+      },
+      "memory_edit": {
+        "title": "Memory",
+        "description": "{list}\n\nOne fact per line. Delete a line to forget it. Type a new line to add one. Start a line with (private) to keep that fact from the other person.",
+        "data": {
+          "facts": "Remembered facts"
+        }
+      },
+      "calendars": {
+        "title": "Calendars",
+        "description": "Events from these calendars are announced when they are due. Pick one to change or remove it, or add one.",
+        "data": {
+          "row": "Calendar"
+        }
+      },
+      "calendar_edit": {
+        "title": "Calendar",
+        "description": "This assistant announces the events of this calendar through the script chosen under Settings > Calendars. Do not list a calendar that another automation already announces, such as the one that holds your reminders, and list a calendar in one assistant only: each assistant that lists it announces it.",
+        "data": {
+          "calendar": "Calendar",
+          "for": "Who it is for",
+          "all_day_time": "All-day events: announce at",
+          "all_day_day": "All-day events: announce",
+          "lead_minutes": "Timed events: announce this long before the start",
+          "contains": "Only events containing",
+          "hint": "What this calendar is",
+          "remove": "Remove this calendar"
+        },
+        "data_description": {
+          "all_day_time": "A time such as 19:00. When empty, the time under Settings > Calendars is used.",
+          "all_day_day": "An event of several days is announced once, for its first day.",
+          "contains": "When filled in, events without this text in their title are skipped.",
+          "hint": "Told to the agent that writes the spoken line, for example: Dutch waste collection. Say in English which bin goes out. For the assistant's character, use Settings > Reminders > Extra instructions for announcements, which applies to every calendar."
+        }
+      }
+    },
+    "error": {
+      "same_user": "Person 1 and Person 2 cannot have the same Home Assistant user.",
+      "memory_agent_required": "Choose an agent that decides what to save, or turn memory off.",
+      "memory_agent_invalid": "The agent that decides what to save may not be the main agent, another assistant or an agent that can control the home, and it must exist. Pick an agent without tools.",
+      "line_too_long": "A fact may be 200 characters at most. This line is too long: {line}",
+      "too_many_facts": "A list may hold 200 facts at most. Remove some facts and try again.",
+      "reminder_agent_invalid": "The agent that writes spoken announcements may not be the main agent, another assistant or an agent that can control the home, and it must exist. Pick an agent without tools.",
+      "reminder_calendar_shared": "{calendar} cannot be a reminder calendar here: {router} already uses it for someone else or for the household. A personal calendar belongs to one person and is never also a household one.",
+      "reminder_calendar_twice": "{calendar} is chosen twice in this assistant's reminder calendars. A personal calendar belongs to one person and is never also a household one.",
+      "reminder_calendar_no_user": "Personal reminder calendars need a Home Assistant user for that person, so My assistant knows whose they are. Choose the user under People, or empty the list.",
+      "chat_character_too_long": "The character for chats may be 2000 characters at most. Shorten it.",
+      "refusal_agent_invalid": "The agent that writes refusals may not be another assistant or an agent that can control the home, and it must exist. Pick an agent without tools, so an unknown voice can never reach one.",
+      "chat_running": "A chat is already running. Stop it first.",
+      "chat_same_assistant": "Choose two different assistants for the chat.",
+      "chat_no_router": "One of the chosen assistants is not available. Reload the page and choose again.",
+      "chat_no_writer": "Both assistants need an announcement agent without tools before they can chat. Choose one under Reminders in each assistant's settings.",
+      "chat_bad_speaker": "That speaker cannot be used. Choose a satellite that can announce or a media player that can play media.",
+      "chat_limits_invalid": "The chat limits are not valid: {reason}",
+      "chat_done": "The chat reached its line limit.",
+      "chat_time_up": "The chat reached its time limit.",
+      "chat_stopped": "The chat was stopped.",
+      "chat_agent_failed": "An assistant could not write its next line, so the chat ended.",
+      "chat_speaker_busy": "The speaker stayed busy, so the chat ended.",
+      "chat_speaker_failed": "The speaker could not play a line, so the chat ended.",
+      "chat_failed": "The chat stopped because of an unexpected error. The Home Assistant log has the details.",
+      "calendar_duplicate": "This assistant already watches that calendar.",
+      "calendar_time_invalid": "Write the time as hours and minutes, for example 19:00, or leave it empty.",
+      "guide_no_satellite": "That satellite was not found. Reload the page and try again.",
+      "guide_tracked": "An automation already uses this satellite's speaker sensors, so nothing was created.",
+      "guide_no_sensors": "This satellite has no speaker sensors yet. Set up voice matching for it first.",
+      "guide_names_missing": "Both person names are needed to tell the speakers apart.",
+      "guide_names_same": "The two people need different names in the voice match, or the assistant cannot tell them apart.",
+      "guide_pipeline_not_router": "That pipeline does not use this assistant, so it was left alone.",
+      "guide_not_wake_word": "That is not a wake word of one of your satellites.",
+      "guide_no_pipeline": "That wake word does not use a pipeline that can be copied.",
+      "guide_router_missing": "This assistant is not ready yet. Reload it and try again.",
+      "guide_pipeline_name_shared": "Two pipelines are named {name}, so the wake word could end up on the wrong one. Rename one of them in Settings > Voice assistants, then try again.",
+      "guide_failed": "Home Assistant refused the change: {reason}",
+      "mine_not_yours": "That is not one of your assistants.",
+      "mine_settings_need_admin": "Your persona cannot be saved until an administrator fixes this assistant's other settings on the Voice Manager page. Ask an administrator to open that page.",
+      "mine_persona_too_long": "Your persona may be 2000 characters at most. Shorten it and try again.",
+      "mine_no_script": "Reminders cannot be added yet, because the script script.create_reminder does not exist. Ask an administrator to set it up.",
+      "mine_cannot_delete": "This reminder cannot be deleted. It may be gone already, or its calendar does not allow deleting.",
+      "mine_failed": "Home Assistant refused this: {reason}",
+      "mine_title_invalid": "Write what to be reminded of, in 200 characters at most.",
+      "mine_time_invalid": "Choose either a number of minutes from now (1 or more) or a time such as 19:30. A day can only go with a time.",
+      "mine_no_name": "A reminder for you needs your name, and none is set yet. Ask an administrator to fill in your name under People on the Voice Manager page, or add the reminder for the household.",
+      "mine_scope_invalid": "Choose whether the reminder is for you or for the household.",
+      "mine_favorites_not_linked": "Favorites are kept for the people of an assistant. Ask an administrator to choose your Home Assistant user under People on the Voice Manager page.",
+      "mine_favorites_off": "Favorites are off for your assistants. Ask an administrator to switch them on.",
+      "mine_favorites_conflict": "Your favorites are not shared until every assistant agrees who you are; ask an administrator.",
+      "favorites_too_many": "A list may hold 100 favorites at most. Remove one first.",
+      "favorites_name_taken": "That name is already used in this list. Choose another name.",
+      "favorites_bad_name": "A name needs a letter or digit and may be 80 characters at most.",
+      "favorites_bad_url": "An address must start with http:// or https:// (an image may also be a path on Home Assistant starting with /), have no spaces and be 2000 characters at most.",
+      "favorites_bad_uri": "That Music Assistant item cannot be saved. Search for it again.",
+      "favorites_bad_kind": "Choose what kind of favorite this is: radio, podcast, playlist, album, track or stream.",
+      "favorites_no_source": "A favorite needs either a Music Assistant item or a stream address.",
+      "favorites_too_many_aliases": "A favorite may have 5 other names at most.",
+      "favorites_not_found": "That favorite is not in the list any more. Reload the page.",
+      "favorites_no_music_assistant": "Searching needs Music Assistant, which is not set up. Add the favorite with a stream address instead.",
+      "favorites_search_failed": "Music Assistant could not search just now. Try again later, or add the favorite with a stream address.",
+      "favorites_nothing_found": "Music Assistant found nothing by that name. Try another name.",
+      "favorites_bad_override": "A satellite's speaker must be a media player. Choose one again."
+    },
+    "abort": {
+      "settings_first": "Open Settings and save them once first. The calendars are kept with the settings."
+    },
+    "guide": {
+      "title": "Setup guide",
+      "step_of": "Step {n} of {total}",
+      "steps": {
+        "welcome": "Welcome",
+        "people": "Who lives here",
+        "satellites": "Satellites",
+        "pipelines": "Agent and wake words",
+        "strangers": "Unknown voices",
+        "extras": "Extras",
+        "check": "Check"
+      },
+      "back": "Back",
+      "next": "Next",
+      "done": "Done",
+      "skip": "Skip for now",
+      "close": "Close the guide",
+      "saving": "Saving…",
+      "working": "Working…",
+      "and": "and",
+      "failed": "That did not work: {reason}",
+      "welcome": {
+        "title": "Set up {title}",
+        "lede": "The assistant answers the two people who live here, each in their own persona, and turns every other voice away. This guide sets it up with you in about five minutes.",
+        "what": "What the guide does",
+        "item_1": "Asks who lives here and how the assistant should sound.",
+        "item_2": "Finds your voice satellites and creates the helper and the automation that tell the assistant who is speaking.",
+        "item_3": "Points a wake word at this assistant and switches off local commands, so unknown voices cannot switch things.",
+        "item_4": "Sets how unknown voices are answered, and checks that everything works.",
+        "promise": "Each step is saved when you choose Next. Nothing else in Home Assistant changes until you click a button that says what it will change. You can stop at any time and finish later from the Overview.",
+        "start": "Start"
+      },
+      "people": {
+        "lede": "The two people this assistant recognises, and how it sounds to them.",
+        "user_label": "Home Assistant user (optional)",
+        "style_title": "Style",
+        "style_intro": "Pick a ready-made style. It fills in both personas below and the refusal texts in step 5. You can change every text afterwards.",
+        "style_filled": "Filled in with the style {style}. Changed a name? Pick the style again to put the new name in.",
+        "style_failed": "The style could not be loaded: {reason}",
+        "persona_of": "Persona of {name}"
+      },
+      "styles": {
+        "butler": {
+          "title": "Dry butler",
+          "owner_persona": "The person speaking is {name}. Their partner is called {partner}. Answer as a dry, polite butler, and use their name only when it comes naturally, not in every reply.",
+          "strangers_persona": "You do not know the person speaking. They are not part of this household. As a dry butler, politely refuse to help. Do not carry out the request and do not give out any information about the house or the people who live in it. One or two sentences at most.",
+          "fixed_replies": "I'm afraid I only take instructions from the household.\nWe have not been introduced, so the answer is no.",
+          "near_miss_persona": "The voice sounds a little familiar, but you are not sure who is speaking. Do not carry out the request and do not use any name. As a dry butler, politely ask them to say it again. One sentence.",
+          "about": "Polite, dry and a little formal."
+        },
+        "friendly": {
+          "title": "Warm and friendly",
+          "owner_persona": "The person speaking is {name}. Their partner is called {partner}. Answer in a warm, friendly way, in short sentences. Use their name now and then, not in every reply.",
+          "strangers_persona": "You do not know the person speaking. They are not part of this household. Kindly say that you cannot help them. Do not carry out the request and do not give out any information about the house or the people who live in it. One or two sentences at most.",
+          "fixed_replies": "Sorry, I can only help the people who live here.\nNice to meet you, but I can't do that for you.",
+          "near_miss_persona": "The voice sounds a little familiar, but you are not sure who is speaking. Do not carry out the request and do not use any name. Kindly ask them to say it again. One sentence.",
+          "about": "Warm, kind and relaxed."
+        },
+        "plain": {
+          "title": "Short and plain",
+          "owner_persona": "The person speaking is {name}. Their partner is called {partner}. Answer briefly and to the point, without jokes. Do not use their name unless it helps.",
+          "strangers_persona": "You do not know the person speaking. They are not part of this household. Say briefly that you cannot help. Do not carry out the request and do not give out any information about the house or the people who live in it. One sentence.",
+          "fixed_replies": "I can only help people who live here.\nI do not know your voice, so I cannot do that.",
+          "near_miss_persona": "The voice sounds a little familiar, but you are not sure who is speaking. Do not carry out the request and do not use any name. Say briefly that you did not catch who it was and ask them to repeat it. One sentence.",
+          "about": "Brief and to the point, no jokes."
+        }
+      },
+      "satellites": {
+        "lede": "Each satellite needs a helper that holds who is speaking, and an automation or your own speaker recognition that keeps it up to date. Choose the satellites this assistant listens on.",
+        "loading": "Looking for satellites…",
+        "empty": "No voice satellites were found. Add one to Home Assistant first, then come back to this step.",
+        "failed": "The satellites could not be loaded: {reason}",
+        "choose": "This assistant listens on {satellite}",
+        "helper_ok": "The helper {helper} holds who is speaking.",
+        "helper_missing": "There is no helper {helper} yet, so the assistant cannot tell people apart here.",
+        "helper_will": "Creates the helper {helper}.",
+        "helper_button": "Create the helper",
+        "helper_done": "Created the helper {helper}.",
+        "helper_exists": "The helper {helper} already exists, so nothing was created.",
+        "helper_other_id": "Home Assistant created the helper as input_text.{id}, not {helper}. Rename it under Settings > Devices & services > Helpers.",
+        "tracked": "An automation already keeps the helper up to date.",
+        "tracking_missing": "{sensor} reports who spoke, but no automation copies it into the helper yet.",
+        "names_intro": "Type the name the voice match reports for each person, as {sensor} shows it.",
+        "name_for": "{person} in the voice match",
+        "tracking_will": "Creates an automation that writes owner, partner, stranger or pending into {helper} each time {sensor} reports a voice.",
+        "tracking_button": "Create the tracking automation",
+        "tracking_done": "Created the tracking automation.",
+        "tracking_exists": "An automation with the id {id} already exists, so it was left alone.",
+        "helper_first": "Create the helper first: the automation writes into it.",
+        "no_sensors": "No speaker sensor with a score was found on this satellite, so the guide cannot create the automation. Your speaker recognition must write owner, partner, stranger or pending into {helper}.",
+        "docs": "How to keep the helper up to date"
+      },
+      "pipelines": {
+        "lede": "The main agent answers the people who live here. Each chosen satellite then needs a wake word whose voice assistant pipeline uses this assistant.",
+        "wake_title": "Wake words",
+        "none_chosen": "No satellite is chosen. Choose them in step 3.",
+        "unknown": "The voice assistant pipeline this satellite uses could not be found, so nothing is changed for it. Check it under Settings > Voice assistants.",
+        "open_voice": "Open Voice assistants",
+        "ready": "Wake word {n} answers as this assistant, with local commands off.",
+        "local_on": "Wake word {n} answers as this assistant, but its pipeline {pipeline} prefers handling commands locally, so unknown voices can still switch things.",
+        "local_one": "{satellites} uses the pipeline {pipeline}: local commands will be off there.",
+        "local_many": "{satellites} use the pipeline {pipeline}: local commands will be off for all of them.",
+        "local_button": "Switch off local commands",
+        "local_done": "Local commands are off for {satellites}.",
+        "local_done_none": "Local commands are off on this pipeline.",
+        "not_yet": "No wake word of this satellite answers as this assistant yet. The pipelines it uses now are left as they are.",
+        "pick": "Wake word that will answer as this assistant",
+        "word": "Wake word {n}: {pipeline}",
+        "word_unknown": "Wake word {n}: pipeline unknown",
+        "planning": "Working out what will change…",
+        "will_copy": "Creates the pipeline {name}, a copy of {source} with this assistant as its agent and local commands off. Wake word {n} on {satellite} will then answer as this assistant.",
+        "will_reuse": "Wake word {n} on {satellite} will answer as this assistant, through the existing pipeline {name}.",
+        "wake_button": "Use this wake word",
+        "wake_done": "Wake word {n} on {satellite} now answers as this assistant.",
+        "pipeline_failed": "Home Assistant refused to create the pipeline: {reason}"
+      },
+      "strangers": {
+        "style_filled": "The refusal texts are filled in with the style {style}. Change them as you like."
+      },
+      "extras": {
+        "lede": "All optional. Everything here can be changed later on this page.",
+        "reminders": "Reminders: the main agent can set reminders through a create_reminder script of your own. Switch them on under Reminders once the script exists.",
+        "reminders_docs": "How reminders work",
+        "calendars": "Calendars: events can be spoken when they are due, through a script of your own. Add calendars under Calendars.",
+        "calendars_docs": "How calendar announcements work"
+      },
+      "check": {
+        "lede": "What works and what does not. Fix what you can here, or come back later: the same checks stay on the Overview.",
+        "done_hint": "Done marks the guide as finished. You can run it again from the Overview."
+      },
+      "fix": {
+        "create_helper": "Create the helper",
+        "local_off": "Switch off local commands",
+        "local_will": "Switches off Prefer handling commands locally on this pipeline, for every satellite that uses it.",
+        "tracking": "Set up in the guide",
+        "go_step": "Go to step {n}",
+        "open_section": "Open {section}",
+        "open_guide": "Open the setup guide",
+        "helper_failed": "Home Assistant refused to create the helper: {reason}",
+        "automation_failed": "Home Assistant refused to create the automation: {reason}",
+        "no_satellite": "That satellite was not found. Reload the page and try again."
+      },
+      "overview": {
+        "banner": "Setting up {title} is not finished yet.",
+        "finish": "Finish setting up",
+        "again": "Run the setup guide again"
+      }
+    },
+    "chat": {
+      "title": "Chat show",
+      "lede": "Two assistants talk to each other on a speaker, for fun. They can only talk. They never control the home.",
+      "setup": "Start a chat",
+      "setup_intro": "Choose any two assistants, whichever one is selected elsewhere on this page.",
+      "assistant_a": "First assistant",
+      "assistant_b": "Second assistant",
+      "assistant_a_help": "It speaks first.",
+      "choose_assistant": "Choose an assistant",
+      "speaker": "Speaker",
+      "speaker_help": "The satellite or media player the chat is spoken on.",
+      "choose_speaker": "Choose a speaker",
+      "satellites": "Satellites",
+      "media_players": "Media players",
+      "no_speakers": "No satellite that can announce and no media player was found.",
+      "voice": "People the assistants recognise can join in by voice. Anyone can say stop to end the chat.",
+      "no_voice": "Joining in by voice is not available on this speaker; stop the chat here.",
+      "topic": "Topic",
+      "topic_help": "Optional, at most 200 characters. When empty, the first assistant picks one.",
+      "limits": "Limits",
+      "limits_help": "The chat ends at whichever limit it reaches first.",
+      "max_lines": "Lines at most",
+      "words": "Words per line",
+      "pause": "Seconds between lines",
+      "minutes": "Minutes at most",
+      "listen": "Listen after each round (best effort)",
+      "listen_help": "After the second assistant's line the satellite listens, so someone can join in. The chat goes on if nobody does. Not every satellite or voice pipeline supports this. Do not use it on a satellite whose second wake word goes to an agent that is not an assistant: that agent would see the chat lines.",
+      "save_defaults": "Save as defaults",
+      "defaults_saved": "Saved as defaults",
+      "start": "Start",
+      "stop": "Stop",
+      "working": "Working…",
+      "grace_note": "After a chat, this speaker ignores requests for about 17 seconds.",
+      "one_router": "A chat needs two assistants. Add a second assistant first.",
+      "no_character": "{name} has no character for chats and no extra instructions for announcements, so it will sound plain.",
+      "set_character": "Set its character",
+      "no_writer": "{name} has no announcement agent without tools, so it cannot chat.",
+      "set_writer": "Choose an agent",
+      "transcript": "Transcript",
+      "running": "{a} and {b} are chatting on {speaker}.",
+      "ended": "{a} and {b} chatted on {speaker}.",
+      "topic_line": "Topic: {topic}",
+      "live": "Running",
+      "finishing": "Stopping: the line being spoken finishes first.",
+      "waiting": "Waiting for the first line…",
+      "loading": "Loading…",
+      "failed": "That did not work: {reason}",
+      "load_failed": "The chat show could not be loaded: {reason}"
+    },
+    "mine": {
+      "title": "My assistant",
+      "unlinked_title": "Not linked yet",
+      "unlinked": "You are not linked to an assistant yet. Ask an administrator to open the Voice Manager page, go to People, and choose you as the Home Assistant user of Person 1 or Person 2.",
+      "routers": "Assistant",
+      "failed": "That did not work: {reason}",
+      "sections": {
+        "persona": "Persona",
+        "reminders": "Reminders",
+        "memory": "Memory",
+        "favorites": "Favorites",
+        "shared": "Shared settings"
+      },
+      "persona": {
+        "lede": "How {title} talks to you. This text is added to its instructions whenever you speak.",
+        "label": "Your persona",
+        "placeholder": "For example: the person speaking is Alex. Keep answers short.",
+        "count": "{count} of {max} characters",
+        "save": "Save",
+        "saving": "Saving…",
+        "saved": "Persona saved"
+      },
+      "reminders": {
+        "lede": "Your own reminders and the household's, for the next 30 days.",
+        "calendars_note": "Everyone in the household can still see all calendars on Home Assistant's own Calendar page. This page shows only yours and the household's.",
+        "loading": "Loading reminders…",
+        "empty": "No reminders in the next 30 days.",
+        "mine": "Yours",
+        "household": "Household",
+        "all_day": "all day",
+        "delete": "Delete “{title}”",
+        "deleting": "Deleting…",
+        "deleted": "Reminder deleted",
+        "cannot_delete": "Its calendar does not allow deleting.",
+        "unreadable": "This calendar could not be read: {calendar}",
+        "add_title": "Add a reminder",
+        "what": "What to be reminded of",
+        "what_placeholder": "For example: call the plumber",
+        "for": "For whom",
+        "for_me": "For me",
+        "for_household": "For the household",
+        "announce": "Speak it when it is due",
+        "announce_help": "The assistant says it aloud on the satellite when it is due.",
+        "when": "When",
+        "in_minutes": "In some minutes",
+        "at_time": "At a time",
+        "minutes": "Minutes from now",
+        "time": "Time",
+        "day": "Day",
+        "day_next": "The next time it comes",
+        "days": {
+          "today": "Today",
+          "tomorrow": "Tomorrow",
+          "monday": "Monday",
+          "tuesday": "Tuesday",
+          "wednesday": "Wednesday",
+          "thursday": "Thursday",
+          "friday": "Friday",
+          "saturday": "Saturday",
+          "sunday": "Sunday"
+        },
+        "add": "Add reminder",
+        "adding": "Adding…",
+        "added": "Reminder set",
+        "no_script": "Reminders cannot be added here yet: an administrator needs to set up the create_reminder script."
+      },
+      "memory": {
+        "lede": "What {title} remembers about you. Changes are saved at once. A private fact is kept from the other person.",
+        "entry": "Only with {title}",
+        "global": "With all your assistants",
+        "private": "Private",
+        "shared": "Shared",
+        "private_help": "Kept from the other person. Select to share it.",
+        "shared_help": "The other person's assistant may use it too. Select to keep it private.",
+        "forget": "Forget this",
+        "forget_named": "Forget: {text}",
+        "add_placeholder": "Add a fact, for example: prefers tea in the evening",
+        "add_named": "Add a fact to {list}",
+        "add": "Add",
+        "empty": "Nothing is remembered here yet.",
+        "none": "There is nothing remembered for you on this assistant."
+      },
+      "favorites": {
+        "lede": "Radio stations, podcasts and playlists you can ask for by name, for example: play Radio 2. They are the same on all your assistants, and changes are saved at once.",
+        "loading": "Loading favorites…",
+        "off": "Favorites are off for your assistants. Ask an administrator to switch them on.",
+        "conflict": "Your favorites are not shared until every assistant agrees who you are. Ask an administrator.",
+        "own": "Your favorites",
+        "household": "Household favorites",
+        "empty": "No favorites here yet.",
+        "kinds": {
+          "radio": "Radio",
+          "podcast": "Podcast",
+          "playlist": "Playlist",
+          "album": "Album",
+          "track": "Track",
+          "stream": "Stream"
+        },
+        "also": "Also: {names}",
+        "edit": "Edit",
+        "edit_named": "Edit “{name}”",
+        "remove": "Remove",
+        "remove_named": "Remove “{name}”",
+        "remove_confirm": "Remove “{name}” from the favorites?",
+        "removed": "Favorite removed",
+        "edit_title": "Change this favorite",
+        "name": "Name",
+        "name_placeholder": "For example: Radio 2",
+        "aliases": "Other names",
+        "aliases_placeholder": "For example: the news, morning radio",
+        "aliases_help": "Separated by commas, 5 at most. Asking for any of them plays this favorite.",
+        "save": "Save",
+        "saving": "Saving…",
+        "saved": "Favorite saved",
+        "cancel": "Cancel",
+        "close": "Close",
+        "find": "Find with Music Assistant",
+        "find_label": "Name to find",
+        "find_placeholder": "A station, podcast or playlist",
+        "search": "Search",
+        "searching": "Searching…",
+        "add": "Add",
+        "add_named": "Add “{name}”",
+        "added": "Favorite added",
+        "stream": "Add a stream address",
+        "url": "Stream address",
+        "url_help": "An http:// or https:// address that plays the stream itself."
+      },
+      "shared": {
+        "lede": "Set by an administrator for the whole household. Shown here so you know how it works.",
+        "assistant": "Assistant name",
+        "assistant_help": "The name reminders are taken under, and the voice they are spoken in.",
+        "strangers": "Unknown voices",
+        "strangers_ai": "Turned away politely, in words written by an agent that cannot control the home.",
+        "strangers_fixed": "Turned away with fixed lines.",
+        "calendars": "Calendars that are announced",
+        "calendars_none": "No calendar is announced for you or for everyone.",
+        "for_you": "For you",
+        "for_everyone": "For everyone",
+        "all_day_at": "all-day events at {time}",
+        "all_day_before": "all-day events at {time} the day before",
+        "all_day_usual": "all-day events at the usual time",
+        "all_day_usual_before": "all-day events at the usual time the day before",
+        "lead": "timed events {minutes} min before",
+        "at_start": "timed events at their start"
+      }
+    }
+  },
+  "services": {
+    "start_chat": {
+      "name": "Start chat",
+      "description": "Two assistants chat with each other on a speaker, for fun. Only one chat runs at a time. Needs an administrator.",
+      "fields": {
+        "a": {
+          "name": "First assistant",
+          "description": "The config entry id of the first assistant."
+        },
+        "b": {
+          "name": "Second assistant",
+          "description": "The config entry id of the second assistant. It must differ from the first."
+        },
+        "speaker": {
+          "name": "Speaker",
+          "description": "A satellite that can announce, or a media player that can play media."
+        },
+        "topic": {
+          "name": "Topic",
+          "description": "What to talk about, 200 characters at most. Left empty, the assistants choose."
+        },
+        "max_lines": {
+          "name": "Maximum lines",
+          "description": "How many lines the chat lasts, 2 to 50. The saved default when empty."
+        },
+        "words": {
+          "name": "Words per line",
+          "description": "The most words in a line, 5 to 80. The saved default when empty."
+        },
+        "pause": {
+          "name": "Pause",
+          "description": "Seconds between lines, 0 to 10. The saved default when empty."
+        },
+        "minutes": {
+          "name": "Maximum minutes",
+          "description": "How long the chat may last, 1 to 30. The saved default when empty."
+        },
+        "listen": {
+          "name": "Listen after each round",
+          "description": "Whether to listen for people after each round. The saved default when empty."
+        }
+      }
+    },
+    "stop_chat": {
+      "name": "Stop chat",
+      "description": "Ends the running chat. The line being spoken finishes first. Needs an administrator."
+    },
+    "compose_announcement": {
+      "name": "Compose announcement",
+      "description": "Writes one short spoken line in the style of the assistant a satellite uses, for Home Assistant to announce. Returns empty text when it cannot, so the caller can fall back to plain text. Automations and scripts keep working; a person who is not an administrator and runs a script that calls this by hand is refused.",
+      "fields": {
+        "satellite": {
+          "name": "Satellite",
+          "description": "The satellite that will speak. Its primary assistant decides the style when no assistant is given."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "What is announced. Only reminder is supported."
+        },
+        "text": {
+          "name": "Text",
+          "description": "What the reminder says. It is kept intact."
+        },
+        "recipient": {
+          "name": "Recipient",
+          "description": "Who it is for: the lower-case name of Person 1 or Person 2 from the assistant's settings, or household for both."
+        },
+        "assistant": {
+          "name": "Assistant",
+          "description": "The assistant that took the reminder, by its assistant name. Decides the style. When empty, the satellite's primary assistant is used."
+        }
+      }
+    }
+  }
+}

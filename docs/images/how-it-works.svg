@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 370" width="880" height="370" role="img" aria-labelledby="t d">
+  <!-- SPDX-FileCopyrightText: 2026 rodavrow -->
+  <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+  <title id="t">How an assistant answers a request</title>
+  <desc id="d">Someone speaks. The assistant works out who it is from the voice match or the logged-in user. Alex or Sam go to the main agent with their own persona, memory and tools. A near miss is asked to say it again. An unknown voice gets a refusal from an agent with no tools, or a fixed line, and the main agent is never called.</desc>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill: #1f2328; }
+    .title { font-size: 16px; font-weight: 600; }
+    .body { font-size: 14px; fill: #424a53; }
+    .box { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1.5; }
+    .line { fill: none; stroke: #8c959f; stroke-width: 2; }
+    .head { fill: #8c959f; }
+    .ok { fill: #1a7f37; } .near { fill: #9a6700; } .no { fill: #cf222e; }
+    @media (prefers-color-scheme: dark) {
+      text { fill: #e6edf3; }
+      .body { fill: #9198a1; }
+      .box { fill: #161b22; stroke: #3d444d; }
+      .line { stroke: #656c76; } .head { fill: #656c76; }
+      .ok { fill: #3fb950; } .near { fill: #d29922; } .no { fill: #f85149; }
+    }
+  </style>
+
+  <!-- Someone speaks -->
+  <rect class="box" x="10" y="150" width="150" height="70" rx="12"/>
+  <text class="title" x="85" y="182" text-anchor="middle">Someone</text>
+  <text class="title" x="85" y="202" text-anchor="middle">speaks</text>
+
+  <!-- Who is it -->
+  <rect class="box" x="210" y="135" width="200" height="100" rx="12"/>
+  <text class="title" x="310" y="170" text-anchor="middle">Who is it?</text>
+  <text class="body" x="310" y="195" text-anchor="middle">The satellite's voice match,</text>
+  <text class="body" x="310" y="214" text-anchor="middle">or the logged-in user</text>
+
+  <path class="line" d="M160 185 H200"/>
+  <path class="head" d="M210 185 l-11 -6 v12 z"/>
+
+  <!-- Branches -->
+  <path class="line" d="M410 185 C 440 185, 440 70, 470 70"/>
+  <path class="head" d="M480 70 l-11 -6 v12 z"/>
+  <path class="line" d="M410 185 H470"/>
+  <path class="head" d="M480 185 l-11 -6 v12 z"/>
+  <path class="line" d="M410 185 C 440 185, 440 300, 470 300"/>
+  <path class="head" d="M480 300 l-11 -6 v12 z"/>
+
+  <!-- Recognised -->
+  <rect class="box" x="480" y="20" width="390" height="100" rx="12"/>
+  <rect class="ok" x="480" y="20" width="8" height="100" rx="4"/>
+  <text class="title" x="506" y="52">Alex or Sam</text>
+  <text class="body" x="506" y="77">Your main agent answers, with that person's</text>
+  <text class="body" x="506" y="97">persona, memory and the usual tools.</text>
+
+  <!-- Near miss -->
+  <rect class="box" x="480" y="145" width="390" height="80" rx="12"/>
+  <rect class="near" x="480" y="145" width="8" height="80" rx="4"/>
+  <text class="title" x="506" y="177">Almost recognised (optional)</text>
+  <text class="body" x="506" y="202">"You sound familiar. Could you say that again?"</text>
+
+  <!-- Unknown -->
+  <rect class="box" x="480" y="250" width="390" height="110" rx="12"/>
+  <rect class="no" x="480" y="250" width="8" height="110" rx="4"/>
+  <text class="title" x="506" y="282">Anyone else</text>
+  <text class="body" x="506" y="307">A refusal written by an agent with no tools,</text>
+  <text class="body" x="506" y="327">or a fixed line. The main agent and its tools</text>
+  <text class="body" x="506" y="347">are never called.</text>
+</svg>
