@@ -86,6 +86,8 @@ Found under **Assistant** on the settings page. Used only when this assistant ta
 | Instructions for the refusal | What the refusal agent is told about the person speaking. |
 | Fixed lines | One per row. Used when fixed lines are chosen, and as a fallback when the refusal agent fails or takes longer than 6 seconds. |
 
+During a [chat show](chat-show.md#joining-in-and-stopping), and for a short while after it, an unknown voice on the chat's satellite joins the chat as a guest instead.
+
 ## Almost recognised
 
 | Setting | What it does |

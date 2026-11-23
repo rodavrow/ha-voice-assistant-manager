@@ -1472,3 +1472,45 @@ async def test_a_failing_character_select_does_not_stop_the_chat(hass, show):
 
     assert show.speakers.order == ["announce"] * 4
     assert show.manager.state()["ended"] == "chat_done"
+
+
+def test_the_assistants_are_told_a_guest_is_someone_unknown():
+    rules = chat_instructions("Jeeves", "Ada", 30)
+
+    assert f'"{chat_show.GUEST}"' in rules
+    assert "do not assume who" in rules
+
+
+async def test_an_assistant_on_no_wake_word_shows_the_character_the_other_does_not_use(
+    hass, show
+):
+    add_look_select(hass, show)
+    slots = {show.jeeves.entry_id: 0}
+    with patch.object(
+        chat_show.announcement_look,
+        "wake_slot",
+        lambda hass, satellite, entry: slots.get(entry.entry_id),
+    ):
+        await run_chat(hass, show)
+
+    assert show.speakers.order[:4] == [
+        "select Assistant 1",
+        "announce",
+        "select Assistant 2",
+        "announce",
+    ]
+
+
+async def test_two_assistants_on_no_wake_word_still_show_as_two_characters(hass, show):
+    add_look_select(hass, show)
+    with patch.object(
+        chat_show.announcement_look, "wake_slot", lambda hass, satellite, entry: None
+    ):
+        await run_chat(hass, show)
+
+    assert show.speakers.order == [
+        "select Assistant 1",
+        "announce",
+        "select Assistant 2",
+        "announce",
+    ] * 2

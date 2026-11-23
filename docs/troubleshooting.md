@@ -57,7 +57,7 @@ Turn on debug logging for the integration (the entry's menu > **Enable debug log
 | The Chat show will not start | A chat is already running, the same assistant is chosen twice, or an assistant has no announcement agent without tools (set under Reminders in its settings). The speaker must be a satellite that can announce or a media player that can play media. |
 | The Chat show ends after one line | The announcement agent failed or answered with nothing, or the speaker stayed busy. The card says which, and the Home Assistant log has the details. |
 | The two assistants sound the same | Both use the same announcement agent and have no "Character for chats". Give each one a character, and a voice. See [Chat show](chat-show.md#giving-each-assistant-a-character). |
-| Saying something during a chat does nothing, or is refused | Joining in works on satellites only, and the wake word must use an assistant. A voice the assistant cannot identify is refused while a chat runs. On a media player the chat is listen-only. |
+| Saying something during a chat does nothing | Joining in works on satellites only, and the wake word must use an assistant. The satellite says nothing back: the next assistant answers. A turn of one word, or one that was cut off, is dropped. On a media player the chat is listen-only. The log shows how each turn was taken. |
 | The satellite wakes during a chat line | The assistants say each other's names, which may be its wake words. The assistant ignores what it hears then and the chat goes on. To join in or say stop, wake the satellite between lines. The Stop button always works. |
 | The chat stopped after a restart | A chat is not kept when Home Assistant restarts or one of the two assistants is reloaded. Start it again. |
 

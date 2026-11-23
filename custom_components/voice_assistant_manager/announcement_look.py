@@ -52,6 +52,21 @@ def option_for(slot: int | None, options: Sequence[str]) -> str:
     return wanted if wanted in options else DEFAULT_OPTION
 
 
+def pair_slots(own: int | None, other: int | None) -> tuple[int | None, int | None]:
+    """The slots two assistants in one chat show as, so they never look the same.
+
+    An assistant on no wake word gets the first of the first two slots the other does not
+    use; with neither on a wake word, the first shows as slot 0 and the second as slot 1.
+    """
+    if own is None and other is None:
+        return 0, 1
+    if own is None:
+        return (1 if other == 0 else 0), other
+    if other is None:
+        return own, (1 if own == 0 else 0)
+    return own, other
+
+
 def look_select(hass: HomeAssistant, satellite: str) -> str | None:
     """The character select on the satellite's device, or None when it has none."""
     registry = er.async_get(hass)
@@ -76,16 +91,21 @@ def wake_slot(hass: HomeAssistant, satellite: str, entry: ConfigEntry) -> int | 
 
 
 async def async_show_assistant(
-    hass: HomeAssistant, satellite: str, entry: ConfigEntry | None
+    hass: HomeAssistant,
+    satellite: str,
+    entry: ConfigEntry | None,
+    chat_pair: tuple[ConfigEntry, ConfigEntry] | None = None,
 ) -> None:
     """Choose the character for the satellite's next announcement. Never raises.
 
     `entry` is the assistant about to speak; None shows the device's default character.
+    `chat_pair` is the two assistants of a chat, in chat order, `entry` one of them: the
+    two never show as the same one.
     """
     if not satellite.startswith(_SATELLITE_PREFIX) or not is_enabled(hass):
         return
     try:
-        await _async_choose(hass, satellite, entry)
+        await _async_choose(hass, satellite, entry, chat_pair)
     except TimeoutError:
         _LOGGER.warning("The character select of %s did not answer in time", satellite)
     except Exception:  # noqa: BLE001 - any platform may offer the select; the line goes on
@@ -93,13 +113,22 @@ async def async_show_assistant(
         _LOGGER.warning("Could not choose the character on %s", satellite, exc_info=True)
 
 
-async def _async_choose(hass: HomeAssistant, satellite: str, entry: ConfigEntry | None) -> None:
+async def _async_choose(
+    hass: HomeAssistant,
+    satellite: str,
+    entry: ConfigEntry | None,
+    chat_pair: tuple[ConfigEntry, ConfigEntry] | None,
+) -> None:
     select = look_select(hass, satellite)
     state = hass.states.get(select) if select is not None else None
     if select is None or state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return
     options = state.attributes.get("options") or []
-    option = option_for(wake_slot(hass, satellite, entry) if entry else None, options)
+    slot = wake_slot(hass, satellite, entry) if entry else None
+    if entry is not None and chat_pair is not None and entry in chat_pair:
+        slots = pair_slots(*(wake_slot(hass, satellite, member) for member in chat_pair))
+        slot = slots[chat_pair.index(entry)]
+    option = option_for(slot, options)
     async with asyncio.timeout(SELECT_TIMEOUT):
         await hass.services.async_call(
             "select", "select_option", {"entity_id": select, "option": option}, blocking=True

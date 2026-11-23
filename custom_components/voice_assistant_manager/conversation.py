@@ -45,7 +45,7 @@ from homeassistant.helpers import intent
 from homeassistant.util import ulid
 
 from .announce import safe_toolless_agent
-from .chat_show import get_manager, is_stop_phrase
+from .chat_show import GUEST, get_manager, is_stop_phrase
 from .const import REPLY_AGENT_TIMEOUT
 from .favorites import async_get_favorites, favorites_on, find, lists_for, parse_play
 from .favorites_context import Asker, forget, remember
@@ -91,7 +91,6 @@ _LOGGER = logging.getLogger(__name__)
 SCRIPT_TIMEOUT = 8
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 CHAT_STOPPED_LINE = "Okay."
-CHAT_JOINED_LINE = "Mm-hm."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
 OTHER_PERSON = {"owner": "wife", "wife": "owner"}
 # How the settings screen calls each person, for one who has no name.
@@ -701,17 +700,22 @@ class PersonaRouter(conversation.ConversationEntity):
     async def _chat_show_reply(self, user_input, resp):
         """Answer a request made while a chat show runs on this device, or None.
 
-        This holds for a short grace after the chat ended too, since the satellite may still
-        be listening for a reply to the last line: such a reply gets "Mm-hm.", never an agent.
-        Only the chat that runs on this device is stopped or joined; a grace never touches
-        a chat that has started elsewhere since.
+        Every turn from the chat's satellite belongs to the chat, whoever speaks: the
+        assistants in a chat have no tools and treat what people say as conversation, so
+        an unknown voice reaches nothing. This holds for a short grace after the chat
+        ended too, since the satellite may still be listening for a reply to the last
+        line. Only the chat that runs on this device is stopped or joined; a grace never
+        touches a chat that has started elsewhere since.
 
-        A request the speaker sent after waking on its own chat line (the assistants say
-        each other's names) gets an empty answer: it neither stops nor joins the chat.
-        Anyone can stop the chat. A recognised person's other words join the chat. An
-        unknown voice's other words get None (a voice that could not be
-        identified is refused here), so the usual refusal answers and the chat
-        goes on. Nothing here reaches the main agent, memory or the shared history.
+        - A request the speaker sent after waking on its own chat line (the assistants
+          say each other's names) gets an empty answer: it neither stops nor joins.
+        - Anyone can stop the chat, and is answered "Okay.".
+        - Other words join the chat with the person's name, or as a guest when the voice
+          was not recognised. They get an empty answer, so the satellite says nothing and
+          the next assistant answers them. A fragment, or a turn after the chat ended,
+          joins nothing.
+
+        Nothing here reaches the main agent, memory or the shared history.
         """
         manager = get_manager(self.hass)
         if not manager.is_running_on(user_input.device_id):
@@ -719,21 +723,27 @@ class PersonaRouter(conversation.ConversationEntity):
         if manager.is_self_wake(user_input.device_id):
             # The speaker woke on its own chat line and heard the rest of it: answer with
             # nothing (the voice pipeline skips text-to-speech then) and let the chat go on.
-            return self._speak(user_input, "")
+            return self._chat_turn(user_input, "self-wake ignored", "")
         live = manager.is_live_on(user_input.device_id)
         if is_stop_phrase(user_input.text):
             if live:
                 await manager.async_stop("stopped")
-            return self._speak(user_input, CHAT_STOPPED_LINE)
+            return self._chat_turn(user_input, "stop", CHAT_STOPPED_LINE)
+        if not live:
+            return self._chat_turn(user_input, "after the chat, ignored", "")
+        if manager.is_fragment(user_input.text):
+            return self._chat_turn(user_input, "fragment dropped", "")
         who = resp.get("who") if resp else None
-        if who in ("stranger", "near_miss"):
-            return None
-        if who not in ("owner", "wife"):
-            # Nobody could be identified: fail closed, the main agent stays out of reach.
-            return self._speak(user_input, LAST_RESORT_REPLY)
-        if live:
+        if who in ("owner", "wife"):
             manager.add_person_line(self._person_name(who) or "Someone", user_input.text)
-        return self._speak(user_input, CHAT_JOINED_LINE)
+            return self._chat_turn(user_input, "joined as a recognised person", "")
+        manager.add_person_line(GUEST, user_input.text)
+        return self._chat_turn(user_input, "joined as a guest", "")
+
+    def _chat_turn(self, user_input, kind: str, reply: str):
+        # What was said is personal and stays out of the log; how it was taken does not.
+        _LOGGER.info("Chat show turn on device %s: %s", user_input.device_id, kind)
+        return self._speak(user_input, reply)
 
     def _chat_show_fallback(self, user_input):
         """After an unexpected chat show error: refuse while a chat may run here, else None.

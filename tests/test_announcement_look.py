@@ -23,6 +23,7 @@ from custom_components.voice_assistant_manager.announcement_look import (
     async_show_assistant,
     look_select,
     option_for,
+    pair_slots,
     set_enabled,
     wake_slot,
 )
@@ -348,3 +349,23 @@ async def test_regression_look_a_hanging_select_is_given_up_on(hass, caplog):
         await asyncio.wait_for(async_show_assistant(hass, SATELLITE, None), timeout=5)
 
     assert f"select of {SATELLITE} did not answer in time" in caplog.text
+
+
+# Two assistants in a chat always look different where the device allows.
+
+
+@pytest.mark.parametrize(
+    ("slots", "expected"),
+    [
+        ((0, 1), (0, 1)),
+        ((1, 0), (1, 0)),
+        ((0, None), (0, 1)),
+        ((1, None), (1, 0)),
+        ((None, 0), (1, 0)),
+        ((None, 1), (0, 1)),
+        ((None, None), (0, 1)),
+        ((2, None), (2, 0)),
+    ],
+)
+def test_an_assistant_on_no_wake_word_gets_the_slot_the_other_does_not_use(slots, expected):
+    assert pair_slots(*slots) == expected

@@ -59,7 +59,7 @@ Example for Ada:
 Some satellites can show which assistant is talking: those whose firmware offers a select whose entity id ends in `_next_announcement_assistant`, with the options **Default**, **Assistant 1** and **Assistant 2**. Before every line, that select is set to the assistant about to speak:
 
 - the assistant on the satellite's first wake word shows as **Assistant 1**, the one on the second as **Assistant 2**
-- an assistant on neither wake word shows the device's **Default**
+- an assistant on neither wake word shows as the one the other assistant does not use, so the two never look the same
 
 The choice holds for that one line, so it is made again for each line. The text of the line is sent along, so the device can show it too. If the select cannot be set, the line is still spoken, with the default character.
 
@@ -90,17 +90,23 @@ This works on a **satellite** whose wake word uses any assistant. It does not ne
 
 | Who | What they say | What happens |
 | --- | --- | --- |
-| Alex or Sam (recognised) | Anything | It becomes a line in the chat, with their name. The assistants answer it next. The satellite says "Mm-hm." |
-| Anyone, including an unknown voice | `stop`, `enough`, `quiet`, `that's enough`, `be quiet`, `shut up` or `end the chat`, alone or at the start of what they say | The chat ends. The satellite says "Okay." |
-| An unknown voice | Anything else | Refused, as usual. The chat goes on. |
+| Anyone | `stop`, `enough`, `quiet`, `that's enough`, `be quiet`, `shut up` or `end the chat`, alone or at the start of what they say | The chat ends. The satellite says "Okay." |
+| Alex or Sam (recognised) | Anything else | It becomes a line in the chat, with their name. |
+| Anyone else, including a voice that was not recognised | Anything else | It becomes a line in the chat as "A guest". The assistants are told not to assume who that is, even if they give a name. |
 
-While a chat runs on a satellite, a voice the assistant cannot identify is refused.
+The satellite says nothing back. The next assistant answers what was said, and both keep the whole chat in front of them, so they can come back to it later. People's lines do not count towards the line limit.
+
+**Everyone can join in.** While a chat runs on a satellite, everything heard there goes to the chat, before the usual handling of unknown voices. This is safe because the assistants in a chat have no tools and only see their character text (the chat character, or the announcement instructions when no chat character is set), the built-in chat rules, the topic and the chat so far. They never see memory, reminders, the persona text written for Person 1 or Person 2, or the state of your home. Speaker recognition is optional here: it only decides whether a line shows a name or "A guest". As soon as the chat and its grace (below) have ended, unknown voices are handled by your usual rules again.
+
+**Half-finished turns are dropped.** A turn that is only a greeting and an assistant's name ("Hey Ada."), or one of a single word ("I'm") or ending on a word a sentence cannot end on ("Well I think the"), is not added. A question or an exclamation ("Why?", "Oh my!") is always added. In languages written without spaces, only a turn with nothing but the assistant's name is dropped. The chat goes on. If the satellite often cuts you off, look for a setting on the device for how long it waits before it decides you have finished speaking (ESPHome satellites often have a "Finished speaking detection" select).
 
 The assistants say each other's names, so the satellite may wake on its own line when a name is its wake word. The assistant ignores what the satellite hears then (it answers with nothing) and the chat goes on with the next line. To join in or say stop, wait until a line has ended and wake the satellite between lines.
 
 A line that is playing is never cut off. If the satellite is busy because someone woke it, the chat waits for it, and ends if it stays busy.
 
-What people say while joining in is only used in the chat. It never reaches the main agent, memory or the shared history. This also holds for about a quarter of a minute after the chat ended, while the satellite may still be listening: a late reply gets "Mm-hm." and a late stop word gets "Okay.".
+What people say while joining in is only used in the chat. It never reaches the main agent, memory or the shared history. This also holds for about a quarter of a minute after the chat ended, while the satellite may still be listening: a late reply gets no answer and joins nothing, and a late stop word gets "Okay.".
+
+Each turn during a chat is logged at INFO by how it was taken (joined with a name, joined as a guest, fragment dropped, stop, self-wake, after the chat). What was said is never logged.
 
 ## Why a chat ended
 

@@ -346,6 +346,7 @@ async def test_a_chat_show_request_never_plays_a_favorite(hass, satellite, playe
         is_running_on=lambda device_id: True,
         is_self_wake=lambda device_id: False,
         is_live_on=lambda device_id: True,
+        is_fragment=lambda text: False,
         add_person_line=lambda name, text: None,
     )
     agents = FakeAgents()
@@ -353,7 +354,7 @@ async def test_a_chat_show_request_never_plays_a_favorite(hass, satellite, playe
     with patch.object(router_module, "get_manager", return_value=manager):
         result = await run(hass, entry, "play Radio 2", agents, satellite.device_id)
 
-    assert speech(result) == router_module.CHAT_JOINED_LINE
+    assert speech(result) == ""
     assert played == []
     assert agents.calls == []
 
