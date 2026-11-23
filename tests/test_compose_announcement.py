@@ -582,3 +582,19 @@ async def test_regression_security_a_non_admin_user_cannot_prepare_an_announceme
         await prepare(hass, Context(user_id=hass_read_only_user.id), assistant="Ada")
 
     assert shown == []
+
+
+async def test_regression_look_a_slow_character_select_never_costs_the_line(hass: HomeAssistant):
+    """Review: choosing the character must not count against the time to write the line."""
+    _, _, pipelines = await two_routers(hass)
+
+    async def slow(hass, satellite, entry):
+        await asyncio.sleep(0.2)
+
+    with (
+        patch.object(announce, "COMPOSE_TIMEOUT", 0.1),
+        patch.object(announce.announcement_look, "async_show_assistant", slow),
+    ):
+        response = await compose(hass, pipelines, FakeAgents(writer_reply="Alex, the boiler."))
+
+    assert response == {"text": "Alex, the boiler."}

@@ -11,13 +11,13 @@ select are never touched, and the switch on the Voice Manager page turns it all 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
@@ -27,6 +27,8 @@ _LOGGER = logging.getLogger(__name__)
 
 SELECT_SUFFIX = "_next_announcement_assistant"
 DEFAULT_OPTION = "Default"
+# How long a select is given to take the option before the line goes on without it.
+SELECT_TIMEOUT = 3.0
 _SATELLITE_PREFIX = "assist_satellite."
 # In hass.data[DOMAIN]: False when switched off on the page. Kept here, not in the panel
 # store's state, because the panel module imports the chat show, which imports this one.
@@ -82,16 +84,23 @@ async def async_show_assistant(
     """
     if not satellite.startswith(_SATELLITE_PREFIX) or not is_enabled(hass):
         return
+    try:
+        await _async_choose(hass, satellite, entry)
+    except TimeoutError:
+        _LOGGER.warning("The character select of %s did not answer in time", satellite)
+    except Exception:  # noqa: BLE001 - any platform may offer the select; the line goes on
+        # The line is still spoken, with the device's default character.
+        _LOGGER.warning("Could not choose the character on %s", satellite, exc_info=True)
+
+
+async def _async_choose(hass: HomeAssistant, satellite: str, entry: ConfigEntry | None) -> None:
     select = look_select(hass, satellite)
     state = hass.states.get(select) if select is not None else None
     if select is None or state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return
     options = state.attributes.get("options") or []
     option = option_for(wake_slot(hass, satellite, entry) if entry else None, options)
-    try:
+    async with asyncio.timeout(SELECT_TIMEOUT):
         await hass.services.async_call(
             "select", "select_option", {"entity_id": select, "option": option}, blocking=True
         )
-    except HomeAssistantError as err:
-        # The line is still spoken, with the device's default character.
-        _LOGGER.warning("Could not choose the character on %s: %s", select, err)

@@ -269,7 +269,8 @@ def writer_agent(hass: HomeAssistant, entry: ConfigEntry, *, quiet: bool = False
 
 async def _compose(
     hass: HomeAssistant, satellite: str, text: str, recipient: str, assistant: str
-) -> str:
+) -> tuple[str, ConfigEntry | None]:
+    """The line and the assistant that wrote it; ("", None) when nobody could."""
     language = None
     if for_whom(assistant):
         # The assistant that took the reminder speaks it, so its persona words it. No
@@ -282,7 +283,7 @@ async def _compose(
         if language == "*":  # A router takes any language, which is not one to ask for.
             language = None
     if entry is None:
-        return ""
+        return "", None
     line = await _write_line(
         hass,
         entry,
@@ -291,10 +292,7 @@ async def _compose(
         lambda names: ANNOUNCE_INSTRUCTIONS.format(names=names),
         language,
     )
-    if line:
-        # The caller announces the line straight after, as this assistant.
-        await announcement_look.async_show_assistant(hass, satellite, entry)
-    return line
+    return line, entry
 
 
 async def _write_line(
@@ -342,14 +340,19 @@ async def async_compose_announcement(
 
     Never raises, and gives up after COMPOSE_TIMEOUT seconds.
     """
+    line, entry = "", None
     try:
         async with asyncio.timeout(COMPOSE_TIMEOUT):
-            return await _compose(hass, satellite, text, recipient, assistant)
+            line, entry = await _compose(hass, satellite, text, recipient, assistant)
     except TimeoutError:
         _LOGGER.debug("Announcement took longer than %s s, returning no text", COMPOSE_TIMEOUT)
     except Exception:  # noqa: BLE001 - the caller must always get an answer to fall back on
         _LOGGER.warning("Could not compose an announcement", exc_info=True)
-    return ""
+    if line:
+        # Outside the time limit, which is for writing the line. The caller announces it
+        # straight after, as this assistant. Never raises.
+        await announcement_look.async_show_assistant(hass, satellite, entry)
+    return line
 
 
 def async_register_services(hass: HomeAssistant) -> None:

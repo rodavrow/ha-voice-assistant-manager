@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Showing which assistant speaks on devices that offer a character select."""
 
+import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -301,3 +302,49 @@ async def test_an_assistant_on_no_wake_word_has_no_slot(hass, two_assistants):
     add_device(hass, selects=(("pipeline", "Jeeves"),))
 
     assert wake_slot(hass, SATELLITE, ada) is None
+
+
+# Nothing here may stop a line.
+
+
+async def test_regression_look_an_unexpected_select_error_never_raises(hass, caplog):
+    """Review: any platform may offer the select, and raise anything."""
+    add_device(hass)
+
+    async def broken(call: ServiceCall) -> None:
+        raise RuntimeError("odd platform")
+
+    hass.services.async_register("select", "select_option", broken)
+
+    with caplog.at_level(logging.WARNING):
+        await async_show_assistant(hass, SATELLITE, None)
+
+    assert "odd platform" in caplog.text
+
+
+async def test_regression_look_a_failing_slot_lookup_never_raises(hass, chosen):
+    add_device(hass)
+    router = await add_router(hass)
+
+    def broken(hass, satellite, entry):
+        raise RuntimeError("pipeline store broke")
+
+    with patch.object(announcement_look, "wake_slot", broken):
+        await async_show_assistant(hass, SATELLITE, router)
+
+    assert chosen == []
+
+
+async def test_regression_look_a_hanging_select_is_given_up_on(hass, caplog):
+    """Review: a select that never answers must not hold the line back."""
+    add_device(hass)
+
+    async def hangs(call: ServiceCall) -> None:
+        await asyncio.Event().wait()
+
+    hass.services.async_register("select", "select_option", hangs)
+
+    with patch.object(announcement_look, "SELECT_TIMEOUT", 0.05), caplog.at_level(logging.WARNING):
+        await asyncio.wait_for(async_show_assistant(hass, SATELLITE, None), timeout=5)
+
+    assert f"select of {SATELLITE} did not answer in time" in caplog.text
