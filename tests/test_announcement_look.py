@@ -351,7 +351,6 @@ async def test_regression_look_a_hanging_select_is_given_up_on(hass, caplog):
     assert f"select of {SATELLITE} did not answer in time" in caplog.text
 
 
-
 # Two assistants in a chat always look different where the device allows.
 
 

@@ -94,17 +94,18 @@ async def async_show_assistant(
     hass: HomeAssistant,
     satellite: str,
     entry: ConfigEntry | None,
-    other: ConfigEntry | None = None,
+    chat_pair: tuple[ConfigEntry, ConfigEntry] | None = None,
 ) -> None:
     """Choose the character for the satellite's next announcement. Never raises.
 
     `entry` is the assistant about to speak; None shows the device's default character.
-    `other` is the assistant it chats with, if any: the two never show as the same one.
+    `chat_pair` is the two assistants of a chat, in chat order, `entry` one of them: the
+    two never show as the same one.
     """
     if not satellite.startswith(_SATELLITE_PREFIX) or not is_enabled(hass):
         return
     try:
-        await _async_choose(hass, satellite, entry, other)
+        await _async_choose(hass, satellite, entry, chat_pair)
     except TimeoutError:
         _LOGGER.warning("The character select of %s did not answer in time", satellite)
     except Exception:  # noqa: BLE001 - any platform may offer the select; the line goes on
@@ -116,7 +117,7 @@ async def _async_choose(
     hass: HomeAssistant,
     satellite: str,
     entry: ConfigEntry | None,
-    other: ConfigEntry | None,
+    chat_pair: tuple[ConfigEntry, ConfigEntry] | None,
 ) -> None:
     select = look_select(hass, satellite)
     state = hass.states.get(select) if select is not None else None
@@ -124,8 +125,9 @@ async def _async_choose(
         return
     options = state.attributes.get("options") or []
     slot = wake_slot(hass, satellite, entry) if entry else None
-    if entry is not None and other is not None:
-        slot, _ = pair_slots(slot, wake_slot(hass, satellite, other))
+    if entry is not None and chat_pair is not None and entry in chat_pair:
+        slots = pair_slots(*(wake_slot(hass, satellite, member) for member in chat_pair))
+        slot = slots[chat_pair.index(entry)]
     option = option_for(slot, options)
     async with asyncio.timeout(SELECT_TIMEOUT):
         await hass.services.async_call(

@@ -1499,3 +1499,18 @@ async def test_an_assistant_on_no_wake_word_shows_the_character_the_other_does_n
         "select Assistant 2",
         "announce",
     ]
+
+
+async def test_two_assistants_on_no_wake_word_still_show_as_two_characters(hass, show):
+    add_look_select(hass, show)
+    with patch.object(
+        chat_show.announcement_look, "wake_slot", lambda hass, satellite, entry: None
+    ):
+        await run_chat(hass, show)
+
+    assert show.speakers.order == [
+        "select Assistant 1",
+        "announce",
+        "select Assistant 2",
+        "announce",
+    ] * 2

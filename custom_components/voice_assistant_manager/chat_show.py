@@ -123,6 +123,9 @@ _DANGLING_WORDS = frozenset(
     }
 )
 _GREETINGS = frozenset({"hey", "hi", "hello", "ok", "okay"})
+# Scripts written without spaces between words (Thai, Japanese kana, Chinese characters):
+# there the words of a turn cannot be counted.
+_UNSPACED_SCRIPT = re.compile(r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]")
 
 # The agent is asked for this share of the words limit, so a line ends before the limit.
 LINE_TARGET_SHARE = 0.85
@@ -261,15 +264,22 @@ def chat_instructions(own_name: str, other_name: str, words: int) -> str:
 def is_fragment(text: str, names: Sequence[str]) -> bool:
     """Whether a person's turn is too short or cut off to be a line in the chat.
 
-    A leading greeting and assistant name ("Hey Ada, ...") is left out first. What is left
-    must have MIN_PERSON_WORDS words and not end on a word a sentence cannot end on.
+    A leading greeting and assistant name ("Hey Ada, ...") is left out first. Nothing
+    left is a fragment. A question or exclamation ("Why?") is never one. Otherwise what is
+    left must have MIN_PERSON_WORDS words and not end on a word a sentence cannot end on;
+    in a script without spaces, words cannot be counted, so only nothing left counts.
     """
+    text = text.replace("\u2019", "'").strip()
     words = [word for word in _NOT_WORD.split(text.casefold()) if word]
     called = {part for name in names for part in name.casefold().split()}
     start = 1 if len(words) > 1 and words[0] in _GREETINGS and words[1] in called else 0
     while start < len(words) and words[start] in called:
         start += 1
     words = words[start:]
+    if not words:
+        return True
+    if text.endswith(("?", "!")) or _UNSPACED_SCRIPT.search(text):
+        return False
     return len(words) < MIN_PERSON_WORDS or words[-1] in _DANGLING_WORDS
 
 
@@ -976,7 +986,7 @@ class ChatShowManager:
                 return self._not_idle_reason(chat.speaker)
             # Just before the line: the device's choice holds for one announcement only.
             await announcement_look.async_show_assistant(
-                self.hass, chat.speaker, entry, self._other_router(chat, entry)
+                self.hass, chat.speaker, entry, self._chat_pair(chat)
             )
             watch = _ListenWatch()
             unwatch = async_track_state_change_event(self.hass, [chat.speaker], watch.changed)
@@ -1027,10 +1037,10 @@ class ChatShowManager:
                     self._note_listened_line(chat.speaker, line)
         return "chat_speaker_busy"
 
-    def _other_router(self, chat: _Chat, entry: ConfigEntry) -> ConfigEntry | None:
-        """The assistant the speaking one chats with, if it is still loaded."""
-        other = next((key for key in chat.routers if key != entry.entry_id), None)
-        return _loaded_router(self.hass, other) if other is not None else None
+    def _chat_pair(self, chat: _Chat) -> tuple[ConfigEntry, ConfigEntry] | None:
+        """The chat's two assistants in chat order, or None if one is no longer loaded."""
+        first, second = (_loaded_router(self.hass, key) for key in chat.routers)
+        return (first, second) if first is not None and second is not None else None
 
     async def _async_wait_listened(self, satellite: str, watch: "_ListenWatch") -> None:
         """Wait for the satellite to start listening (briefly), then to be idle again."""

@@ -184,7 +184,9 @@ async def test_after_the_grace_an_unknown_voice_gets_the_stranger_rules_again(
 
 
 @pytest.mark.parametrize(
-    "text", ["I'm", "Hey Ada, I'm", "Jeeves, and the", "Well I think the", "Hey Ada."]
+    "text",
+    ["I'm", "Hey Ada, I'm", "Hey Ada, I’m", "Jeeves, and the", "Well I think the",
+     "Hey Ada.", "Hey Ada?"],
 )
 async def test_a_fragment_is_dropped_and_the_chat_goes_on(hass, show, text):
     await chatting(show)
@@ -199,7 +201,19 @@ async def test_a_fragment_is_dropped_and_the_chat_goes_on(hass, show, text):
     await hass.async_block_till_done(wait_background_tasks=True)
 
 
-@pytest.mark.parametrize("text", ["No way.", "Hey Ada, I disagree.", "Me too!"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "No way.",
+        "Hey Ada, I disagree.",
+        "Me too!",
+        "Who are you talking with?",
+        "Where is it from?",
+        "Oh my!",
+        "Why?",
+        "我觉得猫更好",
+    ],
+)
 async def test_a_short_complete_turn_joins_in(hass, show, text):
     await chatting(show)
 
@@ -257,6 +271,38 @@ async def test_without_a_chat_the_request_goes_to_the_main_agent(hass, show):
 
     assert result.response.speech["plain"]["speech"] != "Okay."
     assert len(show.agents.calls_to(MAIN_AGENT)) == 1
+
+
+@pytest.mark.parametrize(
+    "lookup", [{"who": "near_miss"}, {"who": "stranger"}, {}], ids=["near-miss", "stranger", "none"]
+)
+async def test_any_voice_that_is_not_a_person_joins_as_a_guest(hass, show, lookup):
+    await chatting(show)
+
+    with patch.object(PersonaRouter, "_lookup_from_settings", return_value=lookup):
+        result = await ask(hass, show.jeeves, "I think cats are better", device_id=show.device)
+
+    assert result.response.speech["plain"]["speech"] == ""
+    assert guest_lines(show) == ["I think cats are better"]
+    assert nothing_else_answered(show)
+    show.release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_a_router_without_saved_settings_lets_an_unknown_voice_join_as_a_guest(
+    hass, show
+):
+    """The "who is speaking" script path: an empty answer is nobody identified."""
+    await chatting(show)
+
+    with patch.object(PersonaRouter, "_lookup_from_script", return_value={}):
+        bare = await add_router(hass, {})
+        result = await ask(hass, bare, "I think cats are better", device_id=show.device)
+
+    assert result.response.speech["plain"]["speech"] == ""
+    assert guest_lines(show) == ["I think cats are better"]
+    show.release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
 
 async def test_a_failed_lookup_during_a_chat_joins_as_a_guest(hass, show):
