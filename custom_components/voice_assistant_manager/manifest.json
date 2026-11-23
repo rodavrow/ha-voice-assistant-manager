@@ -21,5 +21,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/rodavrow/ha-voice-assistant-manager/issues",
-  "version": "0.5.1.dev1"
+  "version": "0.5.1.dev2"
 }
