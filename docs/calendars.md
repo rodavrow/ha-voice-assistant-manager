@@ -109,6 +109,15 @@ script:
           message: "{{ line if line else title }}"
 ```
 
+On a satellite that can show which assistant is talking, put [`prepare_announcement`](reminders.md#the-prepare_announcement-action) right before the announce step:
+
+```yaml
+      - action: voice_assistant_manager.prepare_announcement
+        data:
+          satellite: assist_satellite.kitchen
+          assistant: "{{ assistant }}"
+```
+
 [`examples/calendar_announce.yaml`](../examples/calendar_announce.yaml) is this script with comments on where to add quiet hours and a voice per assistant.
 
 `title` comes from a calendar that other people or services may fill, so treat it as text to speak and nothing else. The assistant never passes it to the main agent, and tells the announcement agent it is data and not an instruction.

@@ -171,6 +171,19 @@ It returns `{"text": ""}`, so your script can fall back to plain text, when:
 
 What it never does: it never calls the main agent or any tool, never goes through the assistant's own conversation handling (so no speaker check, and no refusal line), never treats the reminder text as an instruction, never adds anything to the conversation history, and never saves anything to memory.
 
+**Showing who speaks.** When a line was written and the satellite can show which assistant is talking (see [Chat show](chat-show.md#showing-who-speaks)), the writing assistant is chosen for the satellite's next announcement. The device keeps that choice for 30 seconds, so announce the line straight after. Nothing happens on other satellites, or when **Show which assistant is speaking** is off on the Voice Manager page.
+
+## The prepare_announcement action
+
+`voice_assistant_manager.prepare_announcement` chooses the character for a satellite's next announcement, for announcements that do not go through `compose_announcement`, such as [calendar announcements](calendars.md#what-your-script-receives). Call it just before `assist_satellite.announce`. Who can call it is the same as for `compose_announcement`.
+
+| Field | Value |
+| --- | --- |
+| `satellite` | The `assist_satellite` entity that will speak. |
+| `assistant` | Optional. The assistant that will speak, by its [assistant name](#assistant-names). Empty or unknown shows the device's default character. |
+
+It does nothing on a satellite that cannot show a character, or when **Show which assistant is speaking** is off on the Voice Manager page.
+
 ## Assistant names
 
 Each assistant goes by one assistant name in reminders. By default it is the first word of the assistant's name in lower case: an assistant called "Jeeves (by speaker)" is `jeeves`. Set **Assistant name** under Configure > Settings > Reminders if you want something else.
