@@ -47,7 +47,7 @@ Changes apply to the next request. No restart is needed.
 
 | Setting | What it does |
 | --- | --- |
-| Play favorites by name | Off by default. When on, a request that is exactly "play" and a favorite's name ("play Radio 2", "play Radio 2 on the Denon") plays it at once, for Person 1 and Person 2 only, before the built-in commands and without the main agent. Each person's own favorites are shared by every assistant with this on. Other wordings, saving and forgetting need the Voice Assistant Manager tools switched on for the main agent. See [Favorites](favorites.md). |
+| Use favorites | Off by default. Switches favorites on for this assistant: while it is off, the assistant does not use favorites at all, by voice or through the main agent's tools. When on, a request that is exactly "play" and a favorite's name ("play Radio 2", "play Radio 2 on the Denon") plays it at once, for Person 1 and Person 2 only, before the built-in commands and without the main agent. Each person's own favorites are shared by every assistant with this on. Other wordings, saving and forgetting need the Voice Assistant Manager tools switched on for the main agent. See [Favorites](favorites.md). |
 
 The lists themselves, and the **Speakers** (which speaker plays a favorite on each satellite when none is named), are in the **Favorites** section of the Voice Manager page, not in the Configure dialog. Speakers are the same for every assistant.
 

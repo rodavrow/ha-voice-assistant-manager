@@ -98,10 +98,10 @@
             "name": "Favorites",
             "description": "Named radio stations, podcasts and playlists that Person 1 and Person 2 can play by voice. Never used for an unknown voice.",
             "data": {
-              "enabled": "Play favorites by name"
+              "enabled": "Use favorites"
             },
             "data_description": {
-              "enabled": "A request such as play Radio 2, or play Radio 2 on the Denon, that names a favorite exactly plays it at once, before the built-in commands and without the main agent. Person 1's and Person 2's own favorites are shared by every assistant with this switched on."
+              "enabled": "Switches favorites on for this assistant: playing, saving and forgetting them by voice, and the lists on My assistant. While it is off, this assistant does not use favorites at all. A request that is exactly play and a favorite's name, such as play Radio 2 or play Radio 2 on the Denon, plays at once, without the main agent. Person 1's and Person 2's own favorites are shared by every assistant with this switched on."
             }
           },
           "chat": {

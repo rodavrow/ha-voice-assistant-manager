@@ -26,7 +26,7 @@ An unknown voice never reaches favorites, just as it never reaches the main agen
 Favorites are switched on for each assistant.
 
 1. Open **Voice Manager** in the sidebar and go to **Favorites**.
-2. Choose the assistant and switch on **Play favorites by name**. The same switch is under **Favorites** in the assistant's settings, see [Settings](settings.md#favorites).
+2. Choose the assistant and switch on **Use favorites**. The same switch is under **Favorites** in the assistant's settings, see [Settings](settings.md#favorites).
 
 Changes apply to the next request. No restart is needed.
 

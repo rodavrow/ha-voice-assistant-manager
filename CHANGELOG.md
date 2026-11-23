@@ -3,6 +3,14 @@
 All notable changes to Voice Assistant Manager. Versions follow the `version` in
 `custom_components/voice_assistant_manager/manifest.json`.
 
+## Unreleased
+
+### Changed
+
+- **The favorites switch is now called "Use favorites".** It was "Play favorites by name",
+  which read as if it only covered the quick "play …" requests. It switches the whole
+  feature on for an assistant, and its description now says so. Nothing else changes.
+
 ## 0.5.0 - 2026-11-23
 
 ### Licence
