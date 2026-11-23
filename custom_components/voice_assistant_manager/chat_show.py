@@ -70,7 +70,7 @@ SATELLITE_START_CONVERSATION = 2
 LISTEN_START_WAIT = 2.0
 LISTEN_WAIT = 10.0
 # How long the speaker's device stays in the chat after it ended: a reply to the last line,
-# or one after a stop, still gets "Mm-hm." or "Okay." and never reaches the main agent.
+# or one after a stop, still gets nothing or "Okay." and never reaches the main agent.
 REPLY_GRACE = LISTEN_START_WAIT + LISTEN_WAIT + 5.0
 SATELLITE_IDLE = "idle"
 # AssistSatelliteState: listening from the pipeline's STT_START, responding while Home

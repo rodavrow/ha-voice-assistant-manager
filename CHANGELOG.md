@@ -15,6 +15,15 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Changed
 
+- **Everyone at the satellite can join a chat show.** While a chat runs, every turn from its
+  satellite goes to the chat. A recognised voice joins with the person's name; anyone else
+  joins as "A guest", and the assistants are told not to assume who that is. Unknown voices
+  were refused before. The chat assistants have no tools and see no memory, so a guest
+  reaches nothing; after the chat, the usual rules apply again.
+- **No more "Mm-hm." when someone joins a chat.** The satellite says nothing and the next
+  assistant answers. Turns of one word, or cut off mid-sentence, are dropped.
+- **The two assistants in a chat never show as the same character.** One that is on neither
+  of the satellite's wake words shows as the character the other does not use.
 - **The favorites switch is now called "Use favorites".** It was "Play favorites by name",
   which read as if it only covered the quick "play …" requests. It switches the whole
   feature on for an assistant, and its description now says so. Nothing else changes.
