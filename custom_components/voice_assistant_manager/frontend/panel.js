@@ -1114,6 +1114,9 @@ class VoicePersonaRouterPanel extends HTMLElement {
         { class: "card" },
         h("h3", {}, this._text("step.settings.sections.advanced.name", "Advanced")),
         this._textField("advanced", "rule", { multiline: true }),
+        this._textField("advanced", "agent_down_line", {
+          placeholder: "Sorry, I can't think right now. Please try again in a moment.",
+        }),
         this._numberField("advanced", "wait_seconds", 0, 6, 0.5, "seconds", 3),
         this._choiceField(
           "advanced",

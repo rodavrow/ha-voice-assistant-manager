@@ -91,6 +91,8 @@ from .speaker import FOLLOW_UP_WINDOW, Remembered, Role, follow_up_role, resolve
 _LOGGER = logging.getLogger(__name__)
 SCRIPT_TIMEOUT = 8
 LAST_RESORT_REPLY = "Sorry, I can't help you."
+# Spoken when the main agent fails (its provider is down, say), unless set under Advanced.
+DEFAULT_AGENT_DOWN_LINE = "Sorry, I can't think right now. Please try again in a moment."
 CHAT_STOPPED_LINE = "Okay."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
 OTHER_PERSON = {"owner": "wife", "wife": "owner"}
@@ -140,6 +142,14 @@ def _leave_to_main_agent(result):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
     async_add_entities([PersonaRouter(entry)])
 
+
+
+def _silent_error(result: conversation.ConversationResult) -> bool:
+    """An error answer with nothing to say, which a satellite would end in silence."""
+    response = result.response
+    if response.response_type is not intent.IntentResponseType.ERROR:
+        return False
+    return not str((response.speech.get("plain") or {}).get("speech") or "").strip()
 
 class PersonaRouter(conversation.ConversationEntity):
     _attr_supports_streaming = True
@@ -828,6 +838,10 @@ class PersonaRouter(conversation.ConversationEntity):
             result = dataclasses.replace(result, conversation_id=user_input.conversation_id)
         return result, log, log_start
 
+    def _agent_down_line(self) -> str:
+        advanced = self._entry.options.get("advanced") or {}
+        return str(advanced.get("agent_down_line") or "").strip() or DEFAULT_AGENT_DOWN_LINE
+
     def _main_prompt(self, resp: dict[str, Any], extra: str | None) -> str:
         """The extra prompt for the main agent, never empty.
 
@@ -940,9 +954,19 @@ class PersonaRouter(conversation.ConversationEntity):
                 satellite_id=user_input.satellite_id,
                 extra_system_prompt=self._main_prompt(resp, user_input.extra_system_prompt),
             )
+        except Exception:  # noqa: BLE001 - the person hears a line, not a failed turn
+            _LOGGER.exception("The main agent %s failed, answering with a short line", main_agent)
+            return self._speak(user_input, self._agent_down_line())
         finally:
             if remembered:
                 forget(self.hass, remembered)
+        if _silent_error(result):
+            _LOGGER.error(
+                "The main agent %s answered with an error and no words, answering with a "
+                "short line",
+                main_agent,
+            )
+            return self._speak(user_input, self._agent_down_line())
         if conversation_id != user_input.conversation_id:
             result, log, log_start = self._after_clean_conversation(user_input, result)
         reminders = bool(resp.get("reminders"))

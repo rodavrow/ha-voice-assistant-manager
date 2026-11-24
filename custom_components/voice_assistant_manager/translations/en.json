@@ -195,13 +195,15 @@
               "rule": "Shared history rule",
               "wait_seconds": "Wait for the voice match",
               "no_helper_role": "A device without speaker recognition is",
-              "avatar_connection": "Avatar connection"
+              "avatar_connection": "Avatar connection",
+              "agent_down_line": "When the main agent fails, say"
             },
             "data_description": {
               "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
               "wait_seconds": "How long to wait while the helper says pending. If no match arrives in time, the voice counts as unknown.",
               "no_helper_role": "Used for a request that neither a voice_speaker helper nor a Home Assistant user decides: a typed request when no user is chosen under Person 1 or Person 2, or a request from a device that has no helper and no user.",
-              "avatar_connection": "For satellites in avatar mode. Connect when woken: the satellite connects to LiveTalking when it wakes, about a second before the avatar shows. Always connected: the avatar is there at once, and each satellite keeps a LiveTalking session open. Recommended for the Chat show."
+              "avatar_connection": "For satellites in avatar mode. Connect when woken: the satellite connects to LiveTalking when it wakes, about a second before the avatar shows. Always connected: the avatar is there at once, and each satellite keeps a LiveTalking session open. Recommended for the Chat show.",
+              "agent_down_line": "Spoken when the main agent cannot answer, for example because its AI provider is down, instead of ending the turn in silence. When empty: Sorry, I can't think right now. Please try again in a moment."
             }
           }
         }

@@ -43,6 +43,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A main agent that fails no longer ends the turn in silence.** When the main agent
+  raises an error (its AI provider is down, say) or answers with an error and no words,
+  the assistant says a short line instead: "Sorry, I can't think right now. Please try
+  again in a moment.", or your own under **Advanced**. The cause is logged; memory is not
+  touched.
 - **A follow-up keeps the person who was speaking.** A follow-up question has no wake word
   and usually no new voice match, and the tracking automation only let the last speaker
   carry on when the satellite started listening within 2 seconds of going idle. A
