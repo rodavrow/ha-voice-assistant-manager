@@ -7,7 +7,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
-- **Avatars.** **Add avatar** on an assistant's entry creates a text-to-speech entity that
+- **Avatars.** The **Avatar** card under **Assistant** on the Voice Manager page (or **Add
+  avatar** on an assistant's entry) creates a text-to-speech entity that
   speaks through the engine you choose and sends a copy of each finished clip to a
   LiveTalking lip-sync server. The satellite's speech is passed on unchanged and made only
   once. The engine, address and an on/off switch can be changed at any time without a
