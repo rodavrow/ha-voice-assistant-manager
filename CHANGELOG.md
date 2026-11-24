@@ -48,9 +48,9 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   carry on when the satellite started listening within 2 seconds of going idle. A
   satellite that took longer, such as a display speaking through its avatar, got the
   unknown-voice answer on follow-ups. Voice Assistant Manager now remembers the person per
-  conversation: a follow-up on the same satellite within a minute keeps them, unless a new
-  voice match says otherwise (the other person switches, an unknown voice is refused).
-  Follow-ups wait at most a second for a late match.
+  conversation: a follow-up on the same satellite within 20 seconds keeps them, unless a
+  new voice match says otherwise (the other person switches, an unknown voice is refused).
+  Follow-ups wait the full "Wait for the voice match" time, so a late match still decides.
 
 ## 0.5.0 - 2026-11-23
 
