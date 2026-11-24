@@ -29,6 +29,7 @@ import enum
 import logging
 import random
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components import conversation
@@ -102,6 +103,9 @@ LAST_RESORT_REPLY = "Sorry, I can't help you."
 DEFAULT_AGENT_DOWN_LINE = "Sorry, I can't think right now. Please try again in a moment."
 CHAT_STOPPED_LINE = "Okay."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
+# How long after a satellite starts listening its voice match can still arrive, unless set
+# under Advanced. LANovo publishes it 4.6-5.5 s after the wake word, whatever is said.
+DEFAULT_MATCH_WITHIN = 6.0
 # The text sensor a satellite reports on each new turn's wake word (LANovo, EchoLocal).
 WAKE_WORD_SENSOR = "Last wake word"
 OTHER_PERSON = {"owner": "wife", "wife": "owner"}
@@ -263,21 +267,29 @@ class PersonaRouter(conversation.ConversationEntity):
     async def _helper_state(self, device_id, advanced):
         """The voice_speaker helper's state on the satellite, or None if it has none.
 
-        Waits a little while the helper says pending, because the match lands a
-        few seconds after the wake word: up to the "wait for the voice match" setting.
+        While the helper says pending it waits for the voice match, until "the match
+        arrives within" seconds after the helper became pending, which is when the
+        satellite started listening. A satellite matches on a fixed stretch of audio after
+        the wake word, so the match lands a fixed time after it however long the person
+        speaks: after a long request it is already there, and nothing is waited for.
         """
         helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
         if state is None:
             return None
         try:
-            seconds = float(advanced.get("wait_seconds", 3))
+            within = float(advanced.get("match_within", DEFAULT_MATCH_WITHIN))
         except (TypeError, ValueError):
-            seconds = 3.0
-        for _ in range(max(int(seconds * 10), 0)):
+            within = DEFAULT_MATCH_WITHIN
+        # A cap on the steps too, so a clock that stands still can never keep it waiting.
+        for _ in range(max(int(within * 10) + 1, 0)):
             if state.state != "pending":
                 break
-            await asyncio.sleep(0.1)
+            deadline = state.last_changed + timedelta(seconds=within)
+            remaining = (deadline - dt_util.utcnow()).total_seconds()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(0.1, remaining))
             state = self.hass.states.get(helper)
             if state is None:
                 return None
@@ -308,7 +320,7 @@ class PersonaRouter(conversation.ConversationEntity):
 
         A follow-up in the same conversation keeps its person unless a new voice match
         says otherwise (speaker.follow_up_role), so it never depends on the satellite's
-        timing. Every turn waits the whole "wait for the voice match" time, so a new wake
+        timing. Every turn waits for the match until its deadline (_helper_state), so a new wake
         word's match, an unknown voice's too, still decides.
         """
         now = dt_util.utcnow()

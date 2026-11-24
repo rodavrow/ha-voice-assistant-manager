@@ -1117,7 +1117,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         this._textField("advanced", "agent_down_line", {
           placeholder: "Sorry, I can't think right now. Please try again in a moment.",
         }),
-        this._numberField("advanced", "wait_seconds", 0, 6, 0.5, "seconds", 3),
+        this._numberField("advanced", "match_within", 0, 15, 0.5, "seconds", 6),
         this._choiceField(
           "advanced",
           "no_helper_role",

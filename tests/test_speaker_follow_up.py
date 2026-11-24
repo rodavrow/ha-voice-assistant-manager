@@ -181,7 +181,7 @@ async def test_a_late_stranger_match_on_a_follow_up_is_still_caught(hass):
 
     from .router_helpers import options_with
 
-    router = await add_router(hass, options_with(advanced={"wait_seconds": 3}))
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
     kitchen = add_satellite(hass)
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
@@ -270,13 +270,84 @@ async def test_regression_a_repeated_wake_word_still_waits_for_the_match(hass):
 
     from .router_helpers import options_with
 
-    router = await add_router(hass, options_with(advanced={"wait_seconds": 3}))
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
     kitchen = add_satellite(hass)
     sensor = add_wake_sensor(hass, kitchen)
     woke(hass, sensor)
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
     match(hass, kitchen, "pending")  # someone woke it again with the same phrase
+
+    async def late_match() -> None:
+        await asyncio.sleep(1.3)
+        match(hass, kitchen, "stranger")
+
+    task = hass.async_create_task(late_match())
+    role = await speaker(hass, router, voice_turn(kitchen))
+    await task
+
+    assert role == "stranger"
+
+
+
+# The wait is anchored to when listening started: the satellite's match lands a fixed time
+# after the wake word (LANovo: 4.6-5.5 s), however long the person speaks.
+
+
+def match_since(hass: HomeAssistant, device_id: str, value: str, seconds_ago: float) -> None:
+    """The helper as the tracking automation left it `seconds_ago` (when listening began)."""
+    import time
+
+    hass.states.async_set(
+        f"input_text.voice_speaker_{device_id}", value, timestamp=time.time() - seconds_ago
+    )
+
+
+async def test_after_the_match_deadline_there_is_no_wait(hass):
+    import time
+
+    from .router_helpers import options_with
+
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
+    kitchen = add_satellite(hass)
+    match_since(hass, kitchen, "pending", 7)  # a long request: listening began 7 s ago
+
+    started = time.monotonic()
+    role = await speaker(hass, router, voice_turn(kitchen))
+
+    assert role == "stranger"
+    assert time.monotonic() - started < 0.5
+
+
+async def test_a_short_follow_up_waits_only_for_what_is_left_of_the_deadline(hass):
+    import time
+
+    from .router_helpers import options_with
+
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
+    kitchen = add_satellite(hass)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+    match_since(hass, kitchen, "pending", 5.5)  # the follow-up began 5.5 s ago
+
+    started = time.monotonic()
+    role = await speaker(hass, router, voice_turn(kitchen))
+
+    assert role == "owner"
+    assert time.monotonic() - started < 1.2
+
+
+async def test_a_match_landing_before_the_deadline_still_decides(hass):
+    """A stranger's match lands about 5 s after the wake word, after they stopped speaking."""
+    import asyncio
+
+    from .router_helpers import options_with
+
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
+    kitchen = add_satellite(hass)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+    match_since(hass, kitchen, "pending", 3.5)  # a short request, 3.5 s after the wake word
 
     async def late_match() -> None:
         await asyncio.sleep(1.3)
