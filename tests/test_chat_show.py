@@ -933,7 +933,11 @@ def without_native_audio_libraries(hass: HomeAssistant):
 
 @pytest.fixture
 def quick_busy_wait():
-    with patch.object(chat_show, "BUSY_POLL", 0.01), patch.object(chat_show, "BUSY_WAIT", 0.2):
+    with (
+        patch.object(chat_show, "BUSY_POLL", 0.01),
+        patch.object(chat_show, "BUSY_WAIT", 0.2),
+        patch.object(chat_show, "RETURN_WAIT", 0.05),
+    ):
         yield
 
 
@@ -1087,6 +1091,8 @@ async def test_regression_chat_an_unavailable_media_player_ends_the_chat_as_fail
     with (
         patch("homeassistant.components.tts.generate_media_source_id", fake_tts),
         patch.object(chat_show, "play_timeout", lambda words: 0.01),
+        patch.object(chat_show, "RETURN_WAIT", 0.05),
+        patch.object(chat_show, "BUSY_POLL", 0.01),
     ):
         await run_chat(hass, show, speaker=PLAYER)
 
@@ -1617,7 +1623,96 @@ async def test_a_player_falls_back_to_the_default_voice_when_the_chat_voice_is_e
     with_chat_voice(hass, show)
     chat_audio.result = ("mp3", b"")
 
-    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+    with (
+        patch("homeassistant.components.tts.generate_media_source_id", fake_tts),
+        patch.object(chat_show, "play_timeout", lambda words: 0.01),
+    ):
         await run_chat(hass, show, speaker=PLAYER, limits=ChatLimits(max_lines=1, pause=0))
 
     assert show.speakers.played[0]["media_content_id"].startswith("media-source://tts/default?")
+
+
+# A satellite whose connection drops for a moment (seen: 0.25 s, mid-line, after an update).
+
+
+@pytest.fixture
+def no_rest_of_the_line():
+    """The line a dropped satellite goes on playing takes no time in these tests."""
+    with patch.object(chat_show, "SPOKEN_SECONDS_PER_WORD", 0):
+        yield
+
+
+def dropping(hass, show, audible: bool, back: bool = True) -> None:
+    """The first line's announcement fails because the satellite's connection drops."""
+
+    async def hook(number: int) -> None:
+        if number != 1:
+            return
+        if audible:
+            satellite_state(hass, "responding")
+        satellite_state(hass, "unavailable")
+        if back:
+            satellite_state(hass, "idle")
+        raise HomeAssistantError("Error communicating with the device: EOF received")
+
+    show.speakers.hook = hook
+
+
+async def test_regression_a_drop_while_a_line_plays_does_not_end_the_chat(
+    hass, show, no_rest_of_the_line
+):
+    dropping(hass, show, audible=True)
+
+    await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    assert show.speakers.messages == [JEEVES_LINE, ADA_LINE]
+    assert show.manager.state()["ended"] == "chat_done"
+
+
+async def test_a_line_that_dropped_before_it_played_is_spoken_again(hass, show):
+    dropping(hass, show, audible=False)
+
+    await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    assert show.speakers.messages == [JEEVES_LINE, JEEVES_LINE, ADA_LINE]
+    assert show.manager.state()["ended"] == "chat_done"
+
+
+async def test_a_satellite_that_stays_away_after_a_drop_ends_the_chat(
+    hass, show, no_rest_of_the_line
+):
+    dropping(hass, show, audible=True, back=False)
+
+    with patch.object(chat_show, "RETURN_WAIT", 0.01), patch.object(chat_show, "BUSY_POLL", 0.01):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    assert show.manager.state()["ended"] == "chat_speaker_failed"
+
+
+async def test_a_chat_that_ends_on_a_failure_says_so_as_a_warning(hass, show, caplog):
+    show.agents.writer_error = True
+
+    await run_chat(hass, show)
+
+    assert any(
+        r.levelname == "WARNING" and "chat_agent_failed" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+async def test_a_chat_that_ends_normally_is_not_a_warning(hass, show, caplog):
+    await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    assert not any(
+        r.levelname == "WARNING" and "Chat show ended" in r.getMessage() for r in caplog.records
+    )
+
+
+async def test_the_rest_of_a_line_that_dropped_is_waited_for(hass, show):
+    dropping(hass, show, audible=True)
+    began = asyncio.get_running_loop().time()
+
+    with patch.object(chat_show, "SPOKEN_SECONDS_PER_WORD", 0.02):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=1, pause=0))
+
+    assert asyncio.get_running_loop().time() - began >= 0.02 * len(JEEVES_LINE.split()) - 0.01

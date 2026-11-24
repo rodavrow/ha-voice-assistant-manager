@@ -55,6 +55,12 @@ LINE_TIMEOUT = 20
 # How long a busy satellite is waited for, checking every BUSY_POLL seconds.
 BUSY_POLL = 0.5
 BUSY_WAIT = 20.0
+# How long a satellite whose connection dropped is waited for. A satellite that sends its
+# entities again (after a firmware update, say) is away for a fraction of a second.
+RETURN_WAIT = 15.0
+# How long a line takes to say, per word: a satellite that dropped while a line played goes
+# on playing it, but says it is idle, so the rest of the line is waited for by the clock.
+SPOKEN_SECONDS_PER_WORD = 0.4
 # A satellite announcement blocks until it has played; this only stops a hung one.
 ANNOUNCE_TIMEOUT_BASE = 30.0
 # How long a media player gets to finish a line: base plus seconds per word.
@@ -94,6 +100,8 @@ TTS_VOICE = "voice"  # tts.ATTR_VOICE
 CHAT_VOICE_TIMEOUT = 20
 # Not a chat end reason: the conversation could not start, so the line is announced.
 _LISTEN_UNAVAILABLE = "listen_unavailable"
+# The reasons a chat ends as meant; any other is a failure.
+_NORMAL_ENDS = frozenset({"chat_done", "chat_time_up", "chat_stopped"})
 
 # The ranges of each limit: (smallest, largest).
 LIMIT_RANGES: dict[str, tuple[float, float]] = {
@@ -514,6 +522,8 @@ class _Chat:
     line_finished: datetime | None = None
     # Whether the satellite woke on the line being or last spoken.
     line_woken: bool = False
+    # The satellite went unavailable while the line was being spoken.
+    line_dropped: bool = False
     # When the satellite last woke on its own line, until that request is answered.
     self_wake_at: datetime | None = None
     wake_answered: asyncio.Event = field(default_factory=asyncio.Event)
@@ -606,7 +616,10 @@ class ChatShowManager:
             old_state, new_state = event.data["old_state"], event.data["new_state"]
             if new_state is None:
                 return
-            if new_state.state == SATELLITE_RESPONDING:
+            if new_state.state == STATE_UNAVAILABLE:
+                if chat.speaking and chat.line_finished is None:
+                    chat.line_dropped = True
+            elif new_state.state == SATELLITE_RESPONDING:
                 if chat.speaking and chat.line_finished is None:
                     chat.line_audible = True
             elif new_state.state == SATELLITE_LISTENING and (
@@ -684,7 +697,9 @@ class ChatShowManager:
         if chat.ended:
             return
         chat.ended = reason
-        _LOGGER.info("Chat show ended: %s", reason)
+        # A failure shows without debug logging; a chat that ran its course does not.
+        level = logging.INFO if reason in _NORMAL_ENDS else logging.WARNING
+        _LOGGER.log(level, "Chat show on %s ended: %s", chat.speaker, reason)
 
     async def async_stop(self, reason: str = "stopped") -> None:
         """End the running chat with the reason key chat_<reason>.
@@ -976,7 +991,7 @@ class ChatShowManager:
         satellite listens after the line; what a person answers arrives through the
         joining-in path.
         """
-        if self._unavailable(chat.speaker):
+        if not await self._async_wait_back(chat.speaker):
             _LOGGER.warning("%s is unavailable, ending the chat", chat.speaker)
             return "chat_speaker_failed"
         if chat.speaker.startswith("assist_satellite."):
@@ -998,6 +1013,24 @@ class ChatShowManager:
                 return False
             await asyncio.sleep(BUSY_POLL)
             waited += BUSY_POLL
+
+    async def _async_wait_back(self, speaker: str) -> bool:
+        """Wait until a speaker that is unavailable is back, at most RETURN_WAIT seconds."""
+        waited = 0.0
+        while self._unavailable(speaker):
+            if waited >= RETURN_WAIT:
+                return False
+            await asyncio.sleep(BUSY_POLL)
+            waited += BUSY_POLL
+        return True
+
+    @staticmethod
+    async def _async_let_finish(line: str, called: datetime) -> None:
+        """Wait out what is left of a line that began playing at about `called`."""
+        takes = SPOKEN_SECONDS_PER_WORD * len(line.split())
+        left = takes - (dt_util.utcnow() - called).total_seconds()
+        if left > 0:
+            await asyncio.sleep(left)
 
     async def _async_announce(
         self, chat: _Chat, entry: ConfigEntry, line: str, listen: bool = False
@@ -1038,7 +1071,8 @@ class ChatShowManager:
             watch = _ListenWatch()
             unwatch = async_track_state_change_event(self.hass, [chat.speaker], watch.changed)
             chat.line_listens, chat.line_audible, chat.line_woken = listen, False, False
-            chat.line_finished = None
+            chat.line_finished, chat.line_dropped = None, False
+            called = dt_util.utcnow()
             returned = False
             try:
                 chat.speaking = True
@@ -1058,6 +1092,29 @@ class ChatShowManager:
                     # counts as spoken and the chat goes on.
                     _LOGGER.debug("%s failed a chat line it woke on: %s", chat.speaker, err)
                     return ""
+                if chat.line_dropped and not _is_busy_error(err):
+                    if not await self._async_wait_back(chat.speaker):
+                        _LOGGER.warning(
+                            "%s dropped its connection during a chat line and did not come "
+                            "back in %s s: %s",
+                            chat.speaker, RETURN_WAIT, err,
+                        )
+                        return "chat_speaker_failed"
+                    if chat.line_audible:
+                        # It goes on playing the line it had started.
+                        _LOGGER.warning(
+                            "%s dropped its connection while a chat line played and is "
+                            "back; the chat goes on: %s",
+                            chat.speaker, err,
+                        )
+                        await self._async_let_finish(line, called)
+                        return ""
+                    _LOGGER.warning(
+                        "%s dropped its connection before a chat line played and is back; "
+                        "the line is tried again: %s",
+                        chat.speaker, err,
+                    )
+                    continue
                 if not _is_busy_error(err):
                     if listen:
                         _LOGGER.warning(
