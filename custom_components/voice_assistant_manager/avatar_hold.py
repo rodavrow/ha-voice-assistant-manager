@@ -15,9 +15,10 @@ import logging
 
 import voluptuous as vol
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, State, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_state_change_event
 
 from .avatar import esphome_entity
 
@@ -26,6 +27,8 @@ _LOGGER = logging.getLogger(__name__)
 # The switch's name in the firmware: fixed English, on the satellite's own device.
 HOLD_NAME = "Avatar hold"
 CALL_TIMEOUT = 5
+# How long a switch that is unavailable is waited for before it is turned off.
+OFF_WAIT = 30.0
 
 
 def hold_switch(hass: HomeAssistant, satellite: str) -> str | None:
@@ -43,12 +46,39 @@ def hold_switch(hass: HomeAssistant, satellite: str) -> str | None:
     return None
 
 
+async def _async_wait_available(hass: HomeAssistant, switch: str) -> State | None:
+    """The switch's state once it is available again, or None after OFF_WAIT seconds."""
+    back = asyncio.Event()
+
+    @callback
+    def changed(event: Event[EventStateChangedData]) -> None:
+        new_state = event.data["new_state"]
+        if new_state is not None and new_state.state != STATE_UNAVAILABLE:
+            back.set()
+
+    unwatch = async_track_state_change_event(hass, [switch], changed)
+    try:
+        async with asyncio.timeout(OFF_WAIT):
+            await back.wait()
+    except TimeoutError:
+        return None
+    finally:
+        unwatch()
+    return hass.states.get(switch)
+
+
 async def async_set(hass: HomeAssistant, satellite: str, on: bool) -> None:
     """Turn the satellite's hold on or off. Never raises; nothing without the switch."""
     switch = hold_switch(hass, satellite)
     state = hass.states.get(switch) if switch is not None else None
-    if switch is None or state is None or state.state == STATE_UNAVAILABLE:
+    if switch is None or state is None:
         return
+    if state.state == STATE_UNAVAILABLE:
+        # Turning it on can wait for the next line. Off cannot: a satellite that dropped
+        # as the chat ended comes back with the hold still on.
+        state = None if on else await _async_wait_available(hass, switch)
+        if state is None:
+            return
     if state.state == (STATE_ON if on else STATE_OFF):
         return
     try:

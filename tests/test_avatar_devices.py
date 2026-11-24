@@ -620,3 +620,22 @@ async def test_regression_avatar_text_entities_are_text_info(hass, engines, sent
 
     assert device.calls[0].startswith("set_value text.kitchen_assistant_1_avatar_url ")
     assert f"turn_on {assistant_switch(1)} None" in device.calls
+
+
+async def test_regression_nothing_is_written_to_a_satellite_that_is_away(
+    hass, engines, sent, device
+):
+    """Seen during a firmware update: six writes to unavailable entities, each a warning."""
+    entry = await add_router(hass)
+    await add_avatar(hass, entry, "tts.cloud_voice")
+    domains = {"mode": "switch", "url": "text", "id": "text", "connection": "select"}
+    for slot in (1, 2):
+        for kind, domain in domains.items():
+            entity_id = f"{domain}.kitchen_assistant_{slot}_avatar_{kind}"
+            hass.states.async_set(entity_id, "unavailable")
+    device.calls.clear()
+
+    with slots(entry, None):
+        await reconcile(hass)
+
+    assert device.calls == []

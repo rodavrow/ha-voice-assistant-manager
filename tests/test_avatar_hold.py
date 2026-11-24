@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """A chat show asks a satellite with an "Avatar hold" switch to keep the avatar on screen."""
 
+import asyncio
 import logging
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -119,7 +121,8 @@ async def test_a_hold_that_cannot_be_set_does_not_end_the_chat(hass, show, hold,
 async def test_an_unavailable_hold_switch_is_left_alone(hass, show, hold):
     hass.states.async_set(HOLD, "unavailable")
 
-    await run_chat(hass, show, limits=TWO_LINES)
+    with patch.object(avatar_hold, "OFF_WAIT", 0.01):
+        await run_chat(hass, show, limits=TWO_LINES)
 
     assert hold.events == ["line", "line"]
 
@@ -141,3 +144,32 @@ def test_only_a_switch_named_avatar_hold_on_the_satellites_own_device_counts(has
     )
 
     assert avatar_hold.hold_switch(hass, SATELLITE) is None
+
+
+async def test_regression_the_hold_is_turned_off_once_a_dropped_switch_is_back(hass, show, hold):
+    """Seen: the satellite dropped as the chat ended, came back with the hold still on."""
+    hass.states.async_set(HOLD, "unavailable")
+
+    turning_off = hass.async_create_task(avatar_hold.async_set(hass, SATELLITE, False))
+    await asyncio.sleep(0)
+    hass.states.async_set(HOLD, "on")
+    await turning_off
+
+    assert hold.events == ["hold off"]
+
+
+async def test_a_switch_that_stays_away_is_given_up_on(hass, show, hold):
+    hass.states.async_set(HOLD, "unavailable")
+
+    with patch.object(avatar_hold, "OFF_WAIT", 0.01):
+        await avatar_hold.async_set(hass, SATELLITE, False)
+
+    assert hold.events == []
+
+
+async def test_turning_the_hold_on_never_waits_for_an_unavailable_switch(hass, show, hold):
+    hass.states.async_set(HOLD, "unavailable")
+
+    await asyncio.wait_for(avatar_hold.async_set(hass, SATELLITE, True), timeout=1)
+
+    assert hold.events == []
