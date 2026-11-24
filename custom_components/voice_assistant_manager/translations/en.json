@@ -746,5 +746,52 @@
         }
       }
     }
+  },
+  "config_subentries": {
+    "avatar": {
+      "entry_type": "Avatar",
+      "initiate_flow": {
+        "user": "Add avatar",
+        "reconfigure": "Edit avatar"
+      },
+      "step": {
+        "user": {
+          "title": "Avatar",
+          "description": "Sends a copy of this assistant's speech to a LiveTalking lip-sync avatar. Choose this avatar's TTS entity in the assistant's voice pipeline. The satellite's speech is never changed.",
+          "data": {
+            "name": "Name",
+            "engine": "Text-to-speech engine",
+            "url": "LiveTalking address",
+            "enabled": "Send speech to the avatar"
+          },
+          "data_description": {
+            "name": "The name of the new text-to-speech entity, for example Ada avatar.",
+            "engine": "The engine that makes the speech. Change it here to switch engines; then choose the voice again in the pipeline.",
+            "url": "For example http://livetalking.local:8010. Every viewer of LiveTalking hears this assistant.",
+            "enabled": "When off, the assistant still speaks, but nothing is sent to the avatar."
+          }
+        },
+        "reconfigure": {
+          "title": "Avatar",
+          "description": "Sends a copy of this assistant's speech to a LiveTalking lip-sync avatar. Choose this avatar's TTS entity in the assistant's voice pipeline. The satellite's speech is never changed.",
+          "data": {
+            "name": "Name",
+            "engine": "Text-to-speech engine",
+            "url": "LiveTalking address",
+            "enabled": "Send speech to the avatar"
+          },
+          "data_description": {
+            "name": "The name of the new text-to-speech entity, for example Ada avatar.",
+            "engine": "The engine that makes the speech. Change it here to switch engines; then choose the voice again in the pipeline.",
+            "url": "For example http://livetalking.local:8010. Every viewer of LiveTalking hears this assistant.",
+            "enabled": "When off, the assistant still speaks, but nothing is sent to the avatar."
+          }
+        }
+      },
+      "error": {
+        "invalid_url": "Enter an address starting with http:// or https://, without a user name, password or query.",
+        "engine_is_avatar": "Choose a real engine, not an avatar."
+      }
+    }
   }
 }

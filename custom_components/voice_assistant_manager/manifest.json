@@ -6,7 +6,8 @@
     "assist_satellite",
     "calendar",
     "frontend",
-    "script"
+    "script",
+    "tts"
   ],
   "codeowners": [
     "@rodavrow"

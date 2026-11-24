@@ -4,12 +4,19 @@
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigSubentryFlow,
+    OptionsFlow,
+)
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
 from .announce import safe_toolless_agent
+from .avatar import SUBENTRY_TYPE as AVATAR
+from .avatar_flow import AvatarSubentryFlow
 from .calendar_watch import calendar_rows
 from .calendars import (
     DAY_BEFORE,
@@ -580,6 +587,13 @@ class PersonaRouterFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         return PersonaRouterOptionsFlow()
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        return {AVATAR: AvatarSubentryFlow}
 
     async def async_step_user(self, user_input=None):
         if user_input is not None:
