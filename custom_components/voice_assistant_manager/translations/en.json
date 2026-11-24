@@ -194,12 +194,14 @@
             "data": {
               "rule": "Shared history rule",
               "wait_seconds": "Wait for the voice match",
-              "no_helper_role": "A device without speaker recognition is"
+              "no_helper_role": "A device without speaker recognition is",
+              "avatar_connection": "Avatar connection"
             },
             "data_description": {
               "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
               "wait_seconds": "How long to wait while the helper says pending. If no match arrives in time, the voice counts as unknown.",
-              "no_helper_role": "Used for a request that neither a voice_speaker helper nor a Home Assistant user decides: a typed request when no user is chosen under Person 1 or Person 2, or a request from a device that has no helper and no user."
+              "no_helper_role": "Used for a request that neither a voice_speaker helper nor a Home Assistant user decides: a typed request when no user is chosen under Person 1 or Person 2, or a request from a device that has no helper and no user.",
+              "avatar_connection": "For satellites in avatar mode. Connect when woken: the satellite connects to LiveTalking when it wakes, about a second before the avatar shows. Always connected: the avatar is there at once, and each satellite keeps a LiveTalking session open. Recommended for the Chat show."
             }
           }
         }
@@ -762,13 +764,15 @@
             "name": "Name",
             "engine": "Text-to-speech engine",
             "url": "LiveTalking address",
-            "enabled": "Send speech to the avatar"
+            "enabled": "Avatar on",
+            "avatar_id": "LiveTalking avatar"
           },
           "data_description": {
             "name": "The name of the new text-to-speech entity, for example Ada avatar.",
             "engine": "The engine that makes the speech. Change it here to switch engines; then choose the voice again in the pipeline.",
             "url": "For example http://livetalking.local:8010. Every viewer of LiveTalking hears this assistant.",
-            "enabled": "When off, the assistant still speaks, but nothing is sent to the avatar."
+            "enabled": "When on, satellites whose wake word uses this assistant show the avatar, if their firmware has avatar mode, and the LiveTalking page gets a copy. When off, everything goes back to normal.",
+            "avatar_id": "The avatar a satellite in avatar mode asks LiveTalking for, for example ada. Leave empty for the server's default."
           }
         },
         "reconfigure": {
@@ -778,20 +782,23 @@
             "name": "Name",
             "engine": "Text-to-speech engine",
             "url": "LiveTalking address",
-            "enabled": "Send speech to the avatar"
+            "enabled": "Avatar on",
+            "avatar_id": "LiveTalking avatar"
           },
           "data_description": {
             "name": "The name of the new text-to-speech entity, for example Ada avatar.",
             "engine": "The engine that makes the speech. Change it here to switch engines; then choose the voice again in the pipeline.",
             "url": "For example http://livetalking.local:8010. Every viewer of LiveTalking hears this assistant.",
-            "enabled": "When off, the assistant still speaks, but nothing is sent to the avatar."
+            "enabled": "When on, satellites whose wake word uses this assistant show the avatar, if their firmware has avatar mode, and the LiveTalking page gets a copy. When off, everything goes back to normal.",
+            "avatar_id": "The avatar a satellite in avatar mode asks LiveTalking for, for example ada. Leave empty for the server's default."
           }
         }
       },
       "error": {
         "invalid_url": "Enter an address starting with http:// or https://, without a user name, password or query.",
         "engine_is_avatar": "Choose a real engine, not an avatar.",
-        "engine_missing": "That text-to-speech entity does not exist."
+        "engine_missing": "That text-to-speech entity does not exist.",
+        "invalid_avatar_id": "Use letters, digits, _ and - only, at most 64 characters."
       }
     }
   }

@@ -14,8 +14,8 @@ from custom_components.voice_assistant_manager.const import DOMAIN
 
 from .test_options_flow import (
     EXISTING_OPTIONS,
+    EXPECTED_SETTINGS,
     MAIN_AGENT,
-    NEW_DEFAULTS,
     open_step,
     picker_labels,
     shown_values,
@@ -86,7 +86,7 @@ async def test_saving_the_settings_keeps_the_calendars(hass: HomeAssistant):
     result = await configure(hass, form, shown_values(form["data_schema"]))
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {**EXISTING_OPTIONS, **NEW_DEFAULTS, "calendar_rows": [WASTE_ROW]}
+    assert entry.options == {**EXPECTED_SETTINGS, "calendar_rows": [WASTE_ROW]}
 
 
 async def test_saving_the_settings_of_a_router_without_calendars_adds_no_list(hass: HomeAssistant):

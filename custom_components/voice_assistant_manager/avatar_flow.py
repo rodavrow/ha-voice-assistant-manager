@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -18,10 +19,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
-from .avatar import CONF_ENABLED, CONF_ENGINE, CONF_URL, normalize_url
+from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_ENGINE, CONF_URL, normalize_url
 from .const import DOMAIN
 
 CONF_NAME = "name"
+# A LiveTalking avatar id, as satellites accept it (avatar_devices.py).
+_AVATAR_ID = re.compile(r"^[A-Za-z0-9_-]{0,64}$")
 
 
 def _is_avatar(hass: HomeAssistant, entity_id: str) -> bool:
@@ -46,11 +49,15 @@ def validate_avatar(
         errors[CONF_ENGINE] = "engine_is_avatar"
     elif hass.states.get(engine) is None:
         errors[CONF_ENGINE] = "engine_missing"
+    avatar_id = str(values.get(CONF_AVATAR_ID) or "").strip()
+    if not _AVATAR_ID.match(avatar_id):
+        errors[CONF_AVATAR_ID] = "invalid_avatar_id"
     title = str(values.get(CONF_NAME) or "").strip() or f"{assistant_title} avatar"
     data = {
         CONF_ENGINE: engine,
         CONF_URL: url,
         CONF_ENABLED: bool(values.get(CONF_ENABLED, True)),
+        CONF_AVATAR_ID: avatar_id,
     }
     return title, data, errors
 
@@ -65,6 +72,7 @@ def _schema() -> vol.Schema:
             vol.Required(CONF_URL): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.URL)
             ),
+            vol.Optional(CONF_AVATAR_ID, default=""): selector.TextSelector(),
             vol.Required(CONF_ENABLED, default=True): selector.BooleanSelector(),
         }
     )

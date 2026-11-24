@@ -9,6 +9,7 @@ import wave
 
 import aiohttp
 import pytest
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from custom_components.voice_assistant_manager import avatar
@@ -265,7 +266,7 @@ async def test_clips_reach_livetalking_in_the_order_they_were_made(hass, monkeyp
     release_first = asyncio.Event()
     played: list[bytes] = []
 
-    async def play(self, extension, audio):
+    async def play(self, extension, audio, skip=frozenset()):
         if audio == MP3:
             first_started.set()
             await release_first.wait()
@@ -284,3 +285,21 @@ async def test_clips_reach_livetalking_in_the_order_they_were_made(hass, monkeyp
     await asyncio.gather(first, second)
 
     assert played == [MP3, later]
+
+
+async def test_sessions_of_satellites_are_skipped(hass, aioclient_mock):
+    """A satellite in avatar mode sends its own speech to its session: never twice."""
+    aioclient_mock.get(SESSIONS, json=sessions_reply("console", "kitchen-device"))
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    session = er.async_get(hass).async_get_or_create(
+        "sensor", "esphome", "aa:bb:cc:dd:ee:ff-sensor-avatar_session_1"
+    )
+    hass.states.async_set(session.entity_id, "kitchen-device")
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+
+    await sender.async_send(BASE, "mp3", MP3, {})
+
+    sent_to = [data for method, _url, data, _h in aioclient_mock.mock_calls if method == "POST"]
+    assert sent_to[0] == {"sessionid": "console"}
+    assert len(sent_to) == 2

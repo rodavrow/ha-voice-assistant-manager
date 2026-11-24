@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 import wave
 from collections.abc import Mapping
 from typing import Any
@@ -19,6 +20,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +29,8 @@ SUBENTRY_TYPE = "avatar"
 CONF_ENGINE = "engine"
 CONF_URL = "url"
 CONF_ENABLED = "enabled"
+# The LiveTalking avatar a device asks for; empty for the server's default.
+CONF_AVATAR_ID = "avatar_id"
 
 # A clip bigger than this is not copied or sent: a few minutes of speech at most.
 MAX_CLIP_BYTES = 10 * 1024 * 1024
@@ -36,6 +40,32 @@ CONNECT_TIMEOUT = 2.0
 TOTAL_TIMEOUT = 10.0
 
 _RAW_EXTENSIONS = frozenset({"pcm", "raw"})
+# The session a satellite in avatar mode holds (avatar_devices.py): it sends its own speech.
+_SESSION_OBJECT = re.compile(r"^avatar_session_\d+$")
+
+
+def object_ids(unique_id: str | None) -> frozenset[str]:
+    """The parts of an ESPHome unique_id that can be the device's object id.
+
+    Home Assistant builds it as <mac>-<platform>-<object_id>, possibly with "@<device>"
+    after the object id for an entity of a sub-device. Entity ids are not used: they come
+    from names and change when the user renames something.
+    """
+    return frozenset(part.split("@", 1)[0] for part in (unique_id or "").split("-"))
+
+
+def device_sessions(hass: HomeAssistant) -> frozenset[str]:
+    """The LiveTalking sessions satellites hold themselves, which a copy must skip."""
+    sessions = set()
+    for entity in er.async_get(hass).entities.values():
+        if entity.domain != "sensor":
+            continue
+        if not any(_SESSION_OBJECT.match(part) for part in object_ids(entity.unique_id)):
+            continue
+        state = hass.states.get(entity.entity_id)
+        if state is not None and state.state not in ("", "unknown", "unavailable"):
+            sessions.add(state.state)
+    return frozenset(sessions)
 
 
 class LiveTalkingError(Exception):
@@ -119,9 +149,14 @@ class LiveTalkingClient:
         self._base_url = base_url
         self._timeout = aiohttp.ClientTimeout(total=TOTAL_TIMEOUT, connect=CONNECT_TIMEOUT)
 
-    async def async_play(self, extension: str, audio: bytes) -> int:
-        """Stop what each viewer's avatar says and play the clip. Returns the viewer count."""
-        session_ids = await self._async_sessions()
+    async def async_play(
+        self, extension: str, audio: bytes, skip: frozenset[str] = frozenset()
+    ) -> int:
+        """Stop what each viewer's avatar says and play the clip. Returns the viewer count.
+
+        Sessions in `skip` are left alone.
+        """
+        session_ids = await self._async_sessions(skip)
         for session_id in session_ids:
             await self._async_post("/interrupt_talk", json={"sessionid": session_id})
             form = aiohttp.FormData()
@@ -130,7 +165,7 @@ class LiveTalkingClient:
             await self._async_post("/humanaudio", data=form)
         return len(session_ids)
 
-    async def _async_sessions(self) -> list[str]:
+    async def _async_sessions(self, skip: frozenset[str]) -> list[str]:
         async with self._session.get(
             f"{self._base_url}/api/admin/sessions", timeout=self._timeout
         ) as response:
@@ -139,7 +174,7 @@ class LiveTalkingClient:
                 payload = await response.json(content_type=None)
             except ValueError as err:
                 raise LiveTalkingError("sessions reply is not JSON") from err
-        return _session_ids(payload)[:MAX_SESSIONS]
+        return [sid for sid in _session_ids(payload) if sid not in skip][:MAX_SESSIONS]
 
     async def _async_post(self, path: str, **kwargs: Any) -> None:
         async with self._session.post(
@@ -197,7 +232,7 @@ class AvatarSender:
         async with self._turn:
             try:
                 async with asyncio.timeout(TOTAL_TIMEOUT):
-                    played = await client.async_play(*clip)
+                    played = await client.async_play(*clip, device_sessions(self._hass))
             except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
                 self._log_failure(err)
                 return
