@@ -25,7 +25,7 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.translation import async_get_translations
 
 from .announce import writer_agent
-from .avatar import CONF_ENABLED, CONF_ENGINE, CONF_URL
+from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_ENGINE, CONF_URL
 from .avatar import SUBENTRY_TYPE as AVATAR
 from .avatar_flow import validate_avatar
 from .calendar_watch import calendar_rows, find_watcher
@@ -198,6 +198,7 @@ def _avatars(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str, Any]]:
             "engine": sub.data.get(CONF_ENGINE),
             "url": sub.data.get(CONF_URL),
             "enabled": bool(sub.data.get(CONF_ENABLED)),
+            "avatar_id": str(sub.data.get(CONF_AVATAR_ID) or ""),
             "entity_id": registry.async_get_entity_id("tts", DOMAIN, sub_id),
         }
         for sub_id, sub in entry.subentries.items()
@@ -837,6 +838,7 @@ _AVATAR_FORM = vol.Schema(
         vol.Required("engine"): str,
         vol.Required("url"): str,
         vol.Optional("enabled", default=True): bool,
+        vol.Optional("avatar_id", default=""): str,
     }
 )
 

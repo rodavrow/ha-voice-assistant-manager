@@ -35,6 +35,7 @@ async def test_the_page_lists_an_assistants_avatars(hass, page, engines, sent):
             "engine": "tts.cloud_voice",
             "url": BASE,
             "enabled": True,
+            "avatar_id": "",
             "entity_id": avatar_id,
         }
     ]
@@ -59,6 +60,7 @@ async def test_adding_an_avatar_on_the_page_creates_its_entity(hass, page, engin
         avatar.CONF_ENGINE: "tts.cloud_voice",
         avatar.CONF_URL: BASE,
         avatar.CONF_ENABLED: True,
+        avatar.CONF_AVATAR_ID: "",
     }
     assert [row["name"] for row in result["router"]["avatars"]] == ["Ada avatar"]
     assert er.async_get(hass).async_get_entity_id("tts", DOMAIN, subentry.subentry_id)
@@ -167,3 +169,59 @@ async def test_someone_who_is_not_an_admin_cannot_save_an_avatar(
 
     assert answer["error"]["code"] == "unauthorized"
     assert entry.subentries == {}
+
+
+async def test_an_avatar_id_is_saved_and_listed(hass, page, engines, sent):
+    entry = await add_router(hass)
+
+    result = await page.ok(
+        "save_avatar", entry_id=entry.entry_id, avatar={**FORM, "avatar_id": "ada_v2"}
+    )
+
+    (subentry,) = entry.subentries.values()
+    assert subentry.data[avatar.CONF_AVATAR_ID] == "ada_v2"
+    assert result["router"]["avatars"][0]["avatar_id"] == "ada_v2"
+
+
+async def test_an_avatar_id_with_odd_characters_is_refused(hass, page, engines):
+    entry = await add_router(hass)
+
+    result = await page.ok(
+        "save_avatar", entry_id=entry.entry_id, avatar={**FORM, "avatar_id": "../ada"}
+    )
+
+    assert result["ok"] is False
+    assert result["errors"]["avatar_id"].startswith("Use letters, digits")
+    assert entry.subentries == {}
+
+
+async def test_the_avatar_session_lifetime_is_saved_under_advanced(hass, page):
+    entry = await add_router(hass)
+    settings = (await page.router(entry))["settings"]
+    settings["advanced"] = {**settings["advanced"], "avatar_connection": "always"}
+
+    result = await page.ok("save_settings", entry_id=entry.entry_id, settings=settings)
+
+    assert result["ok"] is True
+    assert entry.options["advanced"]["avatar_connection"] == "always"
+
+
+async def test_the_avatar_session_lifetime_defaults_to_connect_when_woken(hass, page):
+    entry = await add_router(hass)
+    settings = (await page.router(entry))["settings"]
+    settings["advanced"].pop("avatar_connection", None)
+
+    await page.ok("save_settings", entry_id=entry.entry_id, settings=settings)
+
+    assert entry.options["advanced"]["avatar_connection"] == "on_wake"
+
+
+async def test_an_unknown_avatar_session_lifetime_is_refused(hass, page):
+    entry = await add_router(hass)
+    settings = (await page.router(entry))["settings"]
+    settings["advanced"] = {**settings["advanced"], "avatar_connection": "sometimes"}
+
+    result = await page.ok("save_settings", entry_id=entry.entry_id, settings=settings)
+
+    assert result["ok"] is False
+    assert "avatar_connection" not in entry.options["advanced"]

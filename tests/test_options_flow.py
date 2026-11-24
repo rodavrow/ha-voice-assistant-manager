@@ -56,6 +56,12 @@ EXISTING_OPTIONS = {
     },
     "advanced": {"rule": "Names are labels.", "wait_seconds": 2, "no_helper_role": "stranger"},
 }
+# What the form shows and saves: the existing settings, defaults for the new ones.
+EXPECTED_SETTINGS = {
+    **EXISTING_OPTIONS,
+    **NEW_DEFAULTS,
+    "advanced": {**EXISTING_OPTIONS["advanced"], "avatar_connection": "on_wake"},
+}
 
 
 @pytest.fixture
@@ -124,7 +130,7 @@ async def test_settings_form_shows_existing_values_and_memory_defaults(hass, ent
     form = await open_step(hass, entry, "settings")
 
     assert form["type"] is FlowResultType.FORM
-    assert shown_values(form["data_schema"]) == {**EXISTING_OPTIONS, **NEW_DEFAULTS}
+    assert shown_values(form["data_schema"]) == EXPECTED_SETTINGS
 
 
 async def test_saving_untouched_settings_keeps_options_and_adds_memory_defaults(hass, entry):
@@ -135,7 +141,7 @@ async def test_saving_untouched_settings_keeps_options_and_adds_memory_defaults(
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options == {**EXISTING_OPTIONS, **NEW_DEFAULTS}
+    assert entry.options == EXPECTED_SETTINGS
 
 
 async def test_memory_section_comes_right_after_built_in_commands(hass, entry):

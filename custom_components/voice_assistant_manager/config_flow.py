@@ -194,7 +194,12 @@ def current_settings(hass, entry):
             "persona": DEFAULT_NEAR_PERSONA,
             "fixed_replies": DEFAULT_NEAR_LINES,
         },
-        "advanced": {"rule": str(texts.get("rule") or ""), "wait_seconds": 3, "no_helper_role": "owner"},
+        "advanced": {
+            "rule": str(texts.get("rule") or ""),
+            "wait_seconds": 3,
+            "no_helper_role": "owner",
+            "avatar_connection": "on_wake",
+        },
     }
 
 
@@ -345,6 +350,12 @@ def settings_schema(current, users):
                                 ("owner", "Person 1"),
                                 ("wife", "Person 2"),
                                 ("stranger", "An unknown voice"),
+                            ]
+                        ),
+                        _fixed("avatar_connection", advanced, "on_wake"): _choice(
+                            [
+                                ("on_wake", "Connect when woken"),
+                                ("always", "Always connected"),
                             ]
                         ),
                     }

@@ -13,6 +13,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   LiveTalking lip-sync server. The satellite's speech is passed on unchanged and made only
   once. The engine, address and an on/off switch can be changed at any time without a
   restart. Assistants without an avatar are not changed. See [Avatar](docs/avatar.md).
+- **Satellites in avatar mode.** On satellite firmware with avatar mode, a satellite whose
+  wake word uses an assistant with an avatar that is on shows the avatar's LiveTalking
+  stream instead of its animations, and speaks through it, lip-synced. Voice Assistant
+  Manager switches this on and off with the avatar, and sets the LiveTalking avatar and
+  the new **Avatar connection** setting under Advanced (connect when woken, or always
+  connected). The Avatar card reminds you to point **Voice for chats** at the avatar while it is
+  on, and back at the normal engine once it is off.
 - **Satellites that can show which assistant is talking now do.** On a satellite whose
   firmware offers a select ending in `_next_announcement_assistant`, each Chat show line and each line from `compose_announcement` shows the assistant that speaks it.
   The new `prepare_announcement` action does the same for any other announcement, such as

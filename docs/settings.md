@@ -107,6 +107,7 @@ During a [chat show](chat-show.md#joining-in-and-stopping), and for a short whil
 | Shared history rule | Added to the main agent's prompt after the persona. Use it to explain the name labels. |
 | Wait for the voice match | How long to wait while the helper says `pending`. If no match arrives in time, the voice counts as unknown. |
 | A device without speaker recognition is | Who to assume when nothing else decides: a request with no helper and no user (an automation, say), a VoIP phone call, or a typed request when no user is chosen under Person 1 or Person 2. |
+| Avatar connection | For satellites in [avatar mode](avatar.md#satellites-in-avatar-mode). **Connect when woken** (default): the satellite connects to LiveTalking when it wakes, about a second before the avatar shows. **Always connected**: the avatar is there at once, and each satellite keeps a LiveTalking session open. |
 
 ## What the main agent is told
 

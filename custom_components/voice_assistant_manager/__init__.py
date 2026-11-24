@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
+from . import avatar_devices
 from .announce import async_register_services
 from .avatar import SUBENTRY_TYPE as AVATAR
 from .calendar_watch import (
@@ -36,6 +37,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async_register_commands(hass)
     async_register_mine_commands(hass)
     async_register_favorites_api(hass)
+    avatar_devices.async_setup(hass)
     return True
 
 
@@ -49,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
     await async_start_watcher(hass, entry)
+    avatar_devices.async_request(hass)
     return True
 
 
@@ -86,6 +89,8 @@ async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     loaded = hass.data.get(DOMAIN, {}).get(_LOADED, {}).get(entry.entry_id)
     if loaded is not None and loaded[1] != _avatars(entry):
         hass.config_entries.async_schedule_reload(entry.entry_id)
+    # Satellites follow the avatar's settings and switch, and the session lifetime.
+    avatar_devices.async_request(hass)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

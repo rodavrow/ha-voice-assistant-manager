@@ -392,6 +392,7 @@ async def test_adding_an_avatar_creates_its_tts_entity(hass, engines, sent):
         avatar.CONF_ENGINE: "tts.cloud_voice",
         avatar.CONF_URL: BASE,
         avatar.CONF_ENABLED: True,
+        avatar.CONF_AVATAR_ID: "",
     }
     assert hass.states.get("tts.ada_avatar") is not None
 
