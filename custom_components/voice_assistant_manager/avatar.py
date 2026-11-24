@@ -41,7 +41,7 @@ TOTAL_TIMEOUT = 10.0
 
 _RAW_EXTENSIONS = frozenset({"pcm", "raw"})
 # The session a satellite in avatar mode holds (avatar_devices.py): it sends its own speech.
-SESSION_ENTITY = ("text_sensor", "Avatar session")
+SESSION_NAME = "Avatar session"
 
 
 def esphome_entity(unique_id: str | None) -> tuple[str, str] | None:
@@ -64,7 +64,8 @@ def device_sessions(hass: HomeAssistant) -> frozenset[str]:
     for entity in er.async_get(hass).entities.values():
         if entity.domain != "sensor":
             continue
-        if esphome_entity(entity.unique_id) != SESSION_ENTITY:
+        named_as = esphome_entity(entity.unique_id)
+        if named_as is None or named_as[1] != SESSION_NAME:
             continue
         state = hass.states.get(entity.entity_id)
         if state is not None and state.state not in ("", "unknown", "unavailable"):

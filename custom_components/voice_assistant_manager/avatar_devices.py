@@ -62,7 +62,9 @@ _WAKE_SELECT = re.compile(r"-pipeline(?:_(\d+))?$")
 _BUSY = (ConfigEntryState.SETUP_IN_PROGRESS, ConfigEntryState.UNLOAD_IN_PROGRESS)
 # The sub-device of a slot: its own name (not the one the user gave it) ends in this.
 _SLOT_DEVICE = re.compile(r"\bassistant\s+(\d+)$", re.IGNORECASE)
-# kind -> (ESPHome type, entity name) as the firmware names them; never translated.
+# kind -> (Home Assistant domain, entity name as the firmware names it; never translated).
+# The ESPHome type in the unique_id is not compared: it differs from the domain (a text
+# entity is "text_info", a text sensor "text_sensor").
 ENTITY_NAMES = {
     "mode": ("switch", "Avatar mode"),
     "url": ("text", "Avatar URL"),
@@ -171,8 +173,13 @@ def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntitie
         return None
     named: dict[str, str] = {}
     for entity in er.async_entries_for_device(entities, sub_device):
+        named_as = esphome_entity(entity.unique_id)
         kind = next(
-            (k for k, name in ENTITY_NAMES.items() if esphome_entity(entity.unique_id) == name),
+            (
+                k
+                for k, (domain, name) in ENTITY_NAMES.items()
+                if named_as is not None and entity.domain == domain and named_as[1] == name
+            ),
             None,
         )
         if kind is not None:
