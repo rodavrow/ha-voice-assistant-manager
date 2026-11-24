@@ -38,7 +38,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from . import announcement_look
+from . import announcement_look, avatar_hold
 from .announce import writer_agent
 from .const import DOMAIN
 from .memory import clean_text
@@ -821,6 +821,11 @@ class ChatShowManager:
             self._end(chat, "chat_failed")
         finally:
             self._grace[chat.speaker] = dt_util.utcnow() + timedelta(seconds=REPLY_GRACE)
+            # A task of its own: this one may be cancelled, and may not wait for a device.
+            self.hass.async_create_background_task(
+                avatar_hold.async_set(self.hass, chat.speaker, False),
+                name=f"{DOMAIN} avatar hold off",
+            )
             for unsubscribe in chat.unsubscribe:
                 unsubscribe()
             chat.unsubscribe = []
@@ -1023,6 +1028,9 @@ class ChatShowManager:
                 return ""
             if not await self._async_wait_idle(chat.speaker):
                 return self._not_idle_reason(chat.speaker)
+            # Before every line, not only the first: the device lets go of the hold by
+            # itself when the next line is long in coming.
+            await avatar_hold.async_set(self.hass, chat.speaker, True)
             # Just before the line: the device's choice holds for one announcement only.
             await announcement_look.async_show_assistant(
                 self.hass, chat.speaker, entry, self._chat_pair(chat)
