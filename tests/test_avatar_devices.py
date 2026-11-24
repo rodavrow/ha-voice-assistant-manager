@@ -541,3 +541,38 @@ async def test_the_main_devices_same_named_switch_is_never_used(hass, engines, s
         await reconcile(hass)
 
     assert not any("switch.kitchen_avatar_mode " in call for call in device.calls)
+
+
+# What the check did, for the log
+
+
+def debug_lines(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == avatar_devices.__name__ and record.levelno == logging.DEBUG
+    ]
+
+
+async def test_a_slot_left_alone_is_logged_with_the_reason(hass, engines, sent, device, caplog):
+    await add_router(hass)
+    caplog.set_level(logging.DEBUG, logger=avatar_devices.__name__)
+
+    with slots(None, None):
+        await reconcile(hass)
+
+    lines = debug_lines(caplog)
+    assert any(SATELLITE in line and "slot 1" in line and "no assistant" in line for line in lines)
+
+
+async def test_a_satellite_without_avatar_entities_is_logged(hass, engines, sent, caplog):
+    add_satellite_device(hass, avatar_entities=False)
+    Device(hass)
+    entry = await add_router(hass)
+    caplog.set_level(logging.DEBUG, logger=avatar_devices.__name__)
+
+    with slots(entry, None):
+        await reconcile(hass)
+
+    lines = debug_lines(caplog)
+    assert any(SATELLITE in line and "no avatar entities" in line for line in lines)

@@ -128,6 +128,8 @@ def satellite_slots(hass: HomeAssistant) -> dict[str, dict[int, str | None]]:
     slots: dict[str, dict[int, str | None]] = {}
     for entry in hass.config_entries.async_loaded_entries(DOMAIN):
         for satellite in find_satellites(hass, entry):
+            if not satellite["wake_words"]:
+                _LOGGER.debug("Avatar check: %s has no known wake words", satellite["entity_id"])
             for word in satellite["wake_words"]:
                 select = registry.async_get(word["select"])
                 match = _WAKE_SELECT.search(select.unique_id) if select else None
@@ -199,23 +201,43 @@ class _Owned:
 async def async_reconcile(hass: HomeAssistant) -> None:
     """Bring every satellite slot in line with its assistant's avatar. Never raises."""
     if any(entry.state in _BUSY for entry in hass.config_entries.async_entries(DOMAIN)):
+        _LOGGER.debug("Avatar check skipped: an assistant is setting up or unloading")
         return  # The next request or the minute check catches up.
     data = hass.data.setdefault(DOMAIN, {})
     owned: _Owned = data.setdefault(_OWNED, _Owned(hass))
     await owned.async_load()
     registry = er.async_get(hass)
     seen: set[str] = set()
-    for satellite, assistants in satellite_slots(hass).items():
+    found = satellite_slots(hass)
+    if not found:
+        _LOGGER.debug("Avatar check: no satellite with known wake words")
+    for satellite, assistants in found.items():
         for slot, entry_id in assistants.items():
             entities = slot_entities(hass, satellite, slot)
             switch = registry.async_get(entities.switch) if entities else None
             if entities is None or switch is None:
+                _LOGGER.debug(
+                    "Avatar check: %s slot %d has no avatar entities (sub-device "
+                    "'… assistant %d' with 'Avatar mode' and 'Avatar URL')",
+                    satellite, slot, slot,
+                )
                 continue
             seen.add(switch.id)
             entry = hass.config_entries.async_get_entry(entry_id) if entry_id else None
             if entry is None and switch.id not in owned.ids:
+                _LOGGER.debug(
+                    "Avatar check: %s slot %d uses no assistant of this integration "
+                    "(its wake word's pipeline has another conversation agent); left alone",
+                    satellite, slot,
+                )
                 continue  # Not ours: avatar mode set by hand for another assistant stays.
-            _remember(owned, switch.id, await _async_apply(hass, entities, wish_for(entry)))
+            wish = wish_for(entry)
+            _LOGGER.debug(
+                "Avatar check: %s slot %d uses %s: avatar mode %s",
+                satellite, slot, entry.title if entry else "no assistant",
+                "on" if wish.on else "off",
+            )
+            _remember(owned, switch.id, await _async_apply(hass, entities, wish))
     # Switched on by us, but no slot uses one of our assistants any more (removed, say).
     # Only when wake words can be known: otherwise every slot would look unused.
     orphans = owned.ids - seen if "assist_pipeline" in hass.config.components else set()
