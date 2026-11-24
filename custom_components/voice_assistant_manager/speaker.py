@@ -3,6 +3,8 @@
 """Decide who is speaking. Pure logic with no Home Assistant imports, so it can be tested alone."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Literal
 
 Role = Literal["owner", "wife", "stranger"]
@@ -59,3 +61,47 @@ def resolve_speaker(
         return "stranger", False
 
     return fallback, False
+
+
+# A follow-up in the same voice conversation, on the same satellite, within this long of
+# the previous turn keeps that turn's person unless a new voice match says otherwise.
+FOLLOW_UP_WINDOW = timedelta(seconds=60)
+# Helper values that are a voice match's verdict, unlike "pending".
+_VERDICTS = ("owner", "wife", "partner", "stranger")
+
+
+@dataclass(frozen=True)
+class Remembered:
+    """Who spoke in a voice conversation: a person, never an unknown voice."""
+
+    role: Role  # owner or wife
+    device_id: str
+    decided_by: datetime | None  # when the helper got the voice match that decided it
+    at: datetime  # when that person's last turn was resolved
+
+
+def follow_up_role(
+    remembered: Remembered | None,
+    device_id: str | None,
+    helper_state: str | None,
+    helper_changed: datetime | None,
+    now: datetime,
+) -> Role | None:
+    """The person a follow-up keeps, or None when this turn needs its own voice match.
+
+    A follow-up carries no wake word, so a satellite often makes no new voice match for it,
+    and whether its tracking automation still holds the last speaker depends on the
+    satellite's timing. So the person of the conversation's previous turn is kept unless
+    a voice match arrived since then: another person switches, an unknown voice refuses.
+    Only the same satellite, and only within FOLLOW_UP_WINDOW of the previous turn.
+    """
+    if remembered is None or device_id != remembered.device_id:
+        return None
+    if now - remembered.at > FOLLOW_UP_WINDOW:
+        return None
+    new_match = (
+        helper_state in _VERDICTS
+        and helper_changed is not None
+        and (remembered.decided_by is None or helper_changed > remembered.decided_by)
+    )
+    return None if new_match else remembered.role
