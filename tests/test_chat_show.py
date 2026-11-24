@@ -58,6 +58,31 @@ ADA_LINE = "Oh, Jeeves, you say that every single day."
 FAST = ChatLimits(max_lines=4, pause=0)
 SAT_ANNOUNCE = 1  # AssistSatelliteEntityFeature.ANNOUNCE
 SAT_START_CONVERSATION = 2  # AssistSatelliteEntityFeature.START_CONVERSATION
+GET_AUDIO = "homeassistant.components.tts.async_get_media_source_audio"
+
+
+class FakeAudio:
+    """Stands in for Home Assistant making a chat voice's audio; records each request."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+        self.result: tuple[str, bytes] | BaseException | None = ("mp3", b"audio")
+
+    async def __call__(self, hass: HomeAssistant, media_source_id: str) -> tuple[str, bytes]:
+        self.asked.append(media_source_id)
+        if self.result is None:
+            await asyncio.Event().wait()  # never answers
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+@pytest.fixture(autouse=True)
+def chat_audio():
+    """Every chat voice makes audio unless a test says otherwise."""
+    audio = FakeAudio()
+    with patch(GET_AUDIO, audio):
+        yield audio
 SAT_BOTH = SAT_ANNOUNCE | SAT_START_CONVERSATION
 # Like an ESPHome satellite: start_conversation returns when the line has played and the
 # satellite is idle; it opens its microphone a moment later and is idle again after that.
@@ -1514,3 +1539,85 @@ async def test_two_assistants_on_no_wake_word_still_show_as_two_characters(hass,
         "select Assistant 2",
         "announce",
     ] * 2
+
+
+# A chat voice that makes no audio (a voice the engine does not have, a provider that is down).
+
+
+def with_chat_voice(hass, show) -> None:
+    hass.config_entries.async_update_entry(
+        show.jeeves,
+        options=router_options(JEEVES_WRITER, tts_engine="tts.butler", voice="deep"),
+    )
+
+
+async def test_a_chat_voice_is_made_before_the_line_is_announced(hass, show, chat_audio):
+    with_chat_voice(hass, show)
+
+    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=1, pause=0))
+
+    assert chat_audio.asked == [show.speakers.announced[0]["media_id"]]
+
+
+async def test_regression_empty_chat_voice_audio_falls_back_to_the_message(
+    hass, show, chat_audio, caplog
+):
+    with_chat_voice(hass, show)
+    chat_audio.result = ("mp3", b"")
+
+    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=1, pause=0))
+
+    (announced,) = show.speakers.announced
+    assert (announced["message"], "media_id" in announced) == (JEEVES_LINE, False)
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any("tts.butler" in r.getMessage() and "deep" in r.getMessage() for r in warnings)
+
+
+async def test_a_chat_voice_that_fails_to_make_audio_falls_back_to_the_message(
+    hass, show, chat_audio
+):
+    with_chat_voice(hass, show)
+    chat_audio.result = RuntimeError("status_code: 400, invalid voice")
+
+    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=1, pause=0))
+
+    assert "media_id" not in show.speakers.announced[0]
+    assert show.manager.state()["ended"] == "chat_done"
+
+
+async def test_a_chat_voice_that_never_answers_falls_back_to_the_message(hass, show, chat_audio):
+    with_chat_voice(hass, show)
+    chat_audio.result = None
+
+    with (
+        patch("homeassistant.components.tts.generate_media_source_id", fake_tts),
+        patch.object(chat_show, "CHAT_VOICE_TIMEOUT", 0.01),
+    ):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=1, pause=0))
+
+    assert "media_id" not in show.speakers.announced[0]
+
+
+async def test_the_chat_voice_warning_does_not_repeat_the_line(hass, show, chat_audio, caplog):
+    with_chat_voice(hass, show)
+    chat_audio.result = ("mp3", b"")
+
+    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=1, pause=0))
+
+    assert JEEVES_LINE not in caplog.text
+
+
+async def test_a_player_falls_back_to_the_default_voice_when_the_chat_voice_is_empty(
+    hass, show, player, chat_audio
+):
+    with_chat_voice(hass, show)
+    chat_audio.result = ("mp3", b"")
+
+    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+        await run_chat(hass, show, speaker=PLAYER, limits=ChatLimits(max_lines=1, pause=0))
+
+    assert show.speakers.played[0]["media_content_id"].startswith("media-source://tts/default?")

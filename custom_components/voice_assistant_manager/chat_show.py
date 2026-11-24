@@ -90,6 +90,8 @@ SELF_WAKE_TTL = 20.0
 SELF_WAKE_WARN_AFTER = 3
 PLAYER_PLAYING = "playing"
 TTS_VOICE = "voice"  # tts.ATTR_VOICE
+# How long a chat voice may take to make a line's audio before the line is spoken without.
+CHAT_VOICE_TIMEOUT = 20
 # Not a chat end reason: the conversation could not start, so the line is announced.
 _LISTEN_UNAVAILABLE = "listen_unavailable"
 
@@ -446,6 +448,41 @@ def _tts_media_id(hass: HomeAssistant, line: str, engine: str | None, voice: str
     except HomeAssistantError as err:
         _LOGGER.warning("No chat voice from %s: %s", engine or "the default engine", err)
         return None
+
+
+async def _async_chat_media_id(
+    hass: HomeAssistant, line: str, engine: str, voice: str
+) -> str | None:
+    """A media source id for the line in the chat voice, or None if it makes no audio.
+
+    The audio is made here, before the line is announced: Home Assistant hands a speaker an
+    empty file when an engine fails (a voice it does not have, a provider that is down), and
+    the line would be silent. Home Assistant keeps the audio, so it is made only once.
+    """
+    from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
+
+    media_id = _tts_media_id(hass, line, engine, voice)
+    if media_id is None:
+        return None
+    try:
+        async with asyncio.timeout(CHAT_VOICE_TIMEOUT):
+            _extension, audio = await tts.async_get_media_source_audio(hass, media_id)
+    except TimeoutError:
+        reason = f"no audio within {CHAT_VOICE_TIMEOUT} s"
+    except Exception as err:  # noqa: BLE001 - an engine may raise anything; the line still plays
+        reason = f"{type(err).__name__}, see the text-to-speech error in the log"
+    else:
+        if audio:
+            return media_id
+        reason = "the audio is empty"
+    _LOGGER.warning(
+        "The chat voice %s of %s made no audio (%s), so this line is spoken without it. "
+        "Check the engine and voice under Chat show on the Voice Manager page",
+        voice or "(the engine's default)",
+        engine,
+        reason,
+    )
+    return None
 
 
 def _chat_voice(entry: ConfigEntry) -> tuple[str, str]:
@@ -968,7 +1005,9 @@ class ChatShowManager:
         prompt of whatever the satellite hears next.
         """
         engine, voice = _chat_voice(entry)
-        media_id = _tts_media_id(self.hass, line, engine, voice) if engine else None
+        media_id = (
+            await _async_chat_media_id(self.hass, line, engine, voice) if engine else None
+        )
         service = "start_conversation" if listen else "announce"
         data: dict[str, Any] = {"entity_id": chat.speaker, "preannounce": False}
         if listen:
@@ -1051,7 +1090,9 @@ class ChatShowManager:
 
     async def _async_play(self, chat: _Chat, entry: ConfigEntry, line: str) -> str:
         engine, voice = _chat_voice(entry)
-        media_id = _tts_media_id(self.hass, line, engine, voice) if engine else None
+        media_id = (
+            await _async_chat_media_id(self.hass, line, engine, voice) if engine else None
+        )
         # No chat voice, or one that cannot be made: Home Assistant's default engine.
         media_id = media_id or _tts_media_id(self.hass, line, None, "")
         if media_id is None:
