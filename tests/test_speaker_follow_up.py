@@ -224,14 +224,13 @@ def woke(hass: HomeAssistant, sensor: str) -> None:
     hass.states.async_set(sensor, "hey_ada")
 
 
-async def test_a_reported_follow_up_keeps_the_person_however_late(hass, router, freezer):
+async def test_a_follow_up_with_the_wake_word_unchanged_keeps_the_person(hass, router):
     kitchen = add_satellite(hass)
     sensor = add_wake_sensor(hass, kitchen)
     woke(hass, sensor)
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
 
-    freezer.tick(timedelta(seconds=120))  # a long reply and a slow answer
     match(hass, kitchen, "pending")
 
     assert await speaker(hass, router, voice_turn(kitchen)) == "owner"
@@ -263,8 +262,11 @@ async def test_a_new_wake_word_with_the_other_person_switches(hass, router):
     assert await speaker(hass, router, voice_turn(kitchen)) == "wife"
 
 
-async def test_a_reported_follow_up_does_not_wait_for_a_match_that_never_comes(hass):
-    import time
+async def test_regression_a_repeated_wake_word_still_waits_for_the_match(hass):
+    """Home Assistant drops a text sensor update with an unchanged value, so a second
+    "Hey Ada" does not show in "Last wake word". 0.5.2b3 took that for a follow-up, did not
+    wait, and answered a stranger whose voice match landed a moment later as the person."""
+    import asyncio
 
     from .router_helpers import options_with
 
@@ -274,10 +276,14 @@ async def test_a_reported_follow_up_does_not_wait_for_a_match_that_never_comes(h
     woke(hass, sensor)
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
-    match(hass, kitchen, "pending")
+    match(hass, kitchen, "pending")  # someone woke it again with the same phrase
 
-    started = time.monotonic()
+    async def late_match() -> None:
+        await asyncio.sleep(1.3)
+        match(hass, kitchen, "stranger")
+
+    task = hass.async_create_task(late_match())
     role = await speaker(hass, router, voice_turn(kitchen))
+    await task
 
-    assert role == "owner"
-    assert time.monotonic() - started < 1.0
+    assert role == "stranger"
