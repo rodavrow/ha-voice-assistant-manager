@@ -37,8 +37,9 @@ MAC = "aa:bb:cc:dd:ee:ff"
 # What the satellite firmware calls each avatar entity: (ESPHome type, HA domain, name).
 AVATAR_ENTITIES = {
     "mode": ("switch", "switch", "Avatar mode"),
-    "url": ("text", "text", "Avatar URL"),
-    "id": ("text", "text", "Avatar ID"),
+    # ESPHome's type for a text entity is text_info, as on real satellites.
+    "url": ("text_info", "text", "Avatar URL"),
+    "id": ("text_info", "text", "Avatar ID"),
     "connection": ("select", "select", "Avatar connection"),
 }
 
@@ -604,4 +605,18 @@ async def test_regression_avatar_child_sub_devices_get_avatar_mode(hass, engines
     with slots(entry, None):
         await reconcile(hass)
 
+    assert f"turn_on {assistant_switch(1)} None" in device.calls
+
+
+async def test_regression_avatar_text_entities_are_text_info(hass, engines, sent, device):
+    """Real satellites register "Avatar URL" as <mac>/5/text_info/Avatar URL: the check
+    looked for /text/ and skipped every slot as having no address entity."""
+    entry = await add_router(hass)
+    await add_avatar(hass, entry, "tts.cloud_voice")
+    device.calls.clear()
+
+    with slots(entry, None):
+        await reconcile(hass)
+
+    assert device.calls[0].startswith("set_value text.kitchen_assistant_1_avatar_url ")
     assert f"turn_on {assistant_switch(1)} None" in device.calls
