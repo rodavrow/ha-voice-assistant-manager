@@ -268,10 +268,14 @@ class PersonaRouter(conversation.ConversationEntity):
         """The voice_speaker helper's state on the satellite, or None if it has none.
 
         While the helper says pending it waits for the voice match, until "the match
-        arrives within" seconds after the helper became pending, which is when the
+        arrives within" seconds after pending was last written, which is when the
         satellite started listening. A satellite matches on a fixed stretch of audio after
         the wake word, so the match lands a fixed time after it however long the person
         speaks: after a long request it is already there, and nothing is waited for.
+
+        The last report counts, not the last change: a helper a follow-up left on pending
+        is written pending again at the next wake word, which changes nothing but the
+        report time.
         """
         helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
@@ -285,7 +289,7 @@ class PersonaRouter(conversation.ConversationEntity):
         for _ in range(max(int(within * 10) + 1, 0)):
             if state.state != "pending":
                 break
-            deadline = state.last_changed + timedelta(seconds=within)
+            deadline = state.last_reported + timedelta(seconds=within)
             remaining = (deadline - dt_util.utcnow()).total_seconds()
             if remaining <= 0:
                 break
