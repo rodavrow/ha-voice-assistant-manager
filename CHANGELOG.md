@@ -53,6 +53,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **An avatar's copy only reaches its own face.** The copy of an avatar's speech for
+  LiveTalking viewers went to every session, so with two avatars one assistant could speak
+  with the other's face. With a **LiveTalking avatar** set, it now only goes to sessions
+  showing that avatar; satellites' own sessions are still left out. Each clip logs, at
+  debug level, every session and why it did or did not get the clip.
 - **A main agent that fails no longer ends the turn in silence.** When the main agent
   raises an error (its AI provider is down, say) or answers with an error and no words,
   the assistant says a short line instead: "Sorry, I can't think right now. Please try

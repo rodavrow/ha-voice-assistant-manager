@@ -266,7 +266,7 @@ async def test_clips_reach_livetalking_in_the_order_they_were_made(hass, monkeyp
     release_first = asyncio.Event()
     played: list[bytes] = []
 
-    async def play(self, extension, audio, skip=frozenset()):
+    async def play(self, extension, audio, skip=frozenset(), avatar_id=""):
         if audio == MP3:
             first_started.set()
             await release_first.wait()
@@ -303,3 +303,62 @@ async def test_sessions_of_satellites_are_skipped(hass, aioclient_mock):
     sent_to = [data for method, _url, data, _h in aioclient_mock.mock_calls if method == "POST"]
     assert sent_to[0] == {"sessionid": "console"}
     assert len(sent_to) == 2
+
+
+# Only the same avatar's viewers get the copy
+
+
+def avatar_sessions(*pairs: tuple[str, str]) -> dict:
+    """A sessions reply: (session id, the avatar it shows)."""
+    return {
+        "code": 0,
+        "data": {"sessions": [{"sessionid": s, "avatar_id": a} for s, a in pairs]},
+    }
+
+
+def posted_sessions(aioclient_mock) -> list[str]:
+    return [
+        data["sessionid"]
+        for method, url, data, _h in aioclient_mock.mock_calls
+        if method.lower() == "post" and str(url).endswith("/interrupt_talk")
+    ]
+
+
+async def test_the_copy_only_reaches_viewers_of_the_same_avatar(hass, aioclient_mock):
+    aioclient_mock.get(
+        SESSIONS, json=avatar_sessions(("s1", "ada"), ("o1", "jeeves"), ("s2", "ada"))
+    )
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+
+    await sender.async_send(BASE, "mp3", MP3, {}, avatar_id="ada")
+
+    assert posted_sessions(aioclient_mock) == ["s1", "s2"]
+
+
+async def test_without_an_avatar_id_every_viewer_gets_the_copy(hass, aioclient_mock):
+    aioclient_mock.get(SESSIONS, json=avatar_sessions(("s1", "ada"), ("o1", "jeeves")))
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+
+    await sender.async_send(BASE, "mp3", MP3, {}, avatar_id="")
+
+    assert posted_sessions(aioclient_mock) == ["s1", "o1"]
+
+
+async def test_each_session_is_logged_with_why_it_was_skipped(hass, aioclient_mock, caplog):
+    aioclient_mock.get(SESSIONS, json=avatar_sessions(("own", "ada"), ("o1", "jeeves")))
+    session = er.async_get(hass).async_get_or_create(
+        "sensor", "esphome", "aa:bb:cc:dd:ee:ff/4/text_sensor/Avatar session"
+    )
+    hass.states.async_set(session.entity_id, "own")
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+    caplog.set_level(logging.DEBUG, logger=avatar.__name__)
+
+    await sender.async_send(BASE, "mp3", MP3, {}, avatar_id="ada")
+
+    text = "\n".join(r.getMessage() for r in caplog.records if r.name == avatar.__name__)
+    assert "own" in text and "satellite" in text
+    assert "o1" in text and "jeeves" in text

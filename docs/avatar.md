@@ -72,7 +72,7 @@ While an avatar is on, the **Avatar** card reminds you to choose its entity as t
 
 ## What LiveTalking receives
 
-For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`), leaving out the sessions of satellites in avatar mode. For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
+For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`). It leaves out the sessions of satellites in avatar mode, which send their own speech, and, when the avatar has a **LiveTalking avatar** set, every session showing another avatar, so one assistant never speaks with another's face. For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
 
 - **The audio is sent as the engine made it.** MP3, WAV, FLAC and OGG are recognised from the audio itself and sent unconverted. Raw PCM without a header is wrapped as WAV, but only when the request said its sample rate. Without one it is not sent, and the log says so once.
 - **At most 8 viewers** get a clip, and a clip over 10 MB is not sent.
