@@ -35,7 +35,7 @@ Open the **Assistant** section and look for **Chat show**. Each assistant has tw
 | Setting | What it does |
 | --- | --- |
 | Character for chats | How this assistant behaves in a chat, up to 2000 characters. When empty, **Extra instructions for announcements** is used. When both are empty, the card warns that the assistant will sound plain. |
-| Voice for chats | A text-to-speech engine and, optionally, a voice. When empty, the chat is spoken in the speaker's own voice. |
+| Voice for chats | A text-to-speech engine and, optionally, a voice. When empty, the chat is spoken in the speaker's own voice. A line whose chat voice makes no audio is spoken in the speaker's own voice too, with a warning in the log. |
 
 Two assistants may share one announcement agent. The character is what makes them sound different.
 
