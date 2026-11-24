@@ -7,6 +7,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
+- **Avatars.** **Add avatar** on an assistant's entry creates a text-to-speech entity that
+  speaks through the engine you choose and sends a copy of each finished clip to a
+  LiveTalking lip-sync server. The satellite's speech is passed on unchanged and made only
+  once. The engine, address and an on/off switch can be changed at any time without a
+  restart. Assistants without an avatar are not changed. See [Avatar](docs/avatar.md).
 - **Satellites that can show which assistant is talking now do.** On a satellite whose
   firmware offers a select ending in `_next_announcement_assistant`, each Chat show line and each line from `compose_announcement` shows the assistant that speaks it.
   The new `prepare_announcement` action does the same for any other announcement, such as
