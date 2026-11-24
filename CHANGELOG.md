@@ -41,6 +41,17 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   which read as if it only covered the quick "play …" requests. It switches the whole
   feature on for an assistant, and its description now says so. Nothing else changes.
 
+### Fixed
+
+- **A follow-up keeps the person who was speaking.** A follow-up question has no wake word
+  and usually no new voice match, and the tracking automation only let the last speaker
+  carry on when the satellite started listening within 2 seconds of going idle. A
+  satellite that took longer, such as a display speaking through its avatar, got the
+  unknown-voice answer on follow-ups. Voice Assistant Manager now remembers the person per
+  conversation: a follow-up on the same satellite within a minute keeps them, unless a new
+  voice match says otherwise (the other person switches, an unknown voice is refused).
+  Follow-ups wait at most a second for a late match.
+
 ## 0.5.0 - 2026-11-23
 
 ### Licence

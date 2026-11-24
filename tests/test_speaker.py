@@ -2,9 +2,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Tests for resolve_speaker: who is speaking, from the helper, the logged-in user or the fallback."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
-from custom_components.voice_assistant_manager.speaker import resolve_speaker
+from custom_components.voice_assistant_manager.speaker import (
+    FOLLOW_UP_WINDOW,
+    Remembered,
+    follow_up_role,
+    resolve_speaker,
+)
 
 PERSON_1_USER = "user-person-1"
 PERSON_2_USER = "user-person-2"
@@ -105,3 +112,41 @@ def test_regression_security_helper_is_ignored_for_a_user_when_nobody_is_mapped(
 
 def test_regression_security_helper_still_decides_a_request_without_a_user():
     assert resolve_speaker("owner", None, BOTH_MAPPED, "stranger") == ("owner", True)
+
+
+
+# A follow-up in the same voice conversation keeps its speaker unless a new match says else.
+
+T0 = datetime(2026, 11, 24, 12, 0, tzinfo=UTC)
+ALEX_TURN = Remembered(role="owner", device_id="kitchen", decided_by=T0, at=T0)
+
+
+def later(seconds: float) -> datetime:
+    return T0 + timedelta(seconds=seconds)
+
+
+@pytest.mark.parametrize("helper_state", ["pending", "unknown", ""])
+def test_a_follow_up_without_a_new_match_keeps_the_speaker(helper_state):
+    assert follow_up_role(ALEX_TURN, "kitchen", helper_state, later(5), later(8)) == "owner"
+
+
+def test_a_follow_up_with_the_old_match_unchanged_keeps_the_speaker():
+    assert follow_up_role(ALEX_TURN, "kitchen", "owner", T0, later(8)) == "owner"
+
+
+@pytest.mark.parametrize("helper_state", ["wife", "partner", "stranger", "owner"])
+def test_a_new_voice_match_decides_the_follow_up(helper_state):
+    assert follow_up_role(ALEX_TURN, "kitchen", helper_state, later(5), later(8)) is None
+
+
+def test_another_device_does_not_carry_the_speaker():
+    assert follow_up_role(ALEX_TURN, "office", "pending", later(5), later(8)) is None
+
+
+def test_a_turn_after_the_follow_up_window_needs_its_own_match():
+    seconds = FOLLOW_UP_WINDOW.total_seconds() + 1
+    assert follow_up_role(ALEX_TURN, "kitchen", "pending", later(5), later(seconds)) is None
+
+
+def test_nothing_remembered_means_no_follow_up():
+    assert follow_up_role(None, "kitchen", "pending", later(5), later(8)) is None

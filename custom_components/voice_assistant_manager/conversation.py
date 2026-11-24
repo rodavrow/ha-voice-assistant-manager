@@ -42,6 +42,7 @@ from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
+from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
 from .announce import safe_toolless_agent
@@ -85,13 +86,15 @@ from .reminders import (
     reminder_guidance,
     reminder_tool_outcome,
 )
-from .speaker import Role, resolve_speaker
+from .speaker import FOLLOW_UP_WINDOW, Remembered, Role, follow_up_role, resolve_speaker
 
 _LOGGER = logging.getLogger(__name__)
 SCRIPT_TIMEOUT = 8
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 CHAT_STOPPED_LINE = "Okay."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
+# How long a follow-up waits for a late voice match before keeping the conversation's person.
+FOLLOW_UP_WAIT = 1.0
 OTHER_PERSON = {"owner": "wife", "wife": "owner"}
 # How the settings screen calls each person, for one who has no name.
 PERSON_NUMBER = {"owner": "Person 1", "wife": "Person 2"}
@@ -150,6 +153,8 @@ class PersonaRouter(conversation.ConversationEntity):
         self._last_fixed: str | None = None
         # The unsafe agent last logged for each use ("refusal", "memory"), to log it once.
         self._unsafe_logged: dict[str, str] = {}
+        # conversation_id -> the person of its last voice turn (speaker.follow_up_role).
+        self._spoken_by: dict[str, Remembered] = {}
 
     @property
     def supported_languages(self):
@@ -238,28 +243,30 @@ class PersonaRouter(conversation.ConversationEntity):
             return text
         return labelled
 
-    async def _helper_state(self, device_id, advanced) -> str | None:
-        """Read the voice_speaker helper of the satellite, or None if it has none.
+    async def _helper_state(self, device_id, advanced, most: float | None = None):
+        """The voice_speaker helper's state on the satellite, or None if it has none.
 
         Waits a little while the helper says pending, because the match lands a
-        few seconds after the wake word.
+        few seconds after the wake word: the "wait" setting, or `most` seconds if shorter.
         """
         helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
         if state is None:
             return None
         try:
-            steps = int(float(advanced.get("wait_seconds", 3)) * 10)
+            seconds = float(advanced.get("wait_seconds", 3))
         except (TypeError, ValueError):
-            steps = 30
-        for _ in range(max(steps, 0)):
+            seconds = 3.0
+        if most is not None:
+            seconds = min(seconds, most)
+        for _ in range(max(int(seconds * 10), 0)):
             if state.state != "pending":
                 break
             await asyncio.sleep(0.1)
             state = self.hass.states.get(helper)
             if state is None:
                 return None
-        return state.state
+        return state
 
     async def _who_is_speaking(self, user_input, settings) -> tuple[Role, bool]:
         """Return the role and whether a voice match decided it."""
@@ -277,10 +284,44 @@ class PersonaRouter(conversation.ConversationEntity):
             return resolve_speaker(None, None, user_map, no_helper_role)
         # A request with a user goes by that user alone (see resolve_speaker), so the
         # helper of a device it names is neither read nor waited for.
-        helper_state = (
-            None if user_id else await self._helper_state(user_input.device_id, advanced)
+        if user_id:
+            return resolve_speaker(None, user_id, user_map, no_helper_role)
+        return await self._voice_speaker(user_input, advanced, user_map, no_helper_role)
+
+    async def _voice_speaker(self, user_input, advanced, user_map, no_helper_role):
+        """The role for a request without a user, by the satellite's voice match.
+
+        A follow-up in the same conversation keeps its person unless a new voice match
+        says otherwise (speaker.follow_up_role), so it never depends on the satellite's
+        timing. It waits at most a second for a late match, not the whole wait.
+        """
+        now = dt_util.utcnow()
+        conversation_id = user_input.conversation_id
+        device_id = user_input.device_id
+        self._spoken_by = {
+            key: seen for key, seen in self._spoken_by.items() if now - seen.at <= FOLLOW_UP_WINDOW
+        }
+        remembered = self._spoken_by.get(conversation_id or "")
+        if remembered is not None and remembered.device_id != device_id:
+            remembered = None
+        state = await self._helper_state(
+            device_id, advanced, most=FOLLOW_UP_WAIT if remembered else None
         )
-        return resolve_speaker(helper_state, user_id, user_map, no_helper_role)
+        if state is None:
+            return resolve_speaker(None, None, user_map, no_helper_role)
+        kept = follow_up_role(remembered, device_id, state.state, state.last_changed, now)
+        if kept is not None:
+            role, matched, decided_by = kept, True, remembered.decided_by
+        else:
+            role, matched = resolve_speaker(state.state, None, user_map, no_helper_role)
+            decided_by = state.last_changed
+        if conversation_id and device_id:
+            if role in ("owner", "wife"):
+                self._spoken_by[conversation_id] = Remembered(role, device_id, decided_by, now)
+            else:
+                # An unknown voice ends it: a later turn needs a voice match of its own.
+                self._spoken_by.pop(conversation_id, None)
+        return role, matched
 
     async def _is_system_user(self, user_id: str) -> bool:
         """True for a user Home Assistant created for itself, which no one logs in as."""
