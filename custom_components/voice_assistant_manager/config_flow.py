@@ -167,10 +167,27 @@ def _script_texts(hass, script_entity_id):
     return found
 
 
+# Settings an older version stored that the forms no longer have. They are left out of what
+# the forms see and save, so a stored one never makes a save fail.
+RETIRED_SETTINGS = {"advanced": ("wait_seconds",)}  # replaced by match_within in 0.5.2
+
+
+def without_retired(settings):
+    """The settings without RETIRED_SETTINGS. Anything that is not a mapping is left as is."""
+    if not isinstance(settings, dict):
+        return settings
+    cleaned = dict(settings)
+    for section, keys in RETIRED_SETTINGS.items():
+        part = cleaned.get(section)
+        if isinstance(part, dict):
+            cleaned[section] = {k: v for k, v in part.items() if k not in keys}
+    return cleaned
+
+
 def current_settings(hass, entry):
     """Saved settings, or a first proposal taken from the older script."""
     if entry.options:
-        return dict(entry.options)
+        return without_retired(dict(entry.options))
     texts = _script_texts(hass, entry.data.get("script"))
     personas = texts.get("personas") or {}
     lines = [str(line).strip() for line in texts.get("refusals") or [] if str(line).strip()]
