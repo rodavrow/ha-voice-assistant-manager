@@ -43,6 +43,10 @@ To change anything later, choose **Reconfigure** on the avatar under the assista
 
 The avatar entity stays the same, so the pipeline does not need a new engine.
 
+Home Assistant keeps speech it made under the avatar's name, not the engine's. If both engines use the same voice name, or neither has one, a line said before the switch can still be played in the old engine's voice. Clear the kept speech (the `tts.clear_cache` action) after switching to avoid that.
+
+Adding, removing or renaming an avatar reloads its assistant, which ends a conversation that is going on with it at that moment. Changing the engine, the address or the switch does not.
+
 ## What LiveTalking receives
 
 For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`). For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
@@ -55,7 +59,7 @@ For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers
 
 - **It never delays or changes the speech.** The copy is sent after the clip is complete, from a background task.
 - **It never fails the speech.** If LiveTalking cannot be reached or answers oddly, the log shows one warning per outage, and the satellite speaks as usual. What was said is never logged.
-- **It never invents a fallback.** If the avatar's engine is missing, the request fails as it would for a missing engine. An error from the engine reaches Home Assistant unchanged.
+- **It never invents a fallback.** If the avatar's engine no longer exists, the avatar offers no languages, so Home Assistant refuses the request ("does not support language"), and nothing is spoken until you choose an engine again. An error from the engine reaches Home Assistant unchanged.
 
 ## Limits
 
