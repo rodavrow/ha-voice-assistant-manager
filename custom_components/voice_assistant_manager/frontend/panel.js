@@ -925,6 +925,33 @@ class VoicePersonaRouterPanel extends HTMLElement {
     return this._field(section, key, control, extra);
   }
 
+  // The chat voice: a list when the engine names its voices, free text when it does not.
+  _voiceField() {
+    const engine = this._value("chat", "tts_engine");
+    this._voiceLists = this._voiceLists || {};
+    const voices = engine ? this._voiceLists[engine] : null;
+    if (engine && voices === undefined) this._loadVoices(engine);
+    if (!voices || !voices.length) return this._textField("chat", "voice");
+    return this._choiceField(
+      "chat",
+      "voice",
+      voices.map((voice) => [voice.id, voice.name]),
+      { emptyLabel: "The engine's default voice" }
+    );
+  }
+
+  async _loadVoices(engine) {
+    // null while asked, so it is asked once.
+    this._voiceLists[engine] = null;
+    try {
+      this._voiceLists[engine] = (await this._call("voices", { engine })).voices || [];
+    } catch (err) {
+      // Only a nicer field: without a list the voice is typed.
+      this._voiceLists[engine] = [];
+    }
+    if (this._voiceLists[engine].length) this._render();
+  }
+
   _entityField(section, key, domain, emptyLabel, extra) {
     return this._choiceField(section, key, this._entities(domain), { ...(extra || {}), emptyLabel });
   }
@@ -1105,8 +1132,8 @@ class VoicePersonaRouterPanel extends HTMLElement {
         h("h3", {}, this._text("step.settings.sections.chat.name", "Chat show")),
         h("p", { class: "intro" }, this._text("step.settings.sections.chat.description")),
         this._textField("chat", "character", { multiline: true }),
-        this._entityField("chat", "tts_engine", "tts", "The speaker's own voice"),
-        this._textField("chat", "voice")
+        this._entityField("chat", "tts_engine", "tts", "The speaker's own voice", { redraw: true }),
+        this._voiceField()
       ),
       this._avatarCard(),
       h(

@@ -115,7 +115,7 @@
             "data_description": {
               "character": "How this assistant behaves in a chat, for example: a dry, put-upon butler. A good start is to copy the personality part of the main agent's prompt, and leave out everything about controlling the home or using tools. At most 2000 characters. When empty, Extra instructions for announcements under Reminders is used.",
               "tts_engine": "The engine that speaks this assistant's chat lines. When empty, the voice of the speaker that hosts the chat is used.",
-              "voice": "The name or id of a voice of that engine, for example jeeves. When empty, the engine's default voice is used."
+              "voice": "A voice of that engine. On the Voice Manager page, an engine that lists its voices offers them to choose from. Otherwise type the voice as the engine expects it, which for many engines is the voice's id and not its name. When empty, the engine's default voice is used."
             }
           },
           "calendars": {

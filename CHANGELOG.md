@@ -28,6 +28,9 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Changed
 
+- **The voice for chats is chosen from a list.** When the engine names its voices, the Voice
+  Manager page offers them instead of a text field, so a voice the engine does not have
+  cannot be typed.
 - **Everyone at the satellite can join a chat show.** While a chat runs, every turn from its
   satellite goes to the chat. A recognised voice joins with the person's name; anyone else
   joins as "A guest", and the assistants are told not to assume who that is. Unknown voices
@@ -55,6 +58,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A chat line whose voice makes no audio is no longer silent.** When the engine of **Voice
+  for chats** failed, for example for a voice it does not have, the speaker got an empty
+  file: no sound, no avatar, and the chat ended as if all was well. The audio is now made
+  before the line is announced. Without audio the line is spoken in the speaker's own
+  voice and a warning names the engine and voice.
 - **An avatar's copy only reaches its own face.** The copy of an avatar's speech for
   LiveTalking viewers went to every session, so with two avatars one assistant could speak
   with the other's face. With a **LiveTalking avatar** set, it now only goes to sessions
