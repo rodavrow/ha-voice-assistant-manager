@@ -151,12 +151,18 @@ def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntitie
     found = entities.async_get(satellite)
     if found is None or found.device_id is None:
         return None
+    devices = dr.async_get(hass)
+    # ESPHome registers a sub-device either as a device "via" the satellite or as a
+    # child device of it, which is kept apart from the others.
+    candidates = [
+        *(device for device in devices.devices if device.via_device_id == found.device_id),
+        *dr.async_entries_for_parent_device(devices, found.device_id),
+    ]
     sub_device = next(
         (
             device.id
-            for device in dr.async_get(hass).devices
-            if device.via_device_id == found.device_id
-            and (match := _SLOT_DEVICE.search(device.name or ""))
+            for device in candidates
+            if (match := _SLOT_DEVICE.search(device.name or ""))
             and int(match.group(1)) == slot
         ),
         None,
