@@ -50,6 +50,7 @@ from .config_flow import (
     settings_error_placeholders,
     settings_schema,
     settings_to_save,
+    without_retired,
 )
 from .const import DOMAIN
 from .favorites import (
@@ -298,7 +299,8 @@ async def ws_save_settings(
     if entry is None:
         connection.send_error(msg["id"], NOT_FOUND, "That assistant does not exist.")
         return
-    typed = _without_empty(msg["settings"])
+    # A page opened before an update may still send a setting that no longer exists.
+    typed = without_retired(_without_empty(msg["settings"]))
     try:
         schema = settings_schema(typed, await login_users(hass))
         # A part the page sent nothing for gets the form's own defaults.
