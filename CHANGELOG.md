@@ -62,6 +62,15 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A satellite that drops its connection for a moment no longer ends the chat.** A satellite
+  that reconnects during a line, as some do after a firmware update, ended the chat with
+  "The speaker could not play a line". The chat now waits up to 15 seconds for it to come
+  back and goes on; a line that had not started is spoken again. A chat that ends on a
+  failure is logged as a warning, with the reason.
+- **The avatar hold is turned off after a chat that ended while the satellite was away.** It
+  stayed on until the satellite's own one-minute limit.
+- **Nothing is written to a satellite in avatar mode while it is unavailable.** Each write was
+  a warning in the Home Assistant log during a firmware update.
 - **A chat line whose voice makes no audio is no longer silent.** When the engine of **Voice
   for chats** failed, for example for a voice it does not have, the speaker got an empty
   file: no sound, no avatar, and the chat ended as if all was well. The audio is now made
