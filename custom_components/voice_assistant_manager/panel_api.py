@@ -9,12 +9,13 @@ dialog (config_flow.py), so the page cannot store what the dialog would refuse.
 import logging
 from collections.abc import Mapping
 from dataclasses import asdict
+from types import MappingProxyType
 from typing import Any, Literal
 
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
@@ -24,6 +25,9 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.translation import async_get_translations
 
 from .announce import writer_agent
+from .avatar import CONF_ENABLED, CONF_ENGINE, CONF_URL
+from .avatar import SUBENTRY_TYPE as AVATAR
+from .avatar_flow import validate_avatar
 from .calendar_watch import calendar_rows, find_watcher
 from .chat_show import (
     ChatLimits,
@@ -180,7 +184,35 @@ async def _router(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
             for key, label in memory_list_choices(memory, entry.entry_id, settings)
         ],
         "last_announced": watcher.last_announced if watcher else None,
+        "avatars": _avatars(hass, entry),
     }
+
+
+def _avatars(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str, Any]]:
+    """The assistant's avatars; entity_id is None until the reload that adds it is done."""
+    registry = er.async_get(hass)
+    return [
+        {
+            "id": sub_id,
+            "name": sub.title,
+            "engine": sub.data.get(CONF_ENGINE),
+            "url": sub.data.get(CONF_URL),
+            "enabled": bool(sub.data.get(CONF_ENABLED)),
+            "entity_id": registry.async_get_entity_id("tts", DOMAIN, sub_id),
+        }
+        for sub_id, sub in entry.subentries.items()
+        if sub.subentry_type == AVATAR
+    ]
+
+
+async def _avatar_error_text(hass: HomeAssistant, key: str) -> str:
+    """An error of the Add avatar dialog, so the page says the same."""
+    translations = await async_get_translations(
+        hass, hass.config.language, "config_subentries", [DOMAIN]
+    )
+    return translations.get(
+        f"component.{DOMAIN}.config_subentries.{AVATAR}.error.{key}", key
+    )
 
 
 def _entry(hass: HomeAssistant, entry_id: str) -> ConfigEntry | None:
@@ -799,6 +831,71 @@ _START_CHAT_FIELDS.update(
 START_CHAT_SCHEMA = vol.Schema(_START_CHAT_FIELDS)
 
 
+_AVATAR_FORM = vol.Schema(
+    {
+        vol.Optional("name", default=""): str,
+        vol.Required("engine"): str,
+        vol.Required("url"): str,
+        vol.Optional("enabled", default=True): bool,
+    }
+)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/save_avatar",
+        vol.Required("entry_id"): str,
+        vol.Optional("subentry_id"): vol.Any(str, None),
+        vol.Optional("avatar"): dict,
+        vol.Optional("remove", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_save_avatar(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Add, change or remove one avatar of an assistant, as the Add avatar dialog does.
+
+    The entry's update listener reloads the assistant when an avatar is added, removed or
+    renamed, which adds or removes its entity.
+    """
+    entry = _entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], NOT_FOUND, "That assistant does not exist.")
+        return
+    subentry_id = msg.get("subentry_id")
+    subentry = entry.subentries.get(subentry_id) if subentry_id else None
+    if subentry_id and (subentry is None or subentry.subentry_type != AVATAR):
+        connection.send_result(msg["id"], _refused("That avatar does not exist any more."))
+        return
+    if msg["remove"]:
+        if subentry is not None:
+            hass.config_entries.async_remove_subentry(entry, subentry.subentry_id)
+        connection.send_result(msg["id"], {"ok": True, "router": await _router(hass, entry)})
+        return
+    try:
+        values = _AVATAR_FORM(msg.get("avatar") or {})
+    except vol.Invalid as err:
+        connection.send_result(msg["id"], _refused(f"This avatar cannot be saved: {err}"))
+        return
+    title, data, errors = validate_avatar(hass, values, entry.title)
+    if errors:
+        texts = {field: await _avatar_error_text(hass, key) for field, key in errors.items()}
+        connection.send_result(msg["id"], {"ok": False, "errors": texts})
+        return
+    if subentry is None:
+        hass.config_entries.async_add_subentry(
+            entry,
+            ConfigSubentry(
+                data=MappingProxyType(data), subentry_type=AVATAR, title=title, unique_id=None
+            ),
+        )
+    else:
+        hass.config_entries.async_update_subentry(entry, subentry, title=title, data=data)
+    connection.send_result(msg["id"], {"ok": True, "router": await _router(hass, entry)})
+
+
 @callback
 def async_register_chat_services(hass: HomeAssistant) -> None:
     """The start_chat and stop_chat actions. Admin users only; automations may call them."""
@@ -1043,6 +1140,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_save_settings,
         ws_save_calendar,
         ws_save_memory,
+        ws_save_avatar,
         ws_guide_satellites,
         ws_guide_tracking_automation,
         ws_guide_pipeline_copy,

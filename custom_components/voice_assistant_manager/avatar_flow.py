@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -26,6 +27,32 @@ CONF_NAME = "name"
 def _is_avatar(hass: HomeAssistant, entity_id: str) -> bool:
     registry_entry = er.async_get(hass).async_get(entity_id)
     return registry_entry is not None and registry_entry.platform == DOMAIN
+
+
+def validate_avatar(
+    hass: HomeAssistant, values: Mapping[str, Any], assistant_title: str
+) -> tuple[str, dict[str, Any], dict[str, str]]:
+    """(name, subentry data, errors) for an avatar as typed in the dialog or on the page.
+
+    The errors map a field to a key of config_subentries.avatar.error; empty when it can
+    be saved. An empty name becomes "<assistant> avatar".
+    """
+    errors: dict[str, str] = {}
+    url = normalize_url(str(values.get(CONF_URL) or ""))
+    engine = str(values.get(CONF_ENGINE) or "")
+    if url is None:
+        errors[CONF_URL] = "invalid_url"
+    if _is_avatar(hass, engine):
+        errors[CONF_ENGINE] = "engine_is_avatar"
+    elif hass.states.get(engine) is None:
+        errors[CONF_ENGINE] = "engine_missing"
+    title = str(values.get(CONF_NAME) or "").strip() or f"{assistant_title} avatar"
+    data = {
+        CONF_ENGINE: engine,
+        CONF_URL: url,
+        CONF_ENABLED: bool(values.get(CONF_ENABLED, True)),
+    }
+    return title, data, errors
 
 
 def _schema() -> vol.Schema:
@@ -63,21 +90,8 @@ class AvatarSubentryFlow(ConfigSubentryFlow):
         )
         errors: dict[str, str] = {}
         if user_input is not None:
-            url = normalize_url(str(user_input.get(CONF_URL) or ""))
-            engine = str(user_input[CONF_ENGINE])
-            if url is None:
-                errors[CONF_URL] = "invalid_url"
-            if _is_avatar(self.hass, engine):
-                errors[CONF_ENGINE] = "engine_is_avatar"
-            elif self.hass.states.get(engine) is None:
-                errors[CONF_ENGINE] = "engine_missing"
+            title, data, errors = validate_avatar(self.hass, user_input, entry.title)
             if not errors:
-                title = str(user_input[CONF_NAME]).strip() or f"{entry.title} avatar"
-                data = {
-                    CONF_ENGINE: engine,
-                    CONF_URL: url,
-                    CONF_ENABLED: bool(user_input.get(CONF_ENABLED, True)),
-                }
                 if editing is not None:
                     return self.async_update_and_abort(entry, editing, title=title, data=data)
                 return self.async_create_entry(title=title, data=data)

@@ -456,6 +456,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     this._busy = false;
     this._failed = "";
     this._calendar = null; // { original, row, errors } while a calendar is edited
+    this._avatar = null; // { original, row, errors, busy } while an avatar is edited
     this._openLists = new Set();
     // One memory save at a time: each edit is built from the facts on screen, which only
     // change when the server answers, so a second edit could undo the first.
@@ -542,6 +543,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     this._draft = router ? clone(router.settings) : null;
     this._saveError = "";
     this._calendar = null;
+    this._avatar = null;
   }
 
   get _dirty() {
@@ -678,6 +680,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     if (section === "favorites" && this._section !== "favorites") this._fav.stale = true;
     this._section = section;
     this._calendar = null;
+    this._avatar = null;
     this._render();
     window.scrollTo({ top: 0 });
   }
@@ -1105,6 +1108,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         this._entityField("chat", "tts_engine", "tts", "The speaker's own voice"),
         this._textField("chat", "voice")
       ),
+      this._avatarCard(),
       h(
         "div",
         { class: "card" },
@@ -1497,6 +1501,203 @@ class VoicePersonaRouterPanel extends HTMLElement {
           )
       )
     );
+  }
+
+  // Avatars: stored as config subentries of the assistant (avatar_flow.py, panel_api.ws_save_avatar).
+
+  _avatarCard() {
+    const router = this._router;
+    const avatars = router.avatars || [];
+    const adding = this._avatar && this._avatar.original === null;
+    const name = router.assistant ? router.assistant.charAt(0).toUpperCase() + router.assistant.slice(1) : router.title;
+    return h(
+      "div",
+      { class: "card" },
+      h("h3", {}, "Avatar"),
+      h(
+        "p",
+        { class: "intro" },
+        "A face on a screen that moves its lips to what this assistant says, through a LiveTalking server. The satellite still speaks as before. After adding one, choose its text-to-speech entity in this assistant's voice pipeline (Settings > Voice assistants) and choose the voice again."
+      ),
+      avatars.length ? avatars.map((row) => this._avatarRow(row)) : !adding && h("div", { class: "empty" }, "No avatar."),
+      adding
+        ? this._avatarEditor()
+        : h(
+            "div",
+            { class: "row-actions" },
+            h(
+              "button",
+              {
+                class: "btn",
+                disabled: !!this._avatar,
+                onclick: () => {
+                  this._avatar = { original: null, row: { name: `${name} avatar`, engine: "", url: "", enabled: true }, errors: {} };
+                  this._render();
+                },
+              },
+              "Add an avatar"
+            )
+          )
+    );
+  }
+
+  _avatarRow(row) {
+    if (this._avatar && this._avatar.original === row.id) return this._avatarEditor();
+    const state = this._hass && this._hass.states && this._hass.states[row.engine];
+    const engine = (state && state.attributes && state.attributes.friendly_name) || row.engine;
+    const parts = [
+      `Speaks through ${engine}`,
+      row.enabled ? `sends to ${row.url}` : "sending is off",
+      row.entity_id ? `entity ${row.entity_id}` : "its entity is being created",
+    ];
+    return h(
+      "div",
+      { class: "cal" },
+      h("div", { class: "what" }, h("div", { class: "title" }, row.name), h("div", { class: "sub" }, parts.join(", "))),
+      h(
+        "button",
+        {
+          class: "btn",
+          disabled: !!this._avatar,
+          onclick: () => {
+            this._avatar = { original: row.id, row: { name: row.name, engine: row.engine, url: row.url, enabled: row.enabled }, errors: {} };
+            this._render();
+          },
+        },
+        "Change"
+      )
+    );
+  }
+
+  _avatarEditor() {
+    const editing = this._avatar;
+    const row = editing.row;
+    // Every avatar of every assistant: an avatar never speaks through another one.
+    const avatarIds = new Set(this._data.routers.flatMap((r) => (r.avatars || []).map((a) => a.entity_id)).filter(Boolean));
+    const engines = this._entities("tts").filter(([id]) => !avatarIds.has(id));
+    const field = (key, label, control, help) => {
+      const input = control.matches("input, select, textarea") ? control : control.querySelector("input");
+      input.id = `avatar.${key}`;
+      input.dataset.key = `avatar.${key}`;
+      return h(
+        "div",
+        { class: `field${editing.errors[key] ? " bad" : ""}` },
+        h("label", { for: input.id }, label),
+        control,
+        editing.errors[key] && h("div", { class: "problem" }, editing.errors[key]),
+        help && h("div", { class: "help" }, help)
+      );
+    };
+    return h(
+      "div",
+      { class: "editor" },
+      h("h3", {}, editing.original === null ? "Add an avatar" : "Change this avatar"),
+      editing.errors.base && h("div", { class: "notice error" }, editing.errors.base),
+      field(
+        "name",
+        "Name",
+        h("input", { class: "input", type: "text", value: row.name, oninput: (ev) => (row.name = ev.target.value) }),
+        "The name of its text-to-speech entity: Ada avatar becomes tts.ada_avatar."
+      ),
+      field(
+        "engine",
+        "Text-to-speech engine",
+        this._select(engines, row.engine, (value) => (row.engine = value), "Choose an engine"),
+        "The engine that makes the speech. Change it here to switch engines, then choose the voice again in the pipeline."
+      ),
+      field(
+        "url",
+        "LiveTalking address",
+        h("input", {
+          class: "input",
+          type: "url",
+          placeholder: "http://livetalking.local:8010",
+          value: row.url,
+          oninput: (ev) => (row.url = ev.target.value),
+        }),
+        "Everyone watching LiveTalking hears this assistant."
+      ),
+      this._plainSwitch(
+        "Send speech to the avatar",
+        "When off, the assistant still speaks, but nothing is sent to the avatar.",
+        !!row.enabled,
+        (on) => (row.enabled = on)
+      ),
+      h(
+        "div",
+        { class: "row-actions" },
+        h("button", { class: "btn primary", disabled: !!editing.busy, onclick: () => this._saveAvatar(false) }, editing.busy ? "Saving…" : "Save"),
+        h(
+          "button",
+          {
+            class: "btn",
+            disabled: !!editing.busy,
+            onclick: () => {
+              this._avatar = null;
+              this._render();
+            },
+          },
+          "Cancel"
+        ),
+        h("span", { class: "spacer" }),
+        editing.original !== null &&
+          h(
+            "button",
+            {
+              class: "btn danger",
+              disabled: !!editing.busy,
+              onclick: () => {
+                if (window.confirm("Remove this avatar? Its text-to-speech entity goes too, so a pipeline that uses it needs another engine.")) {
+                  this._saveAvatar(true);
+                }
+              },
+            },
+            "Remove"
+          )
+      )
+    );
+  }
+
+  async _saveAvatar(remove) {
+    const editing = this._avatar;
+    if (!editing || editing.busy) return;
+    editing.busy = true;
+    this._render();
+    try {
+      const result = await this._call("save_avatar", {
+        entry_id: this._routerId,
+        subentry_id: editing.original,
+        ...(remove ? { remove: true } : { avatar: editing.row }),
+      });
+      if (result.ok) {
+        this._replaceRouter(result.router);
+        this._avatar = null;
+        this._toast(remove ? "Avatar removed" : "Avatar saved");
+        // Adding or renaming reloads the assistant; fetch its avatars again once the entity exists.
+        if (!remove) setTimeout(() => this._refreshAvatars(result.router.entry_id), 2000);
+      } else {
+        editing.errors = result.errors;
+      }
+    } catch (err) {
+      editing.errors = { base: reason(err) || "Saving failed." };
+    }
+    editing.busy = false;
+    this._render();
+  }
+
+  /** Fetch one assistant's avatars again, without touching unsaved changes on the page. */
+  async _refreshAvatars(entryId) {
+    try {
+      const data = await this._call("get");
+      const fresh = data.routers.find((r) => r.entry_id === entryId);
+      const current = this._data && this._data.routers.find((r) => r.entry_id === entryId);
+      if (fresh && current) {
+        current.avatars = fresh.avatars;
+        this._render();
+      }
+    } catch (err) {
+      // Only a nicer list: the next visit shows the entity anyway.
+    }
   }
 
   // Favorites.
