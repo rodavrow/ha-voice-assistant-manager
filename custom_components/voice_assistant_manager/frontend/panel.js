@@ -1106,8 +1106,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         h("p", { class: "intro" }, this._text("step.settings.sections.chat.description")),
         this._textField("chat", "character", { multiline: true }),
         this._entityField("chat", "tts_engine", "tts", "The speaker's own voice"),
-        this._textField("chat", "voice"),
-        this._chatVoiceReminder()
+        this._textField("chat", "voice")
       ),
       this._avatarCard(),
       h(
@@ -1558,6 +1557,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
    */
   _chatVoiceReminder() {
     const engine = this._value("chat", "tts_engine") || "";
+    // The first avatar that is on, as avatar_devices.wish_for picks it for the satellites.
     const mine = (this._router.avatars || []).filter((a) => a.enabled && a.entity_id);
     const anyAvatar = new Set(this._data.routers.flatMap((r) => (r.avatars || []).map((a) => a.entity_id)).filter(Boolean));
     if (mine.length && !mine.some((a) => a.entity_id === engine)) {
@@ -1565,7 +1565,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       return h(
         "div",
         { class: "notice after", role: "status" },
-        `The avatar is on: choose ${wanted} as the text-to-speech engine of Voice for chats, so chat lines reach the avatar on the LiveTalking page too. Satellites in avatar mode already speak them through the avatar.`,
+        `The avatar is on: choose ${wanted} as the text-to-speech engine of Voice for chats (under Chat show), so chat lines reach the avatar on the LiveTalking page too. Satellites in avatar mode already speak them through the avatar.`,
         " ",
         h(
           "button",
@@ -1584,7 +1584,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       return h(
         "div",
         { class: "notice after", role: "status" },
-        `Voice for chats still uses the avatar ${engine}, but this assistant's avatar is off. Choose its normal text-to-speech engine again.`
+        `Voice for chats (under Chat show) uses the avatar ${engine}, but no avatar of this assistant is on. Choose this assistant's normal text-to-speech engine there again.`
       );
     }
     return null;

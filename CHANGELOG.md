@@ -18,7 +18,7 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   stream instead of its animations, and speaks through it, lip-synced. Voice Assistant
   Manager switches this on and off with the avatar, and sets the LiveTalking avatar and
   the new **Avatar connection** setting under Advanced (connect when woken, or always
-  connected). The cards remind you to point **Voice for chats** at the avatar while it is
+  connected). The Avatar card reminds you to point **Voice for chats** at the avatar while it is
   on, and back at the normal engine once it is off.
 - **Satellites that can show which assistant is talking now do.** On a satellite whose
   firmware offers a select ending in `_next_announcement_assistant`, each Chat show line and each line from `compose_announcement` shows the assistant that speaks it.

@@ -54,7 +54,7 @@ Adding, removing or renaming an avatar reloads its assistant, which ends a conve
 
 Some satellite firmware can show the avatar itself: the satellite plays the assistant's LiveTalking stream, video and sound, instead of its own animations, and its spoken replies come from LiveTalking, so the lips and the sound match. While listening, the avatar's idle video is shown; while speaking, the avatar speaks.
 
-Voice Assistant Manager switches this for you. For every satellite whose wake word uses an assistant with an avatar that is on, it turns on that wake word's avatar mode and gives it the avatar's LiveTalking address, the LiveTalking avatar and the connection setting below. For every other wake word it turns avatar mode off, so switching an avatar off or removing it puts the satellite back to normal. It checks this when Home Assistant starts, when an avatar or assistant changes, and every minute, which also catches wake words and pipelines you changed. It only changes what differs.
+Voice Assistant Manager switches this for you. For every satellite whose wake word uses an assistant with an avatar that is on, it turns on that wake word's avatar mode and gives it the avatar's LiveTalking address, the LiveTalking avatar and the connection setting below. For a wake word that uses one of its assistants without an avatar that is on, it turns avatar mode off, so switching an avatar off or removing it (or the assistant) puts the satellite back to normal. Avatar mode it did not switch on itself, for a wake word that uses another kind of assistant, is left alone. It checks this when Home Assistant starts, when an avatar or assistant changes, and every minute, which also catches wake words and pipelines you changed. It only changes what differs.
 
 - **Avatar connection** under **Assistant > Advanced**:
   - **Connect when woken** (the default) connects to LiveTalking when the satellite wakes. The avatar shows about a second later; until then the normal look is shown.
@@ -68,7 +68,7 @@ What a satellite needs: firmware with avatar mode (a display with the LiveTalkin
 
 ### Voice for chats
 
-While an avatar is on, the **Chat show** and **Avatar** cards remind you to choose its entity as the text-to-speech engine of **Voice for chats**, with a button to do so. Satellites in avatar mode speak chat lines through the avatar anyway; the setting makes the lines reach the LiveTalking page too. Once the avatar is off, the cards remind you to choose the normal engine again.
+While an avatar is on, the **Avatar** card reminds you to choose its entity as the text-to-speech engine of **Voice for chats**, with a button to do so. Satellites in avatar mode speak chat lines through the avatar anyway; the setting makes the lines reach the LiveTalking page too. Once the avatar is off, it reminds you to choose the normal engine again.
 
 ## What LiveTalking receives
 
