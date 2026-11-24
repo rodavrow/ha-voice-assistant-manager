@@ -41,6 +41,15 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   which read as if it only covered the quick "play …" requests. It switches the whole
   feature on for an assistant, and its description now says so. Nothing else changes.
 
+### Changed
+
+- **The wait for the voice match counts from the wake word.** "Wait for the voice match"
+  (seconds after the person stopped speaking) is replaced by **The voice match arrives
+  within** (seconds after the satellite started listening, default 6). A satellite matches
+  on a fixed stretch of audio after the wake word, so its match lands a fixed time later
+  however long the request is: a long request needs no wait at all, and a short follow-up
+  only waits for what is left. A stored "Wait for the voice match" is not carried over.
+
 ### Fixed
 
 - **A main agent that fails no longer ends the turn in silence.** When the main agent
@@ -56,7 +65,7 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   conversation: a follow-up on the same satellite within a minute of the previous turn
   (each kept follow-up starts the minute again) keeps them, unless a new voice match says
   otherwise (the other person switches, an unknown voice is refused). Every turn waits the
-  full "Wait for the voice match" time. A satellite whose "Last wake word" sensor reports a
+  voice match until its deadline (see below). A satellite whose "Last wake word" sensor reports a
   different wake word marks a new turn, which always needs its own match. An unchanged
   wake word never reaches Home Assistant, so its absence proves nothing.
 

@@ -60,7 +60,13 @@ EXISTING_OPTIONS = {
 EXPECTED_SETTINGS = {
     **EXISTING_OPTIONS,
     **NEW_DEFAULTS,
-    "advanced": {**EXISTING_OPTIONS["advanced"], "avatar_connection": "on_wake"},
+    "advanced": {
+        # A stored "wait for the voice match" from before 0.5.2 is not kept: it counted from
+        # the end of speech, the new setting from the wake word.
+        **{k: v for k, v in EXISTING_OPTIONS["advanced"].items() if k != "wait_seconds"},
+        "avatar_connection": "on_wake",
+        "match_within": 6,
+    },
 }
 
 

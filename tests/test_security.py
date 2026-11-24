@@ -176,7 +176,7 @@ async def test_regression_security_request_with_a_user_never_waits_for_a_pending
         hass,
         options_with(
             owner={"user": ALEX_USER},
-            advanced={"wait_seconds": 3, "no_helper_role": "stranger"},
+            advanced={"match_within": 6, "no_helper_role": "stranger"},
         ),
     )
     device_id = await kitchen_satellite(hass, "pending")

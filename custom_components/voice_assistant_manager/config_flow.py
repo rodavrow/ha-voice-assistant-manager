@@ -196,7 +196,7 @@ def current_settings(hass, entry):
         },
         "advanced": {
             "rule": str(texts.get("rule") or ""),
-            "wait_seconds": 3,
+            "match_within": 6,
             "no_helper_role": "owner",
             "avatar_connection": "on_wake",
         },
@@ -345,7 +345,7 @@ def settings_schema(current, users):
                     {
                         _opt("rule", advanced): _text(True),
                         _opt("agent_down_line", advanced): _text(),
-                        _fixed("wait_seconds", advanced, 3): _number(0, 6, 0.5, "s"),
+                        _fixed("match_within", advanced, 6): _number(0, 15, 0.5, "s"),
                         _fixed("no_helper_role", advanced, "owner"): _choice(
                             [
                                 ("owner", "Person 1"),

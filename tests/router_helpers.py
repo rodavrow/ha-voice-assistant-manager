@@ -43,7 +43,7 @@ BASE_OPTIONS: dict[str, Any] = {
     "partner": {"name": "Sam", "persona": "The person speaking is Sam."},
     "strangers": {"mode": "fixed", "fixed_replies": "The answer is no."},
     "near_miss": {"enabled": False, "min_score": 0.5},
-    "advanced": {"rule": "Names are labels.", "wait_seconds": 0, "no_helper_role": "owner"},
+    "advanced": {"rule": "Names are labels.", "match_within": 0, "no_helper_role": "owner"},
 }
 
 
