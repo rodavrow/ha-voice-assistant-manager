@@ -1106,7 +1106,8 @@ class VoicePersonaRouterPanel extends HTMLElement {
         h("p", { class: "intro" }, this._text("step.settings.sections.chat.description")),
         this._textField("chat", "character", { multiline: true }),
         this._entityField("chat", "tts_engine", "tts", "The speaker's own voice"),
-        this._textField("chat", "voice")
+        this._textField("chat", "voice"),
+        this._chatVoiceReminder()
       ),
       this._avatarCard(),
       h(
@@ -1124,6 +1125,15 @@ class VoicePersonaRouterPanel extends HTMLElement {
             ["stranger", "An unknown voice"],
           ],
           { fallback: "owner" }
+        ),
+        this._choiceField(
+          "advanced",
+          "avatar_connection",
+          [
+            ["on_wake", "Connect when woken"],
+            ["always", "Always connected"],
+          ],
+          { fallback: "on_wake" }
         )
       ),
     ];
@@ -1519,6 +1529,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         { class: "intro" },
         "A face on a screen that moves its lips to what this assistant says, through a LiveTalking server. The satellite still speaks as before. After adding one, choose its text-to-speech entity in this assistant's voice pipeline (Settings > Voice assistants) and choose the voice again."
       ),
+      this._chatVoiceReminder(),
       avatars.length ? avatars.map((row) => this._avatarRow(row)) : !adding && h("div", { class: "empty" }, "No avatar."),
       adding
         ? this._avatarEditor()
@@ -1531,7 +1542,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
                 class: "btn",
                 disabled: !!this._avatar,
                 onclick: () => {
-                  this._avatar = { original: null, row: { name: `${name} avatar`, engine: "", url: "", enabled: true }, errors: {} };
+                  this._avatar = { original: null, row: { name: `${name} avatar`, engine: "", url: "", avatar_id: "", enabled: true }, errors: {} };
                   this._render();
                 },
               },
@@ -1541,15 +1552,54 @@ class VoicePersonaRouterPanel extends HTMLElement {
     );
   }
 
+  /**
+   * Voice for chats should follow the avatar: the avatar entity while one is on, the
+   * normal engine again once it is off. A reminder only; the page never changes it itself.
+   */
+  _chatVoiceReminder() {
+    const engine = this._value("chat", "tts_engine") || "";
+    const mine = (this._router.avatars || []).filter((a) => a.enabled && a.entity_id);
+    const anyAvatar = new Set(this._data.routers.flatMap((r) => (r.avatars || []).map((a) => a.entity_id)).filter(Boolean));
+    if (mine.length && !mine.some((a) => a.entity_id === engine)) {
+      const wanted = mine[0].entity_id;
+      return h(
+        "div",
+        { class: "notice after", role: "status" },
+        `The avatar is on: choose ${wanted} as the text-to-speech engine of Voice for chats, so chat lines reach the avatar on the LiveTalking page too. Satellites in avatar mode already speak them through the avatar.`,
+        " ",
+        h(
+          "button",
+          {
+            class: "btn small",
+            onclick: () => {
+              this._set("chat", "tts_engine", wanted);
+              this._render();
+            },
+          },
+          `Use ${wanted}`
+        )
+      );
+    }
+    if (!mine.length && anyAvatar.has(engine)) {
+      return h(
+        "div",
+        { class: "notice after", role: "status" },
+        `Voice for chats still uses the avatar ${engine}, but this assistant's avatar is off. Choose its normal text-to-speech engine again.`
+      );
+    }
+    return null;
+  }
+
   _avatarRow(row) {
     if (this._avatar && this._avatar.original === row.id) return this._avatarEditor();
     const state = this._hass && this._hass.states && this._hass.states[row.engine];
     const engine = (state && state.attributes && state.attributes.friendly_name) || row.engine;
     const parts = [
       `Speaks through ${engine}`,
-      row.enabled ? `sends to ${row.url}` : "sending is off",
+      row.enabled ? `sends to ${row.url}` : "off",
+      row.avatar_id && `avatar ${row.avatar_id}`,
       row.entity_id ? `entity ${row.entity_id}` : "its entity is being created",
-    ];
+    ].filter(Boolean);
     return h(
       "div",
       { class: "cal" },
@@ -1560,7 +1610,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
           class: "btn",
           disabled: !!this._avatar,
           onclick: () => {
-            this._avatar = { original: row.id, row: { name: row.name, engine: row.engine, url: row.url, enabled: row.enabled }, errors: {} };
+            this._avatar = { original: row.id, row: { name: row.name, engine: row.engine, url: row.url, avatar_id: row.avatar_id || "", enabled: row.enabled }, errors: {} };
             this._render();
           },
         },
@@ -1617,9 +1667,15 @@ class VoicePersonaRouterPanel extends HTMLElement {
         }),
         "Everyone watching LiveTalking hears this assistant."
       ),
+      field(
+        "avatar_id",
+        "LiveTalking avatar",
+        h("input", { class: "input", type: "text", placeholder: "ada", value: row.avatar_id || "", oninput: (ev) => (row.avatar_id = ev.target.value) }),
+        "The avatar a satellite in avatar mode asks LiveTalking for. Leave empty for the server's default."
+      ),
       this._plainSwitch(
-        "Send speech to the avatar",
-        "When off, the assistant still speaks, but nothing is sent to the avatar.",
+        "Avatar on",
+        "When on, satellites whose wake word uses this assistant show the avatar and speak through it, if their firmware has avatar mode, and the LiveTalking page gets a copy. When off, everything goes back to normal.",
         !!row.enabled,
         (on) => (row.enabled = on)
       ),
