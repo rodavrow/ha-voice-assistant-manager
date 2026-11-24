@@ -284,6 +284,9 @@ async def _async_apply(
     for domain, service, entity_id, field, value in settings:
         if entity_id is None or _state(hass, entity_id) == value:
             continue
+        if _state(hass, entity_id) in (None, "unavailable"):
+            # The satellite is away (updating, say): the next check sets it.
+            return None
         if not await _async_call(hass, domain, service, entity_id, {field: value}):
             return None  # Never turn avatar mode on with settings the device did not take.
     state = _state(hass, entities.switch)
