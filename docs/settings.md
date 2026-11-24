@@ -59,7 +59,7 @@ Found under **Assistant** on the settings page. Used only when this assistant ta
 | --- | --- |
 | Character for chats | How this assistant behaves in a chat, up to 2000 characters. A good start is the personality part of the main agent's prompt, without anything about controlling the home or tools. When empty, **Extra instructions for announcements** is used. |
 | Voice for chats: text-to-speech engine | The engine that speaks this assistant's chat lines. When empty, the speaker's own voice is used. A media player without one uses Home Assistant's default text-to-speech engine. |
-| Voice for chats: voice | The voice to ask the engine for. Optional. |
+| Voice for chats: voice | The voice to ask the engine for. Optional. The Voice Manager page lists the voices of an engine that names them; otherwise type the voice as the engine expects it, which is often its id and not its name. |
 
 ## Avatar
 

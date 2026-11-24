@@ -285,6 +285,36 @@ async def ws_set_announcement_look(
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): f"{PREFIX}/voices",
+        vol.Required("engine"): vol.All(str, vol.Match(r"^tts\.[a-z0-9_]{1,200}$")),
+    }
+)
+@callback
+def ws_voices(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The voices of a text-to-speech engine, by name; none if it does not list them."""
+    connection.send_result(msg["id"], {"voices": _voices(hass, msg["engine"])})
+
+
+def _voices(hass: HomeAssistant, engine_id: str) -> list[dict[str, str]]:
+    from homeassistant.components import tts  # noqa: PLC0415 - only needed for this list
+
+    engine = tts.get_engine_instance(hass, engine_id)
+    if engine is None:
+        return []
+    try:
+        voices = engine.async_get_supported_voices(engine.default_language) or []
+    except Exception:  # noqa: BLE001 - only a nicer field: the page falls back to free text
+        _LOGGER.warning("Could not list the voices of %s", engine_id, exc_info=True)
+        return []
+    listed = [{"id": str(voice.voice_id), "name": str(voice.name)} for voice in voices]
+    return sorted(listed, key=lambda voice: voice["name"].casefold())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): f"{PREFIX}/save_settings",
         vol.Required("entry_id"): str,
         vol.Required("settings"): dict,
@@ -1142,6 +1172,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_set_sidebar,
         ws_set_announcement_look,
         ws_save_settings,
+        ws_voices,
         ws_save_calendar,
         ws_save_memory,
         ws_save_avatar,
