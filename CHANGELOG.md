@@ -20,6 +20,10 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   the new **Avatar connection** setting under Advanced (connect when woken, or always
   connected). The Avatar card reminds you to point **Voice for chats** at the avatar while it is
   on, and back at the normal engine once it is off.
+- **The avatar stays on screen between chat lines.** On satellite firmware with an **Avatar
+  hold** switch, a chat show turns it on, so the avatar that spoke last stays on screen,
+  idle, until the next one speaks, and turns it off when the chat ends. See
+  [Avatar](docs/avatar.md#between-the-lines-of-a-chat).
 - **Satellites that can show which assistant is talking now do.** On a satellite whose
   firmware offers a select ending in `_next_announcement_assistant`, each Chat show line and each line from `compose_announcement` shows the assistant that speaks it.
   The new `prepare_announcement` action does the same for any other announcement, such as

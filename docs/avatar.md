@@ -66,6 +66,10 @@ Voice Assistant Manager switches this for you. For every satellite whose wake wo
 
 What a satellite needs: firmware with avatar mode (a display with the LiveTalking support), offering per wake word, on the wake word's assistant device, the entities with the object ids `avatar_mode_N` (switch), `avatar_url_N` and `avatar_id_N` (text), `avatar_connection_N` (select: "Always connected" or "Connect when woken") and `avatar_session_N` (sensor), N being 1 for the first wake word. Voice Assistant Manager finds them by those ids, not by their names, so renaming them does not matter. Satellites without them are never touched.
 
+### Between the lines of a chat
+
+A satellite shows the avatar only while it speaks, so between two lines of a [Chat show](chat-show.md) it would go back to its own screen. On firmware that offers a switch named **Avatar hold**, Voice Assistant Manager turns that switch on for the chat and off when the chat ends. While it is on, the avatar that spoke last stays on screen, idle, until the next one speaks. The satellite turns the switch off by itself a minute after its last announcement. Satellites without the switch are not changed, and the switch is never touched outside a chat.
+
 ### Voice for chats
 
 While an avatar is on, the **Avatar** card reminds you to choose its entity as the text-to-speech engine of **Voice for chats**, with a button to do so. Satellites in avatar mode speak chat lines through the avatar anyway; the setting makes the lines reach the LiveTalking page too. Once the avatar is off, it reminds you to choose the normal engine again.
