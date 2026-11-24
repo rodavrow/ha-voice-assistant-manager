@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The avatar helpers: LiveTalking address, clip preparation and the LiveTalking client."""
 
+import asyncio
 import io
 import logging
 import wave
@@ -150,7 +151,8 @@ async def test_play_sends_to_at_most_max_sessions(hass, aioclient_mock):
         {"code": 1, "msg": "no"},
         {"code": 0, "data": {"sessions": "nope"}},
         {"code": 0, "data": {"sessions": [{"speaking": True}]}},
-        {"code": 0, "data": {"sessions": [{"sessionid": 5}]}},
+        {"code": 0, "data": {"sessions": [{"sessionid": 5.5}]}},
+        {"code": 0, "data": {"sessions": [{"sessionid": True}]}},
         ["not", "a", "dict"],
     ],
 )
@@ -211,3 +213,74 @@ async def test_send_skips_a_clip_it_cannot_prepare_without_calling_livetalking(
     await sender.async_send(BASE, "raw", PCM, {})
 
     assert aioclient_mock.call_count == 0
+
+
+# Review fixes
+
+
+def test_raw_pcm_that_looks_like_an_mpeg_frame_is_still_raw():
+    """Leading samples of -1 are FF FF, which is also an MPEG frame sync."""
+    silence = b"\xff\xff" * 400
+
+    assert avatar.prepare_clip("pcm", silence, {}) is None
+    extension, audio = avatar.prepare_clip("pcm", silence, {"preferred_sample_rate": 16000})
+    assert extension == "wav"
+    assert audio.startswith(b"RIFF")
+
+
+async def test_a_reply_that_is_not_json_warns_once(hass, aioclient_mock, caplog):
+    aioclient_mock.get(SESSIONS, text="<html>not here</html>")
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+
+    await sender.async_send(BASE, "mp3", MP3, {})
+    await sender.async_send(BASE, "mp3", MP3, {})
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+async def test_a_sample_format_wave_cannot_write_is_skipped_without_raising(
+    hass, aioclient_mock
+):
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+    options = {"preferred_sample_rate": 16000, "preferred_sample_bytes": 7}
+
+    await sender.async_send(BASE, "pcm", PCM, options)
+
+    assert aioclient_mock.call_count == 0
+
+
+async def test_numeric_session_ids_are_sent_as_text(hass, aioclient_mock):
+    aioclient_mock.get(SESSIONS, json={"code": 0, "data": {"sessions": [{"sessionid": 482913}]}})
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    assert await client.async_play("mp3", MP3) == 1
+    assert aioclient_mock.mock_calls[1][2] == {"sessionid": "482913"}
+
+
+async def test_clips_reach_livetalking_in_the_order_they_were_made(hass, monkeypatch):
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    played: list[bytes] = []
+
+    async def play(self, extension, audio):
+        if audio == MP3:
+            first_started.set()
+            await release_first.wait()
+        played.append(audio)
+        return 1
+
+    monkeypatch.setattr(avatar.LiveTalkingClient, "async_play", play)
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+    later = b"ID3" + b"\x09" * 40
+
+    first = hass.async_create_task(sender.async_send(BASE, "mp3", MP3, {}))
+    await first_started.wait()
+    second = hass.async_create_task(sender.async_send(BASE, "mp3", later, {}))
+    await asyncio.sleep(0)
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    assert played == [MP3, later]

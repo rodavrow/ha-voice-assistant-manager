@@ -790,7 +790,8 @@
       },
       "error": {
         "invalid_url": "Enter an address starting with http:// or https://, without a user name, password or query.",
-        "engine_is_avatar": "Choose a real engine, not an avatar."
+        "engine_is_avatar": "Choose a real engine, not an avatar.",
+        "engine_missing": "That text-to-speech entity does not exist."
       }
     }
   }

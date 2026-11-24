@@ -96,10 +96,13 @@ def prepare_clip(
     """
     if not audio or len(audio) > MAX_CLIP_BYTES:
         return None
-    if (kind := _container(audio)) is not None:
-        return kind, audio
+    kind = _container(audio)
     if extension.lower() not in _RAW_EXTENSIONS:
-        return extension, audio
+        return (kind or extension), audio
+    if kind == "wav":
+        return kind, audio
+    # Raw samples can start with bytes that look like an MPEG frame (FF FF is -1), so for
+    # raw audio only a WAV header counts.
     rate = options.get("preferred_sample_rate")
     if not rate:
         return None
@@ -132,7 +135,10 @@ class LiveTalkingClient:
             f"{self._base_url}/api/admin/sessions", timeout=self._timeout
         ) as response:
             response.raise_for_status()
-            payload = await response.json(content_type=None)
+            try:
+                payload = await response.json(content_type=None)
+            except ValueError as err:
+                raise LiveTalkingError("sessions reply is not JSON") from err
         return _session_ids(payload)[:MAX_SESSIONS]
 
     async def _async_post(self, path: str, **kwargs: Any) -> None:
@@ -153,6 +159,9 @@ def _session_ids(payload: Any) -> list[str]:  # Any: parsed JSON from another se
     ids = []
     for item in sessions:
         session_id = item.get("sessionid") if isinstance(item, dict) else None
+        # Some LiveTalking versions number their sessions.
+        if isinstance(session_id, int) and not isinstance(session_id, bool):
+            session_id = str(session_id)
         if not isinstance(session_id, str) or not session_id:
             raise LiveTalkingError("sessions reply has a session without an id")
         ids.append(session_id)
@@ -160,43 +169,54 @@ def _session_ids(payload: Any) -> list[str]:  # Any: parsed JSON from another se
 
 
 class AvatarSender:
-    """Sends finished clips for one avatar. Never raises; warns once per outage."""
+    """Sends finished clips for one avatar, one at a time and in order.
+
+    Never raises; warns once per outage.
+    """
 
     def __init__(self, hass: HomeAssistant, name: str) -> None:
         self._hass = hass
         self._name = name
         self._failing = False
         self._warned_format = False
+        # Each clip interrupts the avatar, so an earlier clip must never land after a later one.
+        self._turn = asyncio.Lock()
 
     async def async_send(
         self, base_url: str, extension: str, audio: bytes, options: Mapping[str, Any]
     ) -> None:
-        clip = prepare_clip(extension, audio, options)
+        try:
+            clip = prepare_clip(extension, audio, options)
+        except (wave.Error, ValueError, TypeError) as err:
+            _LOGGER.debug("Avatar %s: clip not sent, bad sample format (%s)", self._name, err)
+            return
         if clip is None:
             self._log_skipped(extension, len(audio))
             return
         client = LiveTalkingClient(async_get_clientsession(self._hass), base_url)
-        try:
-            async with asyncio.timeout(TOTAL_TIMEOUT):
-                played = await client.async_play(*clip)
-        except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
-            self._log_failure(err)
-            return
-        except Exception as err:  # noqa: BLE001 - the speech must never fail because of this
-            _LOGGER.warning("Avatar %s: unexpected error sending a clip", self._name, exc_info=err)
-            return
+        async with self._turn:
+            try:
+                async with asyncio.timeout(TOTAL_TIMEOUT):
+                    played = await client.async_play(*clip)
+            except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
+                self._log_failure(err)
+                return
+            except Exception as err:  # noqa: BLE001 - the speech must never fail because of this
+                self._log_failure(err, unexpected=True)
+                return
         self._failing = False
         _LOGGER.debug("Avatar %s: clip sent to %d viewer(s)", self._name, played)
 
-    def _log_failure(self, err: Exception) -> None:
-        level = logging.DEBUG if self._failing else logging.WARNING
+    def _log_failure(self, err: Exception, *, unexpected: bool = False) -> None:
+        first = not self._failing
         self._failing = True
         _LOGGER.log(
-            level,
+            logging.WARNING if first else logging.DEBUG,
             "Avatar %s: LiveTalking could not be reached or answered oddly (%s); the speech"
             " itself is not affected",
             self._name,
             type(err).__name__,
+            exc_info=err if unexpected and first else None,
         )
 
     def _log_skipped(self, extension: str, size: int) -> None:

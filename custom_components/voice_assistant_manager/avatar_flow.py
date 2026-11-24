@@ -69,6 +69,8 @@ class AvatarSubentryFlow(ConfigSubentryFlow):
                 errors[CONF_URL] = "invalid_url"
             if _is_avatar(self.hass, engine):
                 errors[CONF_ENGINE] = "engine_is_avatar"
+            elif self.hass.states.get(engine) is None:
+                errors[CONF_ENGINE] = "engine_missing"
             if not errors:
                 title = str(user_input[CONF_NAME]).strip() or f"{entry.title} avatar"
                 data = {

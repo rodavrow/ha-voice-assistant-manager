@@ -12,7 +12,8 @@ import aiohttp
 import pytest
 from homeassistant.components import tts
 from homeassistant.components.tts.const import DATA_COMPONENT, DATA_TTS_MANAGER
-from homeassistant.config_entries import ConfigSubentry
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
@@ -109,7 +110,7 @@ async def add_avatar(
         unique_id=None,
     )
     hass.config_entries.async_add_subentry(entry, subentry)
-    assert await hass.config_entries.async_reload(entry.entry_id)
+    # The entry's update listener reloads it, which adds the entity.
     await hass.async_block_till_done()
     entity_id = er.async_get(hass).async_get_entity_id("tts", DOMAIN, subentry.subentry_id)
     assert entity_id is not None
@@ -293,13 +294,26 @@ async def test_an_engine_error_reaches_home_assistant_unchanged(hass, engines, s
     assert sent == []
 
 
-async def test_a_missing_engine_fails_like_a_missing_engine(hass, engines, sent):
+async def test_a_missing_engine_offers_no_language_so_home_assistant_refuses(
+    hass, engines, sent
+):
+    entry = await add_router(hass)
+    avatar_id = await add_avatar(hass, entry, "tts.cloud_voice")
+    set_avatar(hass, entry, engine="tts.gone")
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await speak(hass, avatar_id)
+    assert raised.value.translation_key == "language_not_supported"
+    assert engines["cloud"].calls == []
+    assert sent == []
+
+
+async def test_an_engine_that_vanished_mid_request_fails_as_not_found(hass, engines, sent):
     entry = await add_router(hass)
     avatar_id = await add_avatar(hass, entry, "tts.cloud_voice")
     entity = tts.get_engine_instance(hass, avatar_id)
     set_avatar(hass, entry, engine="tts.gone")
 
-    assert entity.supported_languages == []
     with pytest.raises(HomeAssistantError) as raised:
         await entity.async_get_tts_audio("Hello", "en-GB", {})
     assert raised.value.translation_key == "provider_not_found"
@@ -336,7 +350,11 @@ async def test_removing_the_avatar_removes_its_entity(hass, engines, sent):
 
     assert er.async_get(hass).async_get(avatar_id) is None
     assert hass.states.get(avatar_id) is None
-    assert await hass.config_entries.async_reload(entry.entry_id)
+    assert entry.state is ConfigEntryState.LOADED
+    unloaded = hass.config_entries.async_unload_platforms
+    with patch.object(hass.config_entries, "async_unload_platforms", wraps=unloaded) as unload:
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    assert unload.call_args.args[1] == [Platform.CONVERSATION]
 
 
 # The Add avatar and Reconfigure dialogs
@@ -445,3 +463,54 @@ async def test_renaming_an_avatar_renames_its_entity(hass, engines, sent):
     await hass.async_block_till_done()
 
     assert hass.states.get(avatar_id).name == "Ada face"
+
+
+
+async def test_the_add_dialog_refuses_an_engine_that_does_not_exist(hass, engines):
+    entry = await add_router(hass)
+
+    result = await start_flow(hass, entry)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**AVATAR_FORM, avatar.CONF_ENGINE: "tts.nope"}
+    )
+
+    assert result["errors"] == {avatar.CONF_ENGINE: "engine_missing"}
+
+
+async def test_reconfigure_refuses_the_avatar_itself_as_its_engine(hass, engines, sent):
+    entry = await add_router(hass)
+    avatar_id = await add_avatar(hass, entry, "tts.cloud_voice")
+    subentry_id = next(iter(entry.subentries))
+
+    result = await start_flow(hass, entry, "reconfigure", subentry_id)
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], {**AVATAR_FORM, avatar.CONF_ENGINE: avatar_id}
+    )
+
+    assert result["errors"] == {avatar.CONF_ENGINE: "engine_is_avatar"}
+    assert entry.subentries[subentry_id].data[avatar.CONF_ENGINE] == "tts.cloud_voice"
+
+
+async def test_a_send_still_running_is_cancelled_when_the_assistant_unloads(
+    hass, engines, monkeypatch
+):
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hang(self, *args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(avatar.AvatarSender, "async_send", hang)
+    entry = await add_router(hass)
+    avatar_id = await add_avatar(hass, entry, "tts.cloud_voice")
+    await speak(hass, avatar_id)
+    await started.wait()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    assert cancelled.is_set()

@@ -142,9 +142,13 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
         url = normalize_url(str(settings.get(CONF_URL) or ""))
         if not settings.get(CONF_ENABLED) or url is None or self._sender is None:
             return
-        self.hass.async_create_background_task(
+        # Not started eagerly, so none of the sending runs in the speech path; cancelled with
+        # the assistant when it unloads.
+        self._entry.async_create_background_task(
+            self.hass,
             self._sender.async_send(url, extension, audio, dict(options)),
             f"{DOMAIN} avatar clip {self.entity_id}",
+            eager_start=False,
         )
 
     # Settings
