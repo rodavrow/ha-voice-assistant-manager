@@ -155,13 +155,18 @@ class LiveTalkingClient:
         self._timeout = aiohttp.ClientTimeout(total=TOTAL_TIMEOUT, connect=CONNECT_TIMEOUT)
 
     async def async_play(
-        self, extension: str, audio: bytes, skip: frozenset[str] = frozenset()
+        self,
+        extension: str,
+        audio: bytes,
+        skip: frozenset[str] = frozenset(),
+        avatar_id: str = "",
     ) -> int:
         """Stop what each viewer's avatar says and play the clip. Returns the viewer count.
 
-        Sessions in `skip` are left alone.
+        Sessions in `skip` are left alone, and with an `avatar_id` so are sessions showing
+        another avatar (see choose_viewers).
         """
-        session_ids = await self._async_sessions(skip)
+        session_ids = choose_viewers(await self._async_sessions(), skip, avatar_id)
         for session_id in session_ids:
             await self._async_post("/interrupt_talk", json={"sessionid": session_id})
             form = aiohttp.FormData()
@@ -170,7 +175,7 @@ class LiveTalkingClient:
             await self._async_post("/humanaudio", data=form)
         return len(session_ids)
 
-    async def _async_sessions(self, skip: frozenset[str]) -> list[str]:
+    async def _async_sessions(self) -> list[tuple[str, str]]:
         async with self._session.get(
             f"{self._base_url}/api/admin/sessions", timeout=self._timeout
         ) as response:
@@ -179,7 +184,7 @@ class LiveTalkingClient:
                 payload = await response.json(content_type=None)
             except ValueError as err:
                 raise LiveTalkingError("sessions reply is not JSON") from err
-        return [sid for sid in _session_ids(payload) if sid not in skip][:MAX_SESSIONS]
+        return _sessions(payload)
 
     async def _async_post(self, path: str, **kwargs: Any) -> None:
         async with self._session.post(
@@ -188,15 +193,44 @@ class LiveTalkingClient:
             response.raise_for_status()
 
 
-def _session_ids(payload: Any) -> list[str]:  # Any: parsed JSON from another server
-    """The viewer session ids of a sessions reply. Raises LiveTalkingError on any surprise."""
+def choose_viewers(
+    sessions: list[tuple[str, str]], skip: frozenset[str], avatar_id: str
+) -> list[str]:
+    """The sessions a copy goes to, at most MAX_SESSIONS; each skipped one is logged.
+
+    A session in `skip` belongs to a satellite in avatar mode, which sends its own speech
+    to it. With an `avatar_id`, a session showing another avatar never gets the copy, so
+    one assistant's speech never comes out of another's face. Without one (the server's
+    default avatar) every other session does.
+    """
+    chosen: list[str] = []
+    for session_id, shows in sessions:
+        if session_id in skip:
+            _LOGGER.debug("Avatar copy: session %s skipped, a satellite speaks to it", session_id)
+        elif avatar_id and shows != avatar_id:
+            _LOGGER.debug(
+                "Avatar copy: session %s skipped, it shows avatar %s, not %s",
+                session_id, shows or "(default)", avatar_id,
+            )
+        elif len(chosen) >= MAX_SESSIONS:
+            _LOGGER.debug(
+                "Avatar copy: session %s skipped, %d sessions at most", session_id, MAX_SESSIONS
+            )
+        else:
+            _LOGGER.debug("Avatar copy: session %s gets the clip", session_id)
+            chosen.append(session_id)
+    return chosen
+
+
+def _sessions(payload: Any) -> list[tuple[str, str]]:  # Any: parsed JSON from another server
+    """(session id, avatar id or "") of each viewer. Raises LiveTalkingError on any surprise."""
     if not isinstance(payload, dict) or payload.get("code") != 0:
         raise LiveTalkingError("sessions reply is not a success")
     data = payload.get("data")
     sessions = data.get("sessions") if isinstance(data, dict) else None
     if not isinstance(sessions, list):
         raise LiveTalkingError("sessions reply has no session list")
-    ids = []
+    found: list[tuple[str, str]] = []
     for item in sessions:
         session_id = item.get("sessionid") if isinstance(item, dict) else None
         # Some LiveTalking versions number their sessions.
@@ -204,8 +238,9 @@ def _session_ids(payload: Any) -> list[str]:  # Any: parsed JSON from another se
             session_id = str(session_id)
         if not isinstance(session_id, str) or not session_id:
             raise LiveTalkingError("sessions reply has a session without an id")
-        ids.append(session_id)
-    return ids
+        shows = item.get("avatar_id")
+        found.append((session_id, shows if isinstance(shows, str) else ""))
+    return found
 
 
 class AvatarSender:
@@ -223,7 +258,12 @@ class AvatarSender:
         self._turn = asyncio.Lock()
 
     async def async_send(
-        self, base_url: str, extension: str, audio: bytes, options: Mapping[str, Any]
+        self,
+        base_url: str,
+        extension: str,
+        audio: bytes,
+        options: Mapping[str, Any],
+        avatar_id: str = "",
     ) -> None:
         try:
             clip = prepare_clip(extension, audio, options)
@@ -237,7 +277,9 @@ class AvatarSender:
         async with self._turn:
             try:
                 async with asyncio.timeout(TOTAL_TIMEOUT):
-                    played = await client.async_play(*clip, device_sessions(self._hass))
+                    played = await client.async_play(
+                        *clip, device_sessions(self._hass), avatar_id
+                    )
             except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
                 self._log_failure(err)
                 return

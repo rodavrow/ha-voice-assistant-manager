@@ -21,6 +21,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .avatar import (
+    CONF_AVATAR_ID,
     CONF_ENABLED,
     CONF_ENGINE,
     CONF_URL,
@@ -146,7 +147,9 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
         # the assistant when it unloads.
         self._entry.async_create_background_task(
             self.hass,
-            self._sender.async_send(url, extension, audio, dict(options)),
+            self._sender.async_send(
+                url, extension, audio, dict(options), str(settings.get(CONF_AVATAR_ID) or "")
+            ),
             f"{DOMAIN} avatar clip {self.entity_id}",
             eager_start=False,
         )

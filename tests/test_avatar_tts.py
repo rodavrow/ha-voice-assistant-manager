@@ -91,7 +91,7 @@ def sent(monkeypatch) -> list[tuple[str, str, bytes, dict[str, Any]]]:
     """What the avatar sender was asked to send: (url, extension, audio, options)."""
     calls: list[tuple[str, str, bytes, dict[str, Any]]] = []
 
-    async def record(self, base_url, extension, audio, options):
+    async def record(self, base_url, extension, audio, options, avatar_id=""):
         calls.append((base_url, extension, audio, dict(options)))
 
     monkeypatch.setattr(avatar.AvatarSender, "async_send", record)
