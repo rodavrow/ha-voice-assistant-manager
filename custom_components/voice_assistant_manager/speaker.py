@@ -65,7 +65,7 @@ def resolve_speaker(
 
 # A follow-up in the same voice conversation, on the same satellite, within this long of
 # the previous turn keeps that turn's person unless a new voice match says otherwise.
-FOLLOW_UP_WINDOW = timedelta(seconds=60)
+FOLLOW_UP_WINDOW = timedelta(seconds=20)
 # Helper values that are a voice match's verdict, unlike "pending".
 _VERDICTS = ("owner", "wife", "partner", "stranger")
 

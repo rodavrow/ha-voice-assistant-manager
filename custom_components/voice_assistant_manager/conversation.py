@@ -93,8 +93,6 @@ SCRIPT_TIMEOUT = 8
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 CHAT_STOPPED_LINE = "Okay."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
-# How long a follow-up waits for a late voice match before keeping the conversation's person.
-FOLLOW_UP_WAIT = 1.0
 OTHER_PERSON = {"owner": "wife", "wife": "owner"}
 # How the settings screen calls each person, for one who has no name.
 PERSON_NUMBER = {"owner": "Person 1", "wife": "Person 2"}
@@ -243,11 +241,11 @@ class PersonaRouter(conversation.ConversationEntity):
             return text
         return labelled
 
-    async def _helper_state(self, device_id, advanced, most: float | None = None):
+    async def _helper_state(self, device_id, advanced):
         """The voice_speaker helper's state on the satellite, or None if it has none.
 
         Waits a little while the helper says pending, because the match lands a
-        few seconds after the wake word: the "wait" setting, or `most` seconds if shorter.
+        few seconds after the wake word: up to the "wait for the voice match" setting.
         """
         helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
@@ -257,8 +255,6 @@ class PersonaRouter(conversation.ConversationEntity):
             seconds = float(advanced.get("wait_seconds", 3))
         except (TypeError, ValueError):
             seconds = 3.0
-        if most is not None:
-            seconds = min(seconds, most)
         for _ in range(max(int(seconds * 10), 0)):
             if state.state != "pending":
                 break
@@ -293,7 +289,8 @@ class PersonaRouter(conversation.ConversationEntity):
 
         A follow-up in the same conversation keeps its person unless a new voice match
         says otherwise (speaker.follow_up_role), so it never depends on the satellite's
-        timing. It waits at most a second for a late match, not the whole wait.
+        timing. It waits the whole "wait for the voice match" time like any turn, so a
+        late match, an unknown voice's too, still decides.
         """
         now = dt_util.utcnow()
         conversation_id = user_input.conversation_id
@@ -304,9 +301,7 @@ class PersonaRouter(conversation.ConversationEntity):
         remembered = self._spoken_by.get(conversation_id or "")
         if remembered is not None and remembered.device_id != device_id:
             remembered = None
-        state = await self._helper_state(
-            device_id, advanced, most=FOLLOW_UP_WAIT if remembered else None
-        )
+        state = await self._helper_state(device_id, advanced)
         if state is None:
             return resolve_speaker(None, None, user_map, no_helper_role)
         kept = follow_up_role(remembered, device_id, state.state, state.last_changed, now)

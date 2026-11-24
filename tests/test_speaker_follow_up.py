@@ -172,3 +172,32 @@ async def test_the_follow_up_is_answered_with_the_speakers_persona(hass, router)
 
     main_calls = [call for call in agents.calls if call.get("agent_id") == MAIN_AGENT]
     assert main_calls[-1]["text"] == "Alex: and tomorrow?"
+
+
+async def test_a_late_stranger_match_on_a_follow_up_is_still_caught(hass):
+    """A follow-up waits the full "wait for the voice match" time: a stranger whose match
+    lands after a second is refused, not given the conversation's person."""
+    import asyncio
+
+    from .router_helpers import options_with
+
+    router = await add_router(hass, options_with(advanced={"wait_seconds": 3}))
+    kitchen = add_satellite(hass)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+    match(hass, kitchen, "pending")
+
+    async def late_match() -> None:
+        await asyncio.sleep(1.5)
+        match(hass, kitchen, "stranger")
+
+    task = hass.async_create_task(late_match())
+    role = await speaker(hass, router, voice_turn(kitchen))
+    await task
+
+    assert role == "stranger"
+
+
+def test_the_follow_up_window_is_short():
+    """A separate wake word a little later is not a follow-up: it needs its own match."""
+    assert FOLLOW_UP_WINDOW <= timedelta(seconds=20)
