@@ -48,7 +48,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   within** (seconds after the satellite started listening, default 6). A satellite matches
   on a fixed stretch of audio after the wake word, so its match lands a fixed time later
   however long the request is: a long request needs no wait at all, and a short follow-up
-  only waits for what is left. A stored "Wait for the voice match" is not carried over.
+  only waits for what is left. A stored "Wait for the voice match" is not carried over,
+  and no longer blocks saving the settings on the page.
 
 ### Fixed
 
