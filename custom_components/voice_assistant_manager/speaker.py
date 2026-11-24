@@ -63,9 +63,12 @@ def resolve_speaker(
     return fallback, False
 
 
-# A follow-up in the same voice conversation, on the same satellite, within this long of
-# the previous turn keeps that turn's person unless a new voice match says otherwise.
-FOLLOW_UP_WINDOW = timedelta(seconds=20)
+# A satellite that reports each new turn's wake word tells a follow-up apart exactly. For
+# one that does not, a turn within this long of the previous one counts as a follow-up.
+FOLLOW_UP_WINDOW = timedelta(seconds=60)
+# How long a conversation's person is remembered at most: Home Assistant's own conversation
+# lifetime.
+CONVERSATION_LIFETIME = timedelta(minutes=5)
 # Helper values that are a voice match's verdict, unlike "pending".
 _VERDICTS = ("owner", "wife", "partner", "stranger")
 
@@ -86,18 +89,24 @@ def follow_up_role(
     helper_state: str | None,
     helper_changed: datetime | None,
     now: datetime,
+    woke_since: bool | None,
 ) -> Role | None:
     """The person a follow-up keeps, or None when this turn needs its own voice match.
 
-    A follow-up carries no wake word, so a satellite often makes no new voice match for it,
-    and whether its tracking automation still holds the last speaker depends on the
-    satellite's timing. So the person of the conversation's previous turn is kept unless
+    A follow-up carries no wake word, and satellites often make no voice match for it. So
+    the person of the conversation's previous turn is kept, on the same satellite, unless
     a voice match arrived since then: another person switches, an unknown voice refuses.
-    Only the same satellite, and only within FOLLOW_UP_WINDOW of the previous turn.
+
+    woke_since  True when the satellite reported a wake word (a new turn: wake word, Wake
+                button, a listen after an announcement) since the previous turn, False
+                when it did not (a follow-up), None when it reports none. With None, a
+                turn within FOLLOW_UP_WINDOW of the previous one counts as a follow-up.
     """
     if remembered is None or device_id != remembered.device_id:
         return None
-    if now - remembered.at > FOLLOW_UP_WINDOW:
+    if woke_since is True:
+        return None
+    if woke_since is None and now - remembered.at > FOLLOW_UP_WINDOW:
         return None
     new_match = (
         helper_state in _VERDICTS

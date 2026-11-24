@@ -198,6 +198,86 @@ async def test_a_late_stranger_match_on_a_follow_up_is_still_caught(hass):
     assert role == "stranger"
 
 
-def test_the_follow_up_window_is_short():
-    """A separate wake word a little later is not a follow-up: it needs its own match."""
-    assert FOLLOW_UP_WINDOW <= timedelta(seconds=20)
+def test_without_wake_reports_the_window_is_a_minute():
+    assert timedelta(seconds=60) == FOLLOW_UP_WINDOW
+
+
+# Satellites that report each new turn's wake word, as LANovo and EchoLocal do
+
+
+def add_wake_sensor(hass: HomeAssistant, device_id: str) -> str:
+    """The satellite's "Last wake word" text sensor, as Home Assistant registers it."""
+    from homeassistant.helpers import entity_registry as er
+
+    entity = er.async_get(hass).async_get_or_create(
+        "sensor",
+        "esphome",
+        "aa:bb:cc:dd:ee:ff/0/text_sensor/Last wake word",
+        suggested_object_id="kitchen_last_wake_word",
+        device_id=device_id,
+    )
+    return entity.entity_id
+
+
+def woke(hass: HomeAssistant, sensor: str) -> None:
+    """A new turn: the satellite reports its wake word again, even when it is the same."""
+    hass.states.async_set(sensor, "hey_ada")
+
+
+async def test_a_reported_follow_up_keeps_the_person_however_late(hass, router, freezer):
+    kitchen = add_satellite(hass)
+    sensor = add_wake_sensor(hass, kitchen)
+    woke(hass, sensor)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+
+    freezer.tick(timedelta(seconds=120))  # a long reply and a slow answer
+    match(hass, kitchen, "pending")
+
+    assert await speaker(hass, router, voice_turn(kitchen)) == "owner"
+
+
+async def test_a_new_wake_word_needs_its_own_match(hass, router):
+    kitchen = add_satellite(hass)
+    sensor = add_wake_sensor(hass, kitchen)
+    woke(hass, sensor)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+
+    woke(hass, sensor)  # someone woke it again; no voice match arrived
+    match(hass, kitchen, "pending")
+
+    assert await speaker(hass, router, voice_turn(kitchen)) == "stranger"
+
+
+async def test_a_new_wake_word_with_the_other_person_switches(hass, router):
+    kitchen = add_satellite(hass)
+    sensor = add_wake_sensor(hass, kitchen)
+    woke(hass, sensor)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+
+    woke(hass, sensor)
+    match(hass, kitchen, "partner")
+
+    assert await speaker(hass, router, voice_turn(kitchen)) == "wife"
+
+
+async def test_a_reported_follow_up_does_not_wait_for_a_match_that_never_comes(hass):
+    import time
+
+    from .router_helpers import options_with
+
+    router = await add_router(hass, options_with(advanced={"wait_seconds": 3}))
+    kitchen = add_satellite(hass)
+    sensor = add_wake_sensor(hass, kitchen)
+    woke(hass, sensor)
+    match(hass, kitchen, "owner")
+    await speaker(hass, router, voice_turn(kitchen))
+    match(hass, kitchen, "pending")
+
+    started = time.monotonic()
+    role = await speaker(hass, router, voice_turn(kitchen))
+
+    assert role == "owner"
+    assert time.monotonic() - started < 1.0
