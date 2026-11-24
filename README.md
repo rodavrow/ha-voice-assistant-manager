@@ -179,6 +179,8 @@ The helper holds one of these values:
 
 [`examples/speaker_tracking_automation.yaml`](examples/speaker_tracking_automation.yaml) is an automation that does this for satellites which expose a "last speaker" sensor and a "last speaker score" sensor. When the satellite starts listening it writes `pending`. When the voice match arrives it writes the role.
 
+A follow-up question in the same conversation, which a satellite asks without a wake word and usually without a new voice match, keeps the person of the turn before: on the same satellite, within a minute of that turn. A new voice match still decides: the other person switches, an unknown voice is refused. This does not depend on the satellite's timing.
+
 Change the entity ids and the two names in it to match your setup. If your speaker recognition reports its result in another way, write the same four values into the helper by whatever means you have.
 
 #### 3. Fill in the settings
