@@ -97,6 +97,8 @@ class FakeAgents:
 
     main_reply: str = "Noted."
     main_error: bool = False
+    # When set, the main agent raises it instead of answering (a provider that is down).
+    main_raises: Exception | None = None
     memory_reply: str = '{"add": [], "remove": []}'
     # When set, the memory agent waits for it before answering.
     memory_gate: asyncio.Event | None = None
@@ -138,6 +140,8 @@ class FakeAgents:
             if self.writer_gate is not None:
                 await self.writer_gate.wait()
             return _result(self.writer_reply, error=self.writer_error)
+        if kwargs.get("agent_id") == MAIN_AGENT and self.main_raises is not None:
+            raise self.main_raises
         if self.main_uses_session:
             return self._main_in_session(hass, text, conversation_id, context, kwargs)
         log = hass.data.get(DATA_CHAT_LOGS, {}).get(conversation_id or "")

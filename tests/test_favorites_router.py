@@ -28,6 +28,8 @@ from custom_components.voice_assistant_manager.panel import (
     speaker_overrides,
 )
 
+from custom_components.voice_assistant_manager.conversation import DEFAULT_AGENT_DOWN_LINE
+
 from .router_helpers import (
     MAIN_AGENT,
     MEMORY_AGENT,
@@ -394,12 +396,14 @@ async def test_the_asker_is_forgotten_when_the_main_agent_fails(hass, satellite)
     entry = await favorites_router(hass)
     seen, patched = watching(hass, FakeAgents(), raises=RuntimeError("model is down"))
 
-    with patched, pytest.raises(RuntimeError):
-        await ask(hass, entry, "what's on tonight", device_id=satellite.device_id)
+    with patched:
+        result = await ask(hass, entry, "what's on tonight", device_id=satellite.device_id)
 
     ((context_id, during),) = seen
     assert during is not None
     assert asker(hass, context_id) is None
+    # The failure reaches the person as a short line, not as an error.
+    assert result.response.speech["plain"]["speech"] == DEFAULT_AGENT_DOWN_LINE
 
 
 async def test_regression_a_request_that_remembered_nobody_keeps_another_requests_record(
