@@ -63,8 +63,14 @@ def add_entity(
     return entity.entity_id
 
 
-def add_satellite_device(hass: HomeAssistant, *, avatar_entities: bool = True) -> None:
-    """A satellite whose two assistant sub-devices carry the avatar entities."""
+def add_satellite_device(
+    hass: HomeAssistant, *, avatar_entities: bool = True, children: bool = False
+) -> None:
+    """A satellite whose two assistant sub-devices carry the avatar entities.
+
+    ESPHome registers a sub-device either as a device "via" the satellite or, with
+    `children`, as a child device of it (parent_device_id), which is kept apart.
+    """
     owner = MockConfigEntry(domain="esphome")
     owner.add_to_hass(hass)
     devices = dr.async_get(hass)
@@ -90,12 +96,20 @@ def add_satellite_device(hass: HomeAssistant, *, avatar_entities: bool = True) -
     )
     for slot in (1, 2):
         index = slot + 3  # Not the slot: it differs from one firmware to the next.
-        sub = devices.async_get_or_create(
-            config_entry_id=owner.entry_id,
-            identifiers={("esphome", f"{MAC}_{index}")},
-            name=f"kitchen assistant {slot}",
-            via_device_id=main.id,
-        )
+        if children:
+            sub = devices.async_get_or_create_child(
+                config_entry_id=owner.entry_id,
+                identifiers={("esphome", f"{MAC}_{index}")},
+                name=f"kitchen assistant {slot}",
+                parent_device_id=main.id,
+            )
+        else:
+            sub = devices.async_get_or_create(
+                config_entry_id=owner.entry_id,
+                identifiers={("esphome", f"{MAC}_{index}")},
+                name=f"kitchen assistant {slot}",
+                via_device_id=main.id,
+            )
         defaults = {"mode": "off", "url": "", "id": "", "connection": "Connect when woken"}
         for kind, (esphome_type, domain, name) in AVATAR_ENTITIES.items():
             add_entity(
@@ -576,3 +590,18 @@ async def test_a_satellite_without_avatar_entities_is_logged(hass, engines, sent
 
     lines = debug_lines(caplog)
     assert any(SATELLITE in line and "no avatar entities" in line for line in lines)
+
+
+async def test_regression_avatar_child_sub_devices_get_avatar_mode(hass, engines, sent):
+    """Real satellites registered their assistant sub-devices as child devices, which the
+    check did not search: it logged "has no avatar entities" and never set avatar mode."""
+    add_satellite_device(hass, children=True)
+    device = Device(hass)
+    entry = await add_router(hass)
+    await add_avatar(hass, entry, "tts.cloud_voice")
+    device.calls.clear()
+
+    with slots(entry, None):
+        await reconcile(hass)
+
+    assert f"turn_on {assistant_switch(1)} None" in device.calls
