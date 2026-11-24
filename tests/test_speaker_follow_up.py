@@ -358,3 +358,29 @@ async def test_a_match_landing_before_the_deadline_still_decides(hass):
     await task
 
     assert role == "stranger"
+
+
+async def test_regression_a_helper_left_pending_still_waits_at_the_next_wake_word(hass):
+    """A follow-up leaves the helper on pending (no match comes). At the next wake word
+    the automation writes pending again: the value is unchanged, so only the state's
+    last report moves, not its last change. 0.5.2b5 measured the wait from the last
+    change, found it long over, did not wait, and refused the person as an unknown voice
+    while their match arrived a moment later."""
+    import asyncio
+
+    from .router_helpers import options_with
+
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
+    kitchen = add_satellite(hass)
+    match_since(hass, kitchen, "pending", 60)  # left over from a follow-up a minute ago
+    match(hass, kitchen, "pending")  # the new wake word: the same value written again
+
+    async def the_match() -> None:
+        await asyncio.sleep(1.3)
+        match(hass, kitchen, "owner")
+
+    task = hass.async_create_task(the_match())
+    role = await speaker(hass, router, voice_turn(kitchen, "01ANOTHERCONVERSATION0000"))
+    await task
+
+    assert role == "owner"
