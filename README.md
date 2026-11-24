@@ -28,6 +28,7 @@ It sits in front of a conversation agent you already have (any LLM agent) and lo
 - **Calendar announcements.** The waste collection, birthdays or a family calendar, announced in the assistant's style and language, whatever language the calendar is in. See [Calendar announcements](docs/calendars.md).
 - **Favorites.** "Play Radio 2" plays your own Radio 2 on the speaker you are talking to, instantly. Save stations, podcasts and playlists by voice or on the pages, for yourself or the household. See [Favorites](docs/favorites.md).
 - **A chat show.** Two assistants talk to each other on a speaker, each in its own character and voice, and you can join in or tell them to stop. They can only talk. See [Chat show](docs/chat-show.md).
+- **An avatar.** A face on a screen that moves its lips to what the assistant says, through a LiveTalking server. The satellite still speaks as before. See [Avatar](docs/avatar.md).
 - **A page for each person.** Alex and Sam can manage their own persona, reminders and remembered facts without being administrators. See [My assistant](#my-assistant).
 - **A settings page in the sidebar,** for everything above. There is no YAML to edit for the assistants themselves.
 
@@ -42,6 +43,7 @@ It sits in front of a conversation agent you already have (any LLM agent) and lo
 - [My assistant](#my-assistant)
 - [Favorites](docs/favorites.md)
 - [Chat show](docs/chat-show.md)
+- [Avatar](docs/avatar.md)
 - [Documentation](#documentation)
 - [Words used here](#words-used-here)
 - [Privacy](#privacy)
@@ -259,6 +261,7 @@ An administrator decides where reminders are kept, under **Reminders** in the se
 | [More assistants than wake-word slots](docs/multiple-assistants.md) | Having more assistants than your satellites have wake words. |
 | [Favorites](docs/favorites.md) | Playing stations, podcasts and playlists by name, saving them by voice, whose list and which speaker, and the limits. |
 | [Chat show](docs/chat-show.md) | Two assistants talking to each other on a speaker, with characters, voices, limits and joining in. |
+| [Avatar](docs/avatar.md) | A lip-sync avatar for an assistant: how the speech is copied, switching engines, and the limits. |
 | [Limits](docs/limits.md) | What Voice Assistant Manager does not do, and where it can be bypassed. |
 | [Troubleshooting](docs/troubleshooting.md) | Common problems and their likely causes. |
 | [Contributing](CONTRIBUTING.md) | Running the tests. |
