@@ -61,6 +61,10 @@ Found under **Assistant** on the settings page. Used only when this assistant ta
 | Voice for chats: text-to-speech engine | The engine that speaks this assistant's chat lines. When empty, the speaker's own voice is used. A media player without one uses Home Assistant's default text-to-speech engine. |
 | Voice for chats: voice | The voice to ask the engine for. Optional. |
 
+## Avatar
+
+Found under **Assistant** on the settings page. An avatar is a lip-sync face for this assistant: a text-to-speech entity that speaks through the engine you choose and sends a copy of the speech to a LiveTalking server. Add, change or remove it there. The card's own **Save** stores the avatar at once; it does not need **Save changes**. See [Avatar](avatar.md).
+
 ## Calendars
 
 | Setting | What it does |

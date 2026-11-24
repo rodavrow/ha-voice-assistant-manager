@@ -21,9 +21,11 @@ Only pipelines that use the avatar entity send anything. Other assistants, and o
 
 ## Adding an avatar
 
-1. Go to **Settings > Devices & services > Voice Assistant Manager**.
-2. On the assistant's entry, choose **Add avatar**.
-3. Fill in the dialog and press **Submit**.
+1. Open **Voice Manager** in the sidebar, choose the assistant at the top, and go to **Assistant**.
+2. In the **Avatar** card, press **Add an avatar**.
+3. Fill in the fields and press **Save**.
+
+The same can be done under **Settings > Devices & services > Voice Assistant Manager**, with **Add avatar** on the assistant's entry.
 
 | Setting | What it does |
 | --- | --- |
@@ -34,11 +36,11 @@ Only pipelines that use the avatar entity send anything. Other assistants, and o
 
 Then open **Settings > Voice assistants**, open the assistant's pipeline, set **Text-to-speech** to the new avatar entity, and choose the voice again. The voice list is the engine's own list.
 
-To change anything later, choose **Reconfigure** on the avatar under the assistant's entry. A new engine, address or switch applies to the next thing the assistant says, without a restart.
+To change anything later, press **Change** next to the avatar in the **Avatar** card (or **Reconfigure** on the avatar under the assistant's entry). **Remove** there removes the avatar and its entity. A new engine, address or switch applies to the next thing the assistant says, without a restart.
 
 ### Switching engines
 
-1. Reconfigure the avatar and choose the other engine.
+1. Change the avatar and choose the other engine.
 2. Open the pipeline and choose a voice again. Voices differ per engine, and the pipeline keeps the voice name of the old engine until you change it.
 
 The avatar entity stays the same, so the pipeline does not need a new engine.
