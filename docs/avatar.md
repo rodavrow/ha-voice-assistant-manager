@@ -32,7 +32,8 @@ The same can be done under **Settings > Devices & services > Voice Assistant Man
 | Name | The name of the new entity. "Ada avatar" becomes `tts.ada_avatar`. |
 | Text-to-speech engine | The engine that makes the speech. Any text-to-speech entity, except another avatar. |
 | LiveTalking address | The address of the LiveTalking server, for example `http://livetalking.local:8010`. Only `http://` and `https://` addresses are accepted. |
-| Send speech to the avatar | When off, the assistant still speaks through the avatar entity, but nothing is sent to LiveTalking. |
+| LiveTalking avatar | The avatar a satellite in avatar mode asks LiveTalking for, for example `ada`. Letters, digits, `_` and `-`, at most 64. Leave empty for the server's default. |
+| Avatar on | When on, satellites whose wake word uses this assistant show the avatar (see [Satellites in avatar mode](#satellites-in-avatar-mode)), and the LiveTalking page gets a copy of the speech. When off, everything goes back to normal; the assistant still speaks through the avatar entity. |
 
 Then open **Settings > Voice assistants**, open the assistant's pipeline, set **Text-to-speech** to the new avatar entity, and choose the voice again. The voice list is the engine's own list.
 
@@ -49,9 +50,29 @@ Home Assistant keeps speech it made under the avatar's name, not the engine's. I
 
 Adding, removing or renaming an avatar reloads its assistant, which ends a conversation that is going on with it at that moment. Changing the engine, the address or the switch does not.
 
+## Satellites in avatar mode
+
+Some satellite firmware can show the avatar itself: the satellite plays the assistant's LiveTalking stream, video and sound, instead of its own animations, and its spoken replies come from LiveTalking, so the lips and the sound match. While listening, the avatar's idle video is shown; while speaking, the avatar speaks.
+
+Voice Assistant Manager switches this for you. For every satellite whose wake word uses an assistant with an avatar that is on, it turns on that wake word's avatar mode and gives it the avatar's LiveTalking address, the LiveTalking avatar and the connection setting below. For every other wake word it turns avatar mode off, so switching an avatar off or removing it puts the satellite back to normal. It checks this when Home Assistant starts, when an avatar or assistant changes, and every minute, which also catches wake words and pipelines you changed. It only changes what differs.
+
+- **Avatar connection** under **Assistant > Advanced**:
+  - **Connect when woken** (the default) connects to LiveTalking when the satellite wakes. The avatar shows about a second later; until then the normal look is shown.
+  - **Always connected** keeps a LiveTalking session open per satellite, so the avatar is there at once. Recommended for the [Chat show](chat-show.md).
+- **The satellite sends its own speech to LiveTalking**, for its own session only, so two satellites never speak each other's replies. The copy for other viewers, such as the LiveTalking page, skips the satellites' sessions.
+- **Announcements and Chat show lines** go through the avatar when the satellite's own **Animate announcements** switch is on. When it is off, they play as before.
+- **Speech the satellite plays as a media player** (for example `tts.speak` to its media player) stays as before, with the normal animation.
+- **When anything fails** (LiveTalking cannot be reached, the stream stalls, no sound comes back), the satellite falls back to its normal speech and look for that turn. It never goes silent.
+
+What a satellite needs: firmware with avatar mode (a display with the LiveTalking support), offering per wake word, on the wake word's assistant device, the entities with the object ids `avatar_mode_N` (switch), `avatar_url_N` and `avatar_id_N` (text), `avatar_connection_N` (select: "Always connected" or "Connect when woken") and `avatar_session_N` (sensor), N being 1 for the first wake word. Voice Assistant Manager finds them by those ids, not by their names, so renaming them does not matter. Satellites without them are never touched.
+
+### Voice for chats
+
+While an avatar is on, the **Chat show** and **Avatar** cards remind you to choose its entity as the text-to-speech engine of **Voice for chats**, with a button to do so. Satellites in avatar mode speak chat lines through the avatar anyway; the setting makes the lines reach the LiveTalking page too. Once the avatar is off, the cards remind you to choose the normal engine again.
+
 ## What LiveTalking receives
 
-For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`). For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
+For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`), leaving out the sessions of satellites in avatar mode. For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
 
 - **The audio is sent as the engine made it.** MP3, WAV, FLAC and OGG are recognised from the audio itself and sent unconverted. Raw PCM without a header is wrapped as WAV, but only when the request said its sample rate. Without one it is not sent, and the log says so once.
 - **At most 8 viewers** get a clip, and a clip over 10 MB is not sent.
