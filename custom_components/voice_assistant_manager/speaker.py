@@ -63,8 +63,8 @@ def resolve_speaker(
     return fallback, False
 
 
-# A satellite that reports each new turn's wake word tells a follow-up apart exactly. For
-# one that does not, a turn within this long of the previous one counts as a follow-up.
+# A turn within this long of the conversation's previous turn, on the same satellite, counts
+# as a follow-up. Each follow-up that keeps the person starts it again.
 FOLLOW_UP_WINDOW = timedelta(seconds=60)
 # How long a conversation's person is remembered at most: Home Assistant's own conversation
 # lifetime.
@@ -97,16 +97,17 @@ def follow_up_role(
     the person of the conversation's previous turn is kept, on the same satellite, unless
     a voice match arrived since then: another person switches, an unknown voice refuses.
 
-    woke_since  True when the satellite reported a wake word (a new turn: wake word, Wake
-                button, a listen after an announcement) since the previous turn, False
-                when it did not (a follow-up), None when it reports none. With None, a
-                turn within FOLLOW_UP_WINDOW of the previous one counts as a follow-up.
+    woke_since  True when the satellite reported a new wake word since the previous turn:
+                then this is a new turn. Anything else proves nothing, because Home
+                Assistant drops a report with an unchanged value, so a second wake word
+                with the same phrase never shows. Then a turn within FOLLOW_UP_WINDOW of the
+                previous one counts as a follow-up.
     """
     if remembered is None or device_id != remembered.device_id:
         return None
     if woke_since is True:
         return None
-    if woke_since is None and now - remembered.at > FOLLOW_UP_WINDOW:
+    if now - remembered.at > FOLLOW_UP_WINDOW:
         return None
     new_match = (
         helper_state in _VERDICTS
