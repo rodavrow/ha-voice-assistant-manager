@@ -127,26 +127,42 @@ def later(seconds: float) -> datetime:
 
 @pytest.mark.parametrize("helper_state", ["pending", "unknown", ""])
 def test_a_follow_up_without_a_new_match_keeps_the_speaker(helper_state):
-    assert follow_up_role(ALEX_TURN, "kitchen", helper_state, later(5), later(8)) == "owner"
+    assert follow_up_role(ALEX_TURN, "kitchen", helper_state, later(5), later(8), False) == "owner"
 
 
 def test_a_follow_up_with_the_old_match_unchanged_keeps_the_speaker():
-    assert follow_up_role(ALEX_TURN, "kitchen", "owner", T0, later(8)) == "owner"
+    assert follow_up_role(ALEX_TURN, "kitchen", "owner", T0, later(8), False) == "owner"
 
 
 @pytest.mark.parametrize("helper_state", ["wife", "partner", "stranger", "owner"])
 def test_a_new_voice_match_decides_the_follow_up(helper_state):
-    assert follow_up_role(ALEX_TURN, "kitchen", helper_state, later(5), later(8)) is None
+    assert follow_up_role(ALEX_TURN, "kitchen", helper_state, later(5), later(8), False) is None
+
+
+def test_a_new_turn_on_the_satellite_needs_its_own_match():
+    """A wake word (or the Wake button) was reported since the last turn: not a follow-up."""
+    assert follow_up_role(ALEX_TURN, "kitchen", "pending", later(5), later(8), True) is None
+
+
+def test_a_reported_follow_up_is_kept_however_long_the_replies_took():
+    assert follow_up_role(ALEX_TURN, "kitchen", "pending", later(5), later(200), False) == "owner"
+
+
+def test_without_wake_reports_a_turn_inside_the_window_is_a_follow_up():
+    seconds = FOLLOW_UP_WINDOW.total_seconds() - 1
+    assert follow_up_role(ALEX_TURN, "kitchen", "pending", later(5), later(seconds), None) == (
+        "owner"
+    )
+
+
+def test_without_wake_reports_a_turn_after_the_window_needs_its_own_match():
+    seconds = FOLLOW_UP_WINDOW.total_seconds() + 1
+    assert follow_up_role(ALEX_TURN, "kitchen", "pending", later(5), later(seconds), None) is None
 
 
 def test_another_device_does_not_carry_the_speaker():
-    assert follow_up_role(ALEX_TURN, "office", "pending", later(5), later(8)) is None
-
-
-def test_a_turn_after_the_follow_up_window_needs_its_own_match():
-    seconds = FOLLOW_UP_WINDOW.total_seconds() + 1
-    assert follow_up_role(ALEX_TURN, "kitchen", "pending", later(5), later(seconds)) is None
+    assert follow_up_role(ALEX_TURN, "office", "pending", later(5), later(8), False) is None
 
 
 def test_nothing_remembered_means_no_follow_up():
-    assert follow_up_role(None, "kitchen", "pending", later(5), later(8)) is None
+    assert follow_up_role(None, "kitchen", "pending", later(5), later(8), False) is None
