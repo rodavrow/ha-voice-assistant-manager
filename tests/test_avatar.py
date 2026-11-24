@@ -293,7 +293,7 @@ async def test_sessions_of_satellites_are_skipped(hass, aioclient_mock):
     aioclient_mock.post(INTERRUPT, json={"code": 0})
     aioclient_mock.post(HUMANAUDIO, json={"code": 0})
     session = er.async_get(hass).async_get_or_create(
-        "sensor", "esphome", "aa:bb:cc:dd:ee:ff-sensor-avatar_session_1"
+        "sensor", "esphome", "aa:bb:cc:dd:ee:ff/4/text_sensor/Avatar session"
     )
     hass.states.async_set(session.entity_id, "kitchen-device")
     sender = avatar.AvatarSender(hass, "tts.ada_avatar")

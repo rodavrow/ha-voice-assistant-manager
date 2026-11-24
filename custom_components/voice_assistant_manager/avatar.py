@@ -41,17 +41,21 @@ TOTAL_TIMEOUT = 10.0
 
 _RAW_EXTENSIONS = frozenset({"pcm", "raw"})
 # The session a satellite in avatar mode holds (avatar_devices.py): it sends its own speech.
-_SESSION_OBJECT = re.compile(r"^avatar_session_\d+$")
+SESSION_ENTITY = ("text_sensor", "Avatar session")
 
 
-def object_ids(unique_id: str | None) -> frozenset[str]:
-    """The parts of an ESPHome unique_id that can be the device's object id.
+def esphome_entity(unique_id: str | None) -> tuple[str, str] | None:
+    """(ESPHome type, entity name) of an ESPHome entity's unique_id, or None.
 
-    Home Assistant builds it as <mac>-<platform>-<object_id>, possibly with "@<device>"
-    after the object id for an entity of a sub-device. Entity ids are not used: they come
-    from names and change when the user renames something.
+    On satellites with sub-devices Home Assistant builds it as
+    <mac>/<sub-device index>/<ESPHome type>/<entity name>, for example
+    "ac:cc:fc:a4:13:ff/4/switch/Recognized voices only". The names are fixed English in the
+    firmware and do not change when the user renames the entity; entity ids do.
     """
-    return frozenset(part.split("@", 1)[0] for part in (unique_id or "").split("-"))
+    parts = (unique_id or "").split("/", 3)
+    if len(parts) != 4 or not parts[2] or not parts[3]:
+        return None
+    return parts[2], parts[3]
 
 
 def device_sessions(hass: HomeAssistant) -> frozenset[str]:
@@ -60,7 +64,7 @@ def device_sessions(hass: HomeAssistant) -> frozenset[str]:
     for entity in er.async_get(hass).entities.values():
         if entity.domain != "sensor":
             continue
-        if not any(_SESSION_OBJECT.match(part) for part in object_ids(entity.unique_id)):
+        if esphome_entity(entity.unique_id) != SESSION_ENTITY:
             continue
         state = hass.states.get(entity.entity_id)
         if state is not None and state.state not in ("", "unknown", "unavailable"):

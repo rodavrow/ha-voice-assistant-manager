@@ -4,43 +4,44 @@
 
 Some satellite firmware has an avatar mode per wake-word slot: the device then shows the
 assistant's LiveTalking stream and plays its speech through it. It offers these entities
-on each assistant's sub-device, N being the slot (1 for the first wake word):
+on the sub-device of each slot, named "<device> assistant N" (N = 1 for the first wake
+word), and they are found by the ESPHome type and name in their unique_id:
 
-    switch  …_avatar_mode_N        avatar mode on or off
-    text    …_avatar_url_N         the LiveTalking address
-    text    …_avatar_id_N          the LiveTalking avatar to ask for (empty: the default)
-    select  …_avatar_connection_N  "Always connected" or "Connect when woken"
-    sensor  …_avatar_session_N     the device's LiveTalking session, while it has one
+    switch       "Avatar mode"        avatar mode on or off
+    text         "Avatar URL"         the LiveTalking address
+    text         "Avatar ID"          the LiveTalking avatar to ask for (empty: the default)
+    select       "Avatar connection"  "Always connected" or "Connect when woken"
+    text_sensor  "Avatar session"     the device's LiveTalking session, while it has one
 
 A slot whose wake word uses an assistant with an avatar switched on gets avatar mode on,
-with that avatar's settings; every other slot gets it off. Satellites without these
-entities are never touched. Nothing here raises: a device that refuses is logged.
+with that avatar's settings; a slot whose wake word uses one of these assistants without
+one gets it off. A slot that uses no assistant of this integration is only switched off
+when this integration switched it on (remembered across restarts), so avatar mode set by
+hand elsewhere stays. Satellites without these entities are never touched. Nothing here
+raises: a device that refuses is logged once.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.storage import Store
 
-from .avatar import (
-    CONF_AVATAR_ID,
-    CONF_ENABLED,
-    CONF_URL,
-    SUBENTRY_TYPE,
-    device_sessions,
-    object_ids,
-)
+from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_URL, SUBENTRY_TYPE, esphome_entity
 from .const import DOMAIN
 from .setup_guide import find_satellites
 
@@ -52,6 +53,22 @@ DEFAULT_CONNECTION = "on_wake"
 CALL_TIMEOUT = 5.0
 RECHECK = timedelta(minutes=1)
 _DATA = "avatar_devices"
+_OWNED = "avatar_devices_owned"
+_WARNED = "avatar_devices_warned"
+_STORE_KEY = f"{DOMAIN}.avatar_devices"
+# Home Assistant's wake-word select of slot N: unique_id <mac>-pipeline, <mac>-pipeline_N.
+_WAKE_SELECT = re.compile(r"-pipeline(?:_(\d+))?$")
+# While an assistant sets up or unloads, its slots look unused: change nothing then.
+_BUSY = (ConfigEntryState.SETUP_IN_PROGRESS, ConfigEntryState.UNLOAD_IN_PROGRESS)
+# The sub-device of a slot: its own name (not the one the user gave it) ends in this.
+_SLOT_DEVICE = re.compile(r"\bassistant\s+(\d+)$", re.IGNORECASE)
+# kind -> (ESPHome type, entity name) as the firmware names them; never translated.
+ENTITY_NAMES = {
+    "mode": ("switch", "Avatar mode"),
+    "url": ("text", "Avatar URL"),
+    "id": ("text", "Avatar ID"),
+    "connection": ("select", "Avatar connection"),
+}
 
 
 @dataclass(frozen=True)
@@ -100,70 +117,130 @@ def wish_for(entry: ConfigEntry | None) -> SlotWish:
     )
 
 
-def satellite_slots(hass: HomeAssistant) -> dict[str, list[str | None]]:
-    """satellite -> the assistant (config entry id) of each wake-word slot, None for others.
+def satellite_slots(hass: HomeAssistant) -> dict[str, dict[int, str | None]]:
+    """satellite -> {slot: the assistant (config entry id) its wake word uses, or None}.
 
-    A satellite whose wake words are not known (assist_pipeline not set up) is left out,
-    so it is never touched.
+    The slot (1-based) comes from the key of the wake word's select, not from the order of
+    the selects, so a missing or disabled first select does not shift the second.
+    A satellite whose wake words are not known (assist_pipeline not set up) is left out.
     """
-    slots: dict[str, list[str | None]] = {}
+    registry = er.async_get(hass)
+    slots: dict[str, dict[int, str | None]] = {}
     for entry in hass.config_entries.async_loaded_entries(DOMAIN):
         for satellite in find_satellites(hass, entry):
-            words = satellite["wake_words"]
-            if not words:
-                continue
-            row = slots.setdefault(satellite["entity_id"], [None] * len(words))
-            for index, word in enumerate(words):
-                if word["uses_router"] and index < len(row) and row[index] is None:
-                    row[index] = entry.entry_id
+            for word in satellite["wake_words"]:
+                select = registry.async_get(word["select"])
+                match = _WAKE_SELECT.search(select.unique_id) if select else None
+                if match is None:
+                    continue
+                slot = int(match.group(1) or 1)
+                row = slots.setdefault(satellite["entity_id"], {})
+                if word["uses_router"]:
+                    row[slot] = row.get(slot) or entry.entry_id
+                else:
+                    row.setdefault(slot, None)
     return slots
 
 
 def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntities | None:
-    """The avatar entities of one slot (1-based) on the satellite or its sub-devices,
-    found by the object id in their unique_id (see avatar.object_ids)."""
+    """The avatar entities of one slot (1-based): on the satellite's sub-device named
+    "… assistant <slot>", found by type and name in their unique_id (avatar.esphome_entity)."""
     entities = er.async_get(hass)
     found = entities.async_get(satellite)
     if found is None or found.device_id is None:
         return None
-    device_ids = {found.device_id} | {
-        device.id
-        for device in dr.async_get(hass).devices.values()
-        if device.via_device_id == found.device_id
-    }
-    named: dict[str, str] = {}
-    for device_id in device_ids:
-        for entity in er.async_entries_for_device(entities, device_id):
-            parts = object_ids(entity.unique_id)
-            for kind, domain in (
-                ("mode", "switch"),
-                ("url", "text"),
-                ("id", "text"),
-                ("connection", "select"),
-            ):
-                if entity.domain == domain and f"avatar_{kind}_{slot}" in parts:
-                    named[kind] = entity.entity_id
-    if "mode" not in named:
+    sub_device = next(
+        (
+            device.id
+            for device in dr.async_get(hass).devices
+            if device.via_device_id == found.device_id
+            and (match := _SLOT_DEVICE.search(device.name or ""))
+            and int(match.group(1)) == slot
+        ),
+        None,
+    )
+    if sub_device is None:
         return None
+    named: dict[str, str] = {}
+    for entity in er.async_entries_for_device(entities, sub_device):
+        kind = next(
+            (k for k, name in ENTITY_NAMES.items() if esphome_entity(entity.unique_id) == name),
+            None,
+        )
+        if kind is not None:
+            named[kind] = entity.entity_id
+    if "mode" not in named or "url" not in named:
+        return None  # Never avatar mode without a place for the address.
     return SlotEntities(named["mode"], named.get("url"), named.get("id"), named.get("connection"))
+
+
+class _Owned:
+    """The avatar-mode switches (registry ids) this integration switched on, kept on disk."""
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, list[str]]] = Store(hass, 1, _STORE_KEY)
+        self.ids: set[str] = set()
+        self._saved: set[str] = set()
+        self._loaded = False
+
+    async def async_load(self) -> None:
+        if not self._loaded:
+            data = await self._store.async_load() or {}
+            self.ids = set(data.get("owned") or [])
+            self._saved = set(self.ids)
+            self._loaded = True
+
+    async def async_save(self) -> None:
+        if self.ids != self._saved:
+            await self._store.async_save({"owned": sorted(self.ids)})
+            self._saved = set(self.ids)
 
 
 async def async_reconcile(hass: HomeAssistant) -> None:
     """Bring every satellite slot in line with its assistant's avatar. Never raises."""
+    if any(entry.state in _BUSY for entry in hass.config_entries.async_entries(DOMAIN)):
+        return  # The next request or the minute check catches up.
+    data = hass.data.setdefault(DOMAIN, {})
+    owned: _Owned = data.setdefault(_OWNED, _Owned(hass))
+    await owned.async_load()
+    registry = er.async_get(hass)
+    seen: set[str] = set()
     for satellite, assistants in satellite_slots(hass).items():
-        for index, entry_id in enumerate(assistants):
-            entities = slot_entities(hass, satellite, index + 1)
-            if entities is None:
+        for slot, entry_id in assistants.items():
+            entities = slot_entities(hass, satellite, slot)
+            switch = registry.async_get(entities.switch) if entities else None
+            if entities is None or switch is None:
                 continue
+            seen.add(switch.id)
             entry = hass.config_entries.async_get_entry(entry_id) if entry_id else None
-            await _async_apply(hass, entities, wish_for(entry))
+            if entry is None and switch.id not in owned.ids:
+                continue  # Not ours: avatar mode set by hand for another assistant stays.
+            _remember(owned, switch.id, await _async_apply(hass, entities, wish_for(entry)))
+    # Switched on by us, but no slot uses one of our assistants any more (removed, say).
+    # Only when wake words can be known: otherwise every slot would look unused.
+    orphans = owned.ids - seen if "assist_pipeline" in hass.config.components else set()
+    for switch_id in orphans:
+        switch = registry.async_get(switch_id)
+        if switch is None:
+            owned.ids.discard(switch_id)
+            continue
+        _remember(owned, switch_id, await _async_turn_off(hass, switch.entity_id))
+    await owned.async_save()
 
 
-async def _async_apply(hass: HomeAssistant, entities: SlotEntities, wish: SlotWish) -> None:
+def _remember(owned: _Owned, switch_id: str, now_on: bool | None) -> None:
+    if now_on is True:
+        owned.ids.add(switch_id)
+    elif now_on is False:
+        owned.ids.discard(switch_id)
+
+
+async def _async_apply(
+    hass: HomeAssistant, entities: SlotEntities, wish: SlotWish
+) -> bool | None:
+    """Apply a wish. Returns whether avatar mode is now on, None when that is unknown."""
     if not wish.on:
-        if _state(hass, entities.switch) == "on":
-            await _async_call(hass, "switch", "turn_off", entities.switch, {})
-        return
+        return await _async_turn_off(hass, entities.switch)
     settings = (
         ("text", "set_value", entities.url, "value", wish.url),
         ("text", "set_value", entities.avatar_id, "value", wish.avatar_id),
@@ -173,9 +250,22 @@ async def _async_apply(hass: HomeAssistant, entities: SlotEntities, wish: SlotWi
         if entity_id is None or _state(hass, entity_id) == value:
             continue
         if not await _async_call(hass, domain, service, entity_id, {field: value}):
-            return  # Never turn avatar mode on with settings the device did not take.
-    if _state(hass, entities.switch) != "on":
-        await _async_call(hass, "switch", "turn_on", entities.switch, {})
+            return None  # Never turn avatar mode on with settings the device did not take.
+    state = _state(hass, entities.switch)
+    if state == "on":
+        return True
+    if state == "off" and await _async_call(hass, "switch", "turn_on", entities.switch, {}):
+        return True
+    return None
+
+
+async def _async_turn_off(hass: HomeAssistant, switch: str) -> bool | None:
+    state = _state(hass, switch)
+    if state == "off":
+        return False
+    if state == "on" and await _async_call(hass, "switch", "turn_off", switch, {}):
+        return False
+    return None  # Unavailable, or the device refused: try again at the next check.
 
 
 def _state(hass: HomeAssistant, entity_id: str) -> str | None:
@@ -186,14 +276,21 @@ def _state(hass: HomeAssistant, entity_id: str) -> str | None:
 async def _async_call(
     hass: HomeAssistant, domain: str, service: str, entity_id: str, data: dict[str, Any]
 ) -> bool:
+    warned: set[str] = hass.data.setdefault(DOMAIN, {}).setdefault(_WARNED, set())
     try:
         async with asyncio.timeout(CALL_TIMEOUT):
             await hass.services.async_call(
                 domain, service, {"entity_id": entity_id, **data}, blocking=True
             )
-    except (HomeAssistantError, TimeoutError) as err:
-        _LOGGER.warning("Could not set %s for the avatar: %s", entity_id, err or type(err).__name__)
+    except (HomeAssistantError, TimeoutError, vol.Invalid) as err:
+        # Once per entity until it works again: the check runs every minute.
+        level = logging.DEBUG if entity_id in warned else logging.WARNING
+        warned.add(entity_id)
+        _LOGGER.log(
+            level, "Could not set %s for the avatar: %s", entity_id, err or type(err).__name__
+        )
         return False
+    warned.discard(entity_id)
     return True
 
 
@@ -247,7 +344,7 @@ def async_setup(hass: HomeAssistant) -> None:
             runner.request()
 
     @callback
-    def started(_event: Event) -> None:
+    def started(_hass: HomeAssistant) -> None:
         runner.request()
 
     @callback
@@ -262,5 +359,5 @@ def async_setup(hass: HomeAssistant) -> None:
         stop_listening()
         stop_timer()
 
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, started)
+    async_at_started(hass, started)
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stopping)
