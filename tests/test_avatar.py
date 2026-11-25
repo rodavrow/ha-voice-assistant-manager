@@ -362,3 +362,72 @@ async def test_each_session_is_logged_with_why_it_was_skipped(hass, aioclient_mo
     text = "\n".join(r.getMessage() for r in caplog.records if r.name == avatar.__name__)
     assert "own" in text and "satellite" in text
     assert "o1" in text and "jeeves" in text
+
+
+# The chat stage's calls
+
+
+OFFER = f"{BASE}/offer"
+IS_SPEAKING = f"{BASE}/is_speaking"
+
+
+async def test_offer_opens_a_session_for_the_avatar(hass, aioclient_mock):
+    aioclient_mock.post(OFFER, json={"sdp": "answer", "type": "answer", "sessionid": 7})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    assert await client.async_offer("offer", "ada") == ("answer", "7")
+    assert aioclient_mock.mock_calls[0][2] == {"sdp": "offer", "type": "offer", "avatar": "ada"}
+
+
+async def test_offer_for_the_default_avatar_names_none(hass, aioclient_mock):
+    aioclient_mock.post(OFFER, json={"sdp": "answer", "type": "answer", "sessionid": "s1"})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    await client.async_offer("offer")
+    assert aioclient_mock.mock_calls[0][2] == {"sdp": "offer", "type": "offer"}
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        {"sdp": "", "type": "answer", "sessionid": "s1"},
+        {"sdp": "answer", "type": "offer", "sessionid": "s1"},
+        {"sdp": "answer", "type": "answer"},
+        {"sdp": "answer", "type": "answer", "sessionid": True},
+    ],
+)
+async def test_offer_refuses_an_unexpected_reply(hass, aioclient_mock, reply):
+    aioclient_mock.post(OFFER, json=reply)
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    with pytest.raises(avatar.LiveTalkingError):
+        await client.async_offer("offer")
+
+
+async def test_say_goes_to_one_session_only(hass, aioclient_mock):
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    await client.async_say("s1", "mp3", MP3)
+
+    assert [str(url) for _m, url, _d, _h in aioclient_mock.mock_calls] == [INTERRUPT, HUMANAUDIO]
+    assert form_fields(aioclient_mock.mock_calls[1][2])["sessionid"] == (None, "s1")
+
+
+@pytest.mark.parametrize(("data", "speaking"), [(True, True), (False, False)])
+async def test_speaking_asks_the_session(hass, aioclient_mock, data, speaking):
+    aioclient_mock.post(IS_SPEAKING, json={"code": 0, "data": data})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    assert await client.async_speaking("s1") is speaking
+    assert aioclient_mock.mock_calls[0][2] == {"sessionid": "s1"}
+
+
+@pytest.mark.parametrize("reply", [{"code": 1}, {"code": 0, "data": "yes"}, ["no"]])
+async def test_speaking_refuses_an_unexpected_reply(hass, aioclient_mock, reply):
+    aioclient_mock.post(IS_SPEAKING, json=reply)
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    with pytest.raises(avatar.LiveTalkingError):
+        await client.async_speaking("s1")

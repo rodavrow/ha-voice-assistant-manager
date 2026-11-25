@@ -23,7 +23,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .const import DOMAIN
+
 _LOGGER = logging.getLogger(__name__)
+
+# Where stage.py keeps the chat shown on a cast device, in hass.data[DOMAIN].
+STAGE_DATA = "stage"
 
 SUBENTRY_TYPE = "avatar"
 CONF_ENGINE = "engine"
@@ -57,6 +62,13 @@ def esphome_entity(unique_id: str | None) -> tuple[str, str] | None:
     if len(parts) != 4 or not parts[2] or not parts[3]:
         return None
     return parts[2], parts[3]
+
+
+def stage_sessions(hass: HomeAssistant) -> frozenset[str]:
+    """The sessions of a chat shown on a cast device (stage.py), which get their lines
+    from the chat itself and never a copy."""
+    stage = hass.data.get(DOMAIN, {}).get(STAGE_DATA)
+    return stage.sessions() if stage is not None else frozenset()
 
 
 def device_sessions(hass: HomeAssistant) -> frozenset[str]:
@@ -148,7 +160,7 @@ def prepare_clip(
 
 
 class LiveTalkingClient:
-    """The three LiveTalking calls an avatar needs. Raises on any failure."""
+    """The LiveTalking calls an avatar and the chat stage need. Raises on any failure."""
 
     def __init__(self, session: aiohttp.ClientSession, base_url: str) -> None:
         self._session = session
@@ -175,6 +187,51 @@ class LiveTalkingClient:
             form.add_field("file", audio, filename=f"speech.{extension}")
             await self._async_post("/humanaudio", data=form)
         return len(session_ids)
+
+    async def async_offer(self, sdp: str, avatar_id: str = "") -> tuple[str, str]:
+        """Open a session for a viewer's WebRTC offer: (answer SDP, session id)."""
+        body: dict[str, str] = {"sdp": sdp, "type": "offer"}
+        if avatar_id:
+            body["avatar"] = avatar_id
+        payload = await self._async_post_json("/offer", body)
+        answer, kind = payload.get("sdp"), payload.get("type")
+        session_id = payload.get("sessionid")
+        if isinstance(session_id, int) and not isinstance(session_id, bool):
+            session_id = str(session_id)
+        if not isinstance(answer, str) or not answer or kind != "answer":
+            raise LiveTalkingError("offer reply has no answer")
+        if not isinstance(session_id, str) or not session_id:
+            raise LiveTalkingError("offer reply has no session id")
+        return answer, session_id
+
+    async def async_say(self, session_id: str, extension: str, audio: bytes) -> None:
+        """Stop what one session says and have it say the clip."""
+        await self._async_post("/interrupt_talk", json={"sessionid": session_id})
+        form = aiohttp.FormData()
+        form.add_field("sessionid", session_id)
+        form.add_field("file", audio, filename=f"speech.{extension}")
+        await self._async_post("/humanaudio", data=form)
+
+    async def async_speaking(self, session_id: str) -> bool:
+        """Whether the session is still speaking. It turns false a little before the last
+        of the audio has played."""
+        payload = await self._async_post_json("/is_speaking", {"sessionid": session_id})
+        if payload.get("code") != 0 or not isinstance(payload.get("data"), bool):
+            raise LiveTalkingError("is_speaking reply is not a success")
+        return bool(payload["data"])
+
+    async def _async_post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        async with self._session.post(
+            f"{self._base_url}{path}", json=body, timeout=self._timeout
+        ) as response:
+            response.raise_for_status()
+            try:
+                payload = await response.json(content_type=None)
+            except ValueError as err:
+                raise LiveTalkingError(f"{path} reply is not JSON") from err
+        if not isinstance(payload, dict):
+            raise LiveTalkingError(f"{path} reply is not an object")
+        return payload
 
     async def _async_sessions(self) -> list[tuple[str, str]]:
         async with self._session.get(
@@ -279,7 +336,8 @@ class AvatarSender:
             try:
                 async with asyncio.timeout(TOTAL_TIMEOUT):
                     played = await client.async_play(
-                        *clip, device_sessions(self._hass), avatar_id
+                        *clip, device_sessions(self._hass) | stage_sessions(self._hass),
+                        avatar_id,
                     )
             except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
                 self._log_failure(err)
