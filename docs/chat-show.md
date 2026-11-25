@@ -53,6 +53,27 @@ Example for Ada:
 
 - **A satellite** plays each line as an announcement, in the assistant's chat voice, or in the satellite's own voice when none is set.
 - **A media player** plays the line as text to speech. When an assistant has no chat voice, Home Assistant's default text-to-speech engine is used.
+- **A Google Cast device** (a Nest Hub, a Chromecast or Google TV) shows the avatars talking, when both assistants have an [avatar](avatar.md) that is on and the stage is set up. See [On a cast device](#on-a-cast-device).
+
+## On a cast device
+
+On a Nest Hub, a Chromecast or a Google TV, a chat can show the assistants' avatars instead of only playing their voices. The speaking avatar fills the screen and the other waits, idle, in an inset at the bottom right. Each voice comes from the same LiveTalking stream as its lips, so the two stay in sync.
+
+**Setting it up, once:** under **Chat show** on the Voice Manager page, in **Avatars on cast devices**, choose **Set up the stage**. This adds the Chat stage card to your dashboard resources and creates a dashboard `/vam-chat-stage`, hidden from the sidebar, holding only that card. With dashboard resources kept in YAML, add the module resource the page names there first.
+
+**What it needs:**
+
+- both assistants of the chat with an avatar that is on (see [Avatar](avatar.md))
+- Home Assistant reachable over https, through Home Assistant Cloud or your own certificate, as Home Assistant Cast needs it
+- room for two more sessions on LiveTalking (4 at most, satellites' own included)
+
+**During a chat:** when the chat starts, the device is cast the stage, and the chat waits for both avatars to connect (up to 45 seconds) before the first line. Each line goes only to the speaking avatar. The next line starts once LiveTalking says that avatar has finished. When the chat ends, the device is stopped a few seconds after the last line, unless something else has been cast to it meanwhile.
+
+**Captions:** switch on **Show each line as a caption** to show the text of each line at the bottom of the screen.
+
+**When something goes wrong,** the chat plays as audio on the device, as it would without the stage. That happens when the stage is not set up or is switched off, when an assistant has no avatar, when LiveTalking has no room, when the device does not connect in time, and from the line where a stream drops or a line cannot be sent. The log says why.
+
+A speaker group of cast devices plays audio only.
 
 ## Showing who speaks
 
