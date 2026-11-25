@@ -12,6 +12,12 @@ word), and they are found by the ESPHome type and name in their unique_id:
     text         "Avatar ID"          the LiveTalking avatar to ask for (empty: the default)
     select       "Avatar connection"  "Always connected" or "Connect when woken"
     text_sensor  "Avatar session"     the device's LiveTalking session, while it has one
+    text_sensor  "Avatar state"       off, connecting, connected or failed
+
+A chat show may hold a slot's connection at "Always connected" for the length of the chat
+(avatar_chat.py). That hold lives in memory only and never changes the assistant's own
+setting: while it lasts, the check below leaves the device's select as the chat set it, and
+once it is released or its safety time has passed, the check writes the setting back.
 
 A slot whose wake word uses an assistant with an avatar switched on gets avatar mode on,
 with that avatar's settings; a slot whose wake word uses one of these assistants without
@@ -26,8 +32,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -40,6 +46,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_URL, SUBENTRY_TYPE, esphome_entity
 from .const import DOMAIN
@@ -55,6 +62,7 @@ RECHECK = timedelta(minutes=1)
 _DATA = "avatar_devices"
 _OWNED = "avatar_devices_owned"
 _WARNED = "avatar_devices_warned"
+_HELD = "avatar_devices_held"
 _STORE_KEY = f"{DOMAIN}.avatar_devices"
 # Home Assistant's wake-word select of slot N: unique_id <mac>-pipeline, <mac>-pipeline_N.
 _WAKE_SELECT = re.compile(r"-pipeline(?:_(\d+))?$")
@@ -70,6 +78,7 @@ ENTITY_NAMES = {
     "url": ("text", "Avatar URL"),
     "id": ("text", "Avatar ID"),
     "connection": ("select", "Avatar connection"),
+    "state": ("sensor", "Avatar state"),
 }
 
 
@@ -93,6 +102,8 @@ class SlotEntities:
     url: str | None
     avatar_id: str | None
     connection: str | None
+    # Older firmware has no state sensor.
+    state: str | None = None
 
 
 def wish_for(entry: ConfigEntry | None) -> SlotWish:
@@ -186,7 +197,49 @@ def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntitie
             named[kind] = entity.entity_id
     if "mode" not in named or "url" not in named:
         return None  # Never avatar mode without a place for the address.
-    return SlotEntities(named["mode"], named.get("url"), named.get("id"), named.get("connection"))
+    return SlotEntities(
+        named["mode"], named.get("url"), named.get("id"), named.get("connection"),
+        named.get("state"),
+    )
+
+
+# Connections a chat holds open
+
+
+def _held(hass: HomeAssistant) -> dict[str, datetime]:
+    """Connection select (entity id) -> until when a chat holds it at "Always connected"."""
+    return hass.data.setdefault(DOMAIN, {}).setdefault(_HELD, {})
+
+
+@callback
+def hold_connection(hass: HomeAssistant, select: str, until: datetime) -> None:
+    """Keep this select at "Always connected" until released, or until `until` at the latest."""
+    _held(hass)[select] = until
+
+
+@callback
+def release_connection(hass: HomeAssistant, select: str) -> None:
+    """Let the select follow its assistant's setting again, from the next check on."""
+    _held(hass).pop(select, None)
+
+
+@callback
+def connection_held(hass: HomeAssistant, select: str | None) -> bool:
+    """Whether a chat holds this select now. A hold past its safety time is dropped."""
+    if select is None:
+        return False
+    held = _held(hass)
+    until = held.get(select)
+    if until is None:
+        return False
+    if dt_util.utcnow() < until:
+        return True
+    del held[select]
+    _LOGGER.warning(
+        "A chat held %s at %s past its safety time; it follows its setting again",
+        select, CONNECTION_OPTIONS["always"],
+    )
+    return False
 
 
 class _Owned:
@@ -245,6 +298,8 @@ async def async_reconcile(hass: HomeAssistant) -> None:
                 )
                 continue  # Not ours: avatar mode set by hand for another assistant stays.
             wish = wish_for(entry)
+            if wish.on and connection_held(hass, entities.connection):
+                wish = replace(wish, connection=CONNECTION_OPTIONS["always"])
             _LOGGER.debug(
                 "Avatar check: %s slot %d uses %s: avatar mode %s",
                 satellite, slot, entry.title if entry else "no assistant",
@@ -287,12 +342,12 @@ async def _async_apply(
         if _state(hass, entity_id) in (None, "unavailable"):
             # The satellite is away (updating, say): the next check sets it.
             return None
-        if not await _async_call(hass, domain, service, entity_id, {field: value}):
+        if not await async_call(hass, domain, service, entity_id, {field: value}):
             return None  # Never turn avatar mode on with settings the device did not take.
     state = _state(hass, entities.switch)
     if state == "on":
         return True
-    if state == "off" and await _async_call(hass, "switch", "turn_on", entities.switch, {}):
+    if state == "off" and await async_call(hass, "switch", "turn_on", entities.switch, {}):
         return True
     return None
 
@@ -301,7 +356,7 @@ async def _async_turn_off(hass: HomeAssistant, switch: str) -> bool | None:
     state = _state(hass, switch)
     if state == "off":
         return False
-    if state == "on" and await _async_call(hass, "switch", "turn_off", switch, {}):
+    if state == "on" and await async_call(hass, "switch", "turn_off", switch, {}):
         return False
     return None  # Unavailable, or the device refused: try again at the next check.
 
@@ -311,9 +366,10 @@ def _state(hass: HomeAssistant, entity_id: str) -> str | None:
     return state.state if state is not None else None
 
 
-async def _async_call(
+async def async_call(
     hass: HomeAssistant, domain: str, service: str, entity_id: str, data: dict[str, Any]
 ) -> bool:
+    """Call a service on one avatar entity; a failure is logged once and returns False."""
     warned: set[str] = hass.data.setdefault(DOMAIN, {}).setdefault(_WARNED, set())
     try:
         async with asyncio.timeout(CALL_TIMEOUT):
@@ -362,11 +418,16 @@ class _Runner:
 
 
 @callback
-def async_request(hass: HomeAssistant) -> None:
-    """Reconcile soon, for example after an avatar or an assistant changed."""
+def async_request(hass: HomeAssistant) -> bool:
+    """Reconcile soon, for example after an avatar or an assistant changed.
+
+    False when the checks are not set up, so nothing was asked for.
+    """
     runner = hass.data.get(DOMAIN, {}).get(_DATA)
-    if runner is not None:
-        runner.request()
+    if runner is None:
+        return False
+    runner.request()
+    return True
 
 
 @callback
