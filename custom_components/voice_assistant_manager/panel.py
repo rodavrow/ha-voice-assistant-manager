@@ -21,6 +21,8 @@ from homeassistant.loader import async_get_integration
 from . import announcement_look
 from .chat_show import ChatLimits
 from .const import DOMAIN
+from .stage import SCRIPT_URL as STAGE_SCRIPT_URL
+from .stage import StageSettings
 
 PANEL_URL = "voice-assistant-manager"
 PANEL_ELEMENT = "voice-assistant-manager-panel"
@@ -33,6 +35,8 @@ MINE_ELEMENT = "voice-assistant-manager-mine"
 MINE_TITLE = "My assistant"
 MINE_SCRIPT_URL = f"/{DOMAIN}/mine.js"
 MINE_SCRIPT_FILE = Path(__file__).parent / "frontend" / "mine.js"
+# The card of the chat stage, cast to Google Cast devices (stage.py).
+STAGE_SCRIPT_FILE = Path(__file__).parent / "frontend" / "stage.js"
 STORAGE_VERSION = 1
 GuideState = Literal["done", "dismissed", "started"]
 GUIDE_STATES: tuple[GuideState, ...] = ("done", "dismissed", "started")
@@ -60,6 +64,10 @@ class PanelState:
     speaker_overrides: dict[str, str] = field(default_factory=dict)
     # Whether the speaking assistant's character is chosen on devices that offer one.
     announcement_look: bool = True
+    # Whether a chat on a cast device shows the avatars there, and with captions.
+    chat_stage: StageSettings = field(default_factory=StageSettings)
+    # Where the stage card is served, with the version so an update is fetched again.
+    stage_url: str = STAGE_SCRIPT_URL
 
 
 def _register(hass: HomeAssistant, state: PanelState, *, update: bool) -> None:
@@ -186,6 +194,8 @@ def _data(state: PanelState) -> dict[str, Any]:
         data["announcement_look"] = False
     if state.chat_defaults is not None:
         data["chat_defaults"] = asdict(state.chat_defaults)
+    if state.chat_stage != StageSettings():
+        data["chat_stage"] = asdict(state.chat_stage)
     return data
 
 
@@ -275,6 +285,10 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         announcement_look=not (
             isinstance(stored, dict) and stored.get("announcement_look") is False
         ),
+        chat_stage=StageSettings.from_dict(
+            stored.get("chat_stage") if isinstance(stored, dict) else None
+        ),
+        stage_url=f"{STAGE_SCRIPT_URL}?v={integration.version}",
     )
     announcement_look.set_enabled(hass, state.announcement_look)
     hass.data.setdefault(DOMAIN, {})["panel"] = state
@@ -282,10 +296,18 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         [
             StaticPathConfig(SCRIPT_URL, str(SCRIPT_FILE), cache_headers=False),
             StaticPathConfig(MINE_SCRIPT_URL, str(MINE_SCRIPT_FILE), cache_headers=False),
+            StaticPathConfig(STAGE_SCRIPT_URL, str(STAGE_SCRIPT_FILE), cache_headers=False),
         ]
     )
     _register(hass, state, update=False)
     _register_mine(hass, f"{MINE_SCRIPT_URL}?v={integration.version}")
+
+
+async def async_set_chat_stage(hass: HomeAssistant, settings: StageSettings) -> None:
+    """Remember whether chats on cast devices show the avatars, and with captions."""
+    state = panel_state(hass)
+    state.chat_stage = settings
+    await state.store.async_save(_data(state))
 
 
 async def async_set_announcement_look(hass: HomeAssistant, on: bool) -> bool:
