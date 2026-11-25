@@ -2313,7 +2313,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     const head = this._head(this._c("title"), this._c("lede"));
     const failed = chat.loadError && h("div", { class: "notice error" }, this._c("load_failed", { reason: chat.loadError }));
     if (!chat.state) return [head, failed || h("div", { class: "loading" }, this._c("loading"))];
-    return [head, failed, this._chatSetup(), this._chatTranscript()];
+    return [head, failed, this._chatSetup(), this._chatStage(), this._chatTranscript()];
   }
 
   _chatSetup() {
@@ -2359,6 +2359,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         label: this._c("speaker"),
         help: state.speakers.length ? this._c("speaker_help") : this._c("no_speakers"),
       }),
+      choice.speaker && choice.speaker.cast && state.stage && state.stage.enabled && h("div", { class: "help below" }, this._c("cast")),
       choice.speaker &&
         (choice.speaker.voice
           ? h("div", { class: "help below" }, this._c("voice"))
@@ -2367,7 +2368,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       h("div", { class: "limits-head" }, h("h3", {}, this._c("limits")), h("div", { class: "help" }, this._c("limits_help"))),
       h("div", { class: "limits" }, CHAT_LIMITS.map((limit) => this._chatLimitField(limit, locked))),
       choice.speaker && choice.speaker.listen && this._chatListenField(locked),
-      chat.error && h("div", { class: "notice error after" }, chat.error),
+      chat.error && chat.errorFrom !== "stage" && h("div", { class: "notice error after" }, chat.error),
       h(
         "div",
         { class: "row-actions" },
@@ -2440,6 +2441,112 @@ class VoicePersonaRouterPanel extends HTMLElement {
   }
 
   /** Only for a satellite that can start a conversation; the chat still works if it cannot. */
+  /** Whether chats on cast devices show the avatars, and the button that sets up the stage. */
+  _chatStage() {
+    const chat = this._chat;
+    const stage = chat.state.stage;
+    if (!stage) return null;
+    const locked = !!chat.busy;
+    const toggle = (key, label) => {
+      const id = `chatshow.stage_${key}`;
+      return h(
+        "div",
+        { class: "field switch" },
+        h("label", { for: id }, label),
+        h(
+          "div",
+          { class: "toggle" },
+          h("input", {
+            type: "checkbox",
+            id,
+            checked: !!stage[key],
+            disabled: locked || (key === "captions" && !stage.enabled),
+            onchange: (ev) => this._saveChatStage({ ...stage, [key]: ev.target.checked }),
+          }),
+          h("span", {})
+        )
+      );
+    };
+    const vars = { dashboard: `/${stage.dashboard}`, resource: stage.resource };
+    const ready = !stage.problem;
+    return h(
+      "div",
+      { class: "card" },
+      h("h3", {}, this._c("stage_title")),
+      h("p", { class: "intro" }, this._c("stage_intro")),
+      toggle("enabled", this._c("stage_enabled")),
+      toggle("captions", this._c("stage_captions")),
+      chat.error && chat.errorFrom === "stage" && h("div", { class: "notice error after" }, chat.error),
+      stage.enabled &&
+        (ready
+          ? h("div", { class: "help after" }, this._c("stage_ready", vars))
+          : h("div", { class: "notice after" }, this._c("stage_missing", vars))),
+      stage.enabled &&
+        !ready &&
+        h(
+          "div",
+          { class: "row-actions" },
+          h("button", { class: "btn primary", disabled: locked, onclick: () => this._setUpStage() }, chat.busy === "stage" ? this._c("working") : this._c("stage_setup"))
+        )
+    );
+  }
+
+  _saveChatStage(stage) {
+    const chat = this._chat;
+    return this._chatAct("stage", async () => {
+      const result = await this._call("chat/save_stage", { enabled: stage.enabled, captions: stage.captions });
+      if (result.ok && chat.state) chat.state = { ...chat.state, stage: result.stage };
+      return result;
+    });
+  }
+
+  /**
+   * Add the stage card as a dashboard resource and create the stage dashboard with it, through
+   * Home Assistant's own dashboard commands. What already exists is kept.
+   */
+  _setUpStage() {
+    const stage = this._chat.state.stage;
+    const ws = (type, data) => this._hass.callWS({ type, ...(data || {}) });
+    return this._chatAct("stage", async () => {
+      const base = stage.resource.split("?")[0];
+      let resources;
+      try {
+        resources = await ws("lovelace/resources");
+      } catch (err) {
+        return { ok: false, errors: { stage: this._c("stage_yaml", { resource: stage.resource }) } };
+      }
+      if (!resources.some((item) => String(item.url || "").startsWith(base))) {
+        try {
+          await ws("lovelace/resources/create", { res_type: "module", url: stage.resource });
+        } catch (err) {
+          return { ok: false, errors: { stage: this._c("stage_yaml", { resource: stage.resource }) } };
+        }
+      }
+      try {
+        const dashboards = await ws("lovelace/dashboards/list");
+        if (!dashboards.some((item) => item.url_path === stage.dashboard)) {
+          await ws("lovelace/dashboards/create", {
+            url_path: stage.dashboard,
+            title: "Chat stage",
+            icon: "mdi:television-play",
+            show_in_sidebar: false,
+            require_admin: true,
+          });
+        }
+        await ws("lovelace/config/save", {
+          url_path: stage.dashboard,
+          config: {
+            title: "Chat stage",
+            views: [{ title: "Stage", path: stage.view, type: "panel", cards: [{ type: `custom:${stage.card}` }] }],
+          },
+        });
+      } catch (err) {
+        return { ok: false, errors: { stage: this._c("stage_setup_failed", { reason: reason(err) }) } };
+      }
+      return { ok: true };
+    });
+  }
+
   _chatListenField(locked) {
     const form = this._chat.form;
     const id = "chatshow.listen";
@@ -2519,6 +2626,8 @@ class VoicePersonaRouterPanel extends HTMLElement {
     if (chat.busy) return;
     chat.busy = busy;
     chat.error = "";
+    // Which card shows the error: the stage's own, or the chat's.
+    chat.errorFrom = busy;
     this._render();
     try {
       const result = await work();

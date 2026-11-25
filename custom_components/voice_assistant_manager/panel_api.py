@@ -52,6 +52,7 @@ from .config_flow import (
     settings_to_save,
     without_retired,
 )
+from . import stage
 from .const import DOMAIN
 from .favorites import (
     HOUSEHOLD,
@@ -86,6 +87,7 @@ from .panel import (
     STARTED,
     async_set_announcement_look,
     async_set_chat_defaults,
+    async_set_chat_stage,
     async_set_guide,
     async_set_sidebar,
     async_set_speaker_overrides,
@@ -774,6 +776,8 @@ def _chat_speakers(hass: HomeAssistant) -> list[dict[str, Any]]:
             # Only a satellite that can start a conversation a router hears can listen
             # after a round; the chat refuses to listen anywhere else as well.
             "listen": can_listen(hass, state.entity_id),
+            # A Google Cast device can show the avatars (stage.py).
+            "cast": stage.is_cast_player(hass, state.entity_id),
         }
         for domain in (SATELLITE_DOMAIN, MEDIA_PLAYER_DOMAIN)
         for state in hass.states.async_all(domain)
@@ -828,8 +832,42 @@ async def ws_chat_state(
             "defaults": asdict(chat_defaults(hass)),
             "routers": _routers_for_chat(hass),
             "speakers": _chat_speakers(hass),
+            "stage": _stage_state(hass),
         },
     )
+
+
+def _stage_state(hass: HomeAssistant) -> dict[str, Any]:
+    """The chat stage's settings, whether it is set up, and what setting it up creates."""
+    settings = stage.settings(hass)
+    return {
+        "enabled": settings.enabled,
+        "captions": settings.captions,
+        "problem": stage.setup_problem(hass),
+        "dashboard": stage.DASHBOARD,
+        "view": stage.VIEW,
+        "card": stage.CARD,
+        "resource": panel_state(hass).stage_url,
+    }
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/chat/save_stage",
+        vol.Required("enabled"): bool,
+        vol.Required("captions"): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_chat_save_stage(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Save whether chats on cast devices show the avatars, and with captions."""
+    await async_set_chat_stage(
+        hass, stage.StageSettings(enabled=msg["enabled"], captions=msg["captions"])
+    )
+    connection.send_result(msg["id"], {"ok": True, "stage": _stage_state(hass)})
 
 
 @websocket_api.require_admin
@@ -1187,6 +1225,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_chat_stop,
         ws_chat_state,
         ws_chat_save_defaults,
+        ws_chat_save_stage,
         ws_favorites_get,
         ws_favorites_add,
         ws_favorites_update,

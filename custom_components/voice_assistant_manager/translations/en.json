@@ -513,7 +513,18 @@
       "waiting": "Waiting for the first line…",
       "loading": "Loading…",
       "failed": "That did not work: {reason}",
-      "load_failed": "The chat show could not be loaded: {reason}"
+      "load_failed": "The chat show could not be loaded: {reason}",
+      "cast": "On a Google Cast device (a Nest Hub, a Chromecast or Google TV), the avatars are shown talking when both assistants have an avatar that is on.",
+      "stage_title": "Avatars on cast devices",
+      "stage_intro": "A chat on a Nest Hub, Chromecast or Google TV shows the speaking avatar across the screen and the other in an inset, with its voice from the same stream. It needs both assistants to have an avatar that is on, and Home Assistant reachable over https (Home Assistant Cloud, or your own certificate).",
+      "stage_enabled": "Show the avatars on cast devices",
+      "stage_captions": "Show each line as a caption",
+      "stage_ready": "The stage is set up: the dashboard {dashboard} with the Chat stage card.",
+      "stage_missing": "The stage is not set up yet. Setting it up adds the Chat stage card to your dashboard resources and a dashboard {dashboard}, hidden from the sidebar.",
+      "stage_setup": "Set up the stage",
+      "stage_setup_failed": "Could not set up the stage: {reason}",
+      "stage_yaml": "Your dashboard resources are kept in YAML. Add {resource} as a module resource there, then set up the stage again.",
+      "stage_saved": "Saved."
     },
     "mine": {
       "title": "My assistant",
