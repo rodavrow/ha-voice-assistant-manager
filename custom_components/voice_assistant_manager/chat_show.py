@@ -38,8 +38,9 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from . import announcement_look, avatar_chat, avatar_hold
+from . import announcement_look, avatar_chat, avatar_hold, stage
 from .announce import writer_agent
+from .avatar import prepare_clip
 from .const import DOMAIN
 from .memory import clean_text
 from .reminders import assistant_name
@@ -530,6 +531,8 @@ class _Chat:
     woken_in_a_row: int = 0
     # The avatar connection selects this chat holds at "Always connected" (avatar_chat).
     avatar_selects: list[str] = field(default_factory=list)
+    # The chat shown on a cast device, with the avatars talking (stage.py), if it is.
+    on_stage: stage.Show | None = None
 
     def add(self, who: str, text: str) -> None:
         self.lines.append(ChatLine(who, text, dt_util.utcnow().isoformat()))
@@ -838,6 +841,10 @@ class ChatShowManager:
                 avatar_chat.safety_until(chat.started, chat.limits.minutes),
                 chat.avatar_selects,
             )
+            # A cast device shows the avatars instead, when it can.
+            pair = self._chat_pair(chat)
+            if pair is not None:
+                chat.on_stage = await stage.async_open(self.hass, chat.speaker, pair, chat.names)
             await self._async_talk(chat)
         except asyncio.CancelledError:
             self._end(chat, "chat_stopped")
@@ -856,6 +863,10 @@ class ChatShowManager:
                 avatar_chat.async_release(self.hass, chat.avatar_selects),
                 name=f"{DOMAIN} chat avatars release",
             )
+            if chat.on_stage is not None:
+                self.hass.async_create_background_task(
+                    stage.async_close(self.hass, chat.on_stage), name=f"{DOMAIN} chat stage end"
+                )
             for unsubscribe in chat.unsubscribe:
                 unsubscribe()
             chat.unsubscribe = []
@@ -1015,7 +1026,42 @@ class ChatShowManager:
                 if failure != _LISTEN_UNAVAILABLE:
                     return failure
             return await self._async_announce(chat, entry, line)
+        if chat.on_stage is not None and not chat.on_stage.broken:
+            if await self._async_stage_line(chat, entry, line):
+                return ""
+            # Played as audio from now on, which takes the cast device off the stage.
         return await self._async_play(chat, entry, line)
+
+    async def _async_stage_line(self, chat: _Chat, entry: ConfigEntry, line: str) -> bool:
+        """Have the assistant's avatar say the line on the stage. False when it could not."""
+        from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
+
+        assert chat.on_stage is not None
+        engine, voice = _chat_voice(entry)
+        media_id = (
+            await _async_chat_media_id(self.hass, line, engine, voice) if engine else None
+        )
+        media_id = media_id or _tts_media_id(self.hass, line, None, "")
+        if media_id is None:
+            return False
+        try:
+            async with asyncio.timeout(CHAT_VOICE_TIMEOUT):
+                extension, audio = await tts.async_get_media_source_audio(self.hass, media_id)
+            clip = prepare_clip(extension, audio, {})
+        except Exception as err:  # noqa: BLE001 - an engine may raise anything
+            _LOGGER.warning("No audio for a chat line on the stage: %s", type(err).__name__)
+            return False
+        if clip is None:
+            _LOGGER.warning("The chat voice gave audio the avatar cannot play")
+            return False
+        chat.speaking = True
+        try:
+            return await stage.async_say(
+                self.hass, chat.on_stage, entry.entry_id, line, *clip,
+                timeout=play_timeout(len(line.split())),
+            )
+        finally:
+            chat.speaking = False
 
     async def _async_wait_idle(self, satellite: str, limit: float = BUSY_WAIT) -> bool:
         """Wait until the satellite is idle, at most `limit` seconds. False if it is gone."""

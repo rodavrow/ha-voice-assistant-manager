@@ -24,6 +24,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   hold** switch, a chat show turns it on, so the avatar that spoke last stays on screen,
   idle, until the next one speaks, and turns it off when the chat ends. See
   [Avatar](docs/avatar.md#between-the-lines-of-a-chat).
+- **A chat on a cast device shows the avatars talking.** On a Nest Hub, Chromecast or
+  Google TV, when both assistants have an avatar, the chat casts a stage: the speaking
+  avatar fills the screen and the other waits in an inset, each with its voice from the same
+  LiveTalking stream as its lips. Optional captions show each line. Set it up once with
+  **Set up the stage** under **Chat show** on the Voice Manager page. It needs Home Assistant
+  reachable over https. Whatever goes wrong, the chat plays as audio, as before. See
+  [Chat show](docs/chat-show.md#on-a-cast-device).
 - **A chat's avatars stay connected for the whole chat.** When a chat show starts, each
   assistant in it is connected to LiveTalking on the satellite showing it before the first
   line, and stays connected until the chat ends, also with **Connect when woken**. A new

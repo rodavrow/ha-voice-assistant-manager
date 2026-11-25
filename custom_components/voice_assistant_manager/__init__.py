@@ -22,6 +22,7 @@ from .memory import async_get_memory
 from .mine_api import async_register_mine_commands
 from .panel import async_setup_panel
 from .panel_api import async_register_chat_services, async_register_commands
+from .stage_api import async_register_stage_commands
 
 PLATFORMS = [Platform.CONVERSATION]
 # Per loaded entry: the platforms it set up (so unloading matches) and its avatars.
@@ -36,6 +37,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await async_setup_panel(hass)
     async_register_commands(hass)
     async_register_mine_commands(hass)
+    async_register_stage_commands(hass)
     async_register_favorites_api(hass)
     avatar_devices.async_setup(hass)
     return True
