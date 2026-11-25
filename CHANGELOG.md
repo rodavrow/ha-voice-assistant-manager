@@ -24,6 +24,14 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   hold** switch, a chat show turns it on, so the avatar that spoke last stays on screen,
   idle, until the next one speaks, and turns it off when the chat ends. See
   [Avatar](docs/avatar.md#between-the-lines-of-a-chat).
+- **A chat's avatars stay connected for the whole chat.** When a chat show starts, each
+  assistant in it is connected to LiveTalking on the satellite showing it before the first
+  line, and stays connected until the chat ends, also with **Connect when woken**. A new
+  session opening between lines made LiveTalking's picture stutter on every speaker change.
+  The assistant's own setting is not changed and applies again after the chat; other
+  satellites and assistants are not touched; an avatar that cannot connect, or no room on
+  the server, falls back to connecting when woken. See
+  [Avatar](docs/avatar.md#for-the-whole-chat).
 - **Satellites that can show which assistant is talking now do.** On a satellite whose
   firmware offers a select ending in `_next_announcement_assistant`, each Chat show line and each line from `compose_announcement` shows the assistant that speaks it.
   The new `prepare_announcement` action does the same for any other announcement, such as
@@ -32,6 +40,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Changed
 
+- **A clip is copied to at most 4 LiveTalking viewers**, down from 8, to match the
+  server's session limit.
 - **The voice for chats is chosen from a list.** When the engine names its voices, the Voice
   Manager page offers them instead of a text field, so a voice the engine does not have
   cannot be typed.

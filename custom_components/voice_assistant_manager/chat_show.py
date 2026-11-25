@@ -38,7 +38,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from . import announcement_look, avatar_hold
+from . import announcement_look, avatar_chat, avatar_hold
 from .announce import writer_agent
 from .const import DOMAIN
 from .memory import clean_text
@@ -528,6 +528,8 @@ class _Chat:
     self_wake_at: datetime | None = None
     wake_answered: asyncio.Event = field(default_factory=asyncio.Event)
     woken_in_a_row: int = 0
+    # The avatar connection selects this chat holds at "Always connected" (avatar_chat).
+    avatar_selects: list[str] = field(default_factory=list)
 
     def add(self, who: str, text: str) -> None:
         self.lines.append(ChatLine(who, text, dt_util.utcnow().isoformat()))
@@ -827,6 +829,15 @@ class ChatShowManager:
 
     async def _async_run(self, chat: _Chat) -> None:
         try:
+            # Every assistant's avatar on this speaker connected before the first line, and
+            # kept so until the last: a session opening between lines stutters the others.
+            await avatar_chat.async_hold(
+                self.hass,
+                chat.speaker,
+                chat.routers,
+                avatar_chat.safety_until(chat.started, chat.limits.minutes),
+                chat.avatar_selects,
+            )
             await self._async_talk(chat)
         except asyncio.CancelledError:
             self._end(chat, "chat_stopped")
@@ -840,6 +851,10 @@ class ChatShowManager:
             self.hass.async_create_background_task(
                 avatar_hold.async_set(self.hass, chat.speaker, False),
                 name=f"{DOMAIN} avatar hold off",
+            )
+            self.hass.async_create_background_task(
+                avatar_chat.async_release(self.hass, chat.avatar_selects),
+                name=f"{DOMAIN} chat avatars release",
             )
             for unsubscribe in chat.unsubscribe:
                 unsubscribe()

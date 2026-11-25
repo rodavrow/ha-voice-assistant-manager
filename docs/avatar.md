@@ -58,17 +58,27 @@ Voice Assistant Manager switches this for you. For every satellite whose wake wo
 
 - **Avatar connection** under **Assistant > Advanced**:
   - **Connect when woken** (the default) connects to LiveTalking when the satellite wakes. The avatar shows about a second later; until then the normal look is shown.
-  - **Always connected** keeps a LiveTalking session open per satellite, so the avatar is there at once. Recommended for the [Chat show](chat-show.md).
+  - **Always connected** keeps a LiveTalking session open per satellite, so the avatar is there at once. A [Chat show](chat-show.md) keeps its assistants connected for the chat whichever you choose (see [For the whole chat](#for-the-whole-chat)).
 - **The satellite sends its own speech to LiveTalking**, for its own session only, so two satellites never speak each other's replies. The copy for other viewers, such as the LiveTalking page, skips the satellites' sessions.
 - **Announcements and Chat show lines** go through the avatar when the satellite's own **Animate announcements** switch is on. When it is off, they play as before.
 - **Speech the satellite plays as a media player** (for example `tts.speak` to its media player) stays as before, with the normal animation.
 - **When anything fails** (LiveTalking cannot be reached, the stream stalls, no sound comes back), the satellite falls back to its normal speech and look for that turn. It never goes silent.
 
-What a satellite needs: firmware with avatar mode (a display with the LiveTalking support), offering per wake word, on the wake word's assistant device, the entities with the object ids `avatar_mode_N` (switch), `avatar_url_N` and `avatar_id_N` (text), `avatar_connection_N` (select: "Always connected" or "Connect when woken") and `avatar_session_N` (sensor), N being 1 for the first wake word. Voice Assistant Manager finds them by those ids, not by their names, so renaming them does not matter. Satellites without them are never touched.
+What a satellite needs: firmware with avatar mode (a display with the LiveTalking support), offering per wake word, on the wake word's assistant device, the entities with the object ids `avatar_mode_N` (switch), `avatar_url_N` and `avatar_id_N` (text), `avatar_connection_N` (select: "Always connected" or "Connect when woken"), `avatar_session_N` (sensor) and, on newer firmware, `avatar_state_N` (sensor: off, connecting, connected or failed), N being 1 for the first wake word. Voice Assistant Manager finds them by those ids, not by their names, so renaming them does not matter. Satellites without them are never touched.
 
 ### Between the lines of a chat
 
 A satellite shows the avatar only while it speaks, so between two lines of a [Chat show](chat-show.md) it would go back to its own screen. On firmware that offers a switch named **Avatar hold**, Voice Assistant Manager turns that switch on for the chat and off when the chat ends. While it is on, the avatar that spoke last stays on screen, idle, until the next one speaks. The satellite turns the switch off by itself a minute after its last announcement. Satellites without the switch are not changed, and the switch is never touched outside a chat.
+
+### For the whole chat
+
+LiveTalking's picture stutters for a moment on every session it is running whenever a new session starts. With **Connect when woken**, each change of speaker in a chat would close one session and open another, so every line would stutter. So when a chat starts, Voice Assistant Manager connects the avatar of each assistant in the chat on the satellite showing it, and waits until each one is connected (up to 15 seconds) before the first line. They stay connected until the chat ends, however it ends, and then each goes back to its own **Avatar connection**.
+
+- **Only the chat's satellite, only its assistants.** Other satellites, and wake words that use an assistant not in the chat, are not touched.
+- **Your setting is not changed.** For the length of the chat, the satellite's **Avatar connection** select reads **Always connected**; the setting under **Assistant > Advanced** stays as you chose it, and the select is set back to it after the chat. If you change the setting during a chat, the new one is what the select gets.
+- **It never holds up a chat.** An avatar that does not connect in time or is refused, a satellite that is away, or LiveTalking having no room (4 sessions, satellites' own included) is logged, and that assistant connects when woken, as outside a chat.
+- **It cannot stay on.** A satellite away when the chat ends is set back when it returns (up to 30 seconds), and otherwise by the next minute's check. The hold also ends by itself five minutes after the chat's time limit, and a restart of Home Assistant ends it at once.
+- Firmware without the `avatar_state_N` sensor is connected the same way, but the chat does not wait for it.
 
 ### Voice for chats
 
@@ -79,7 +89,7 @@ While an avatar is on, the **Avatar** card reminds you to choose its entity as t
 For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`). It leaves out the sessions of satellites in avatar mode, which send their own speech, and, when the avatar has a **LiveTalking avatar** set, every session showing another avatar, so one assistant never speaks with another's face. For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
 
 - **The audio is sent as the engine made it.** MP3, WAV, FLAC and OGG are recognised from the audio itself and sent unconverted. Raw PCM without a header is wrapped as WAV, but only when the request said its sample rate. Without one it is not sent, and the log says so once.
-- **At most 8 viewers** get a clip, and a clip over 10 MB is not sent.
+- **At most 4 viewers** get a clip, LiveTalking's session limit on the household server, and a clip over 10 MB is not sent.
 - **Short time limits.** Two seconds to connect, ten seconds in all.
 
 ## What it never does

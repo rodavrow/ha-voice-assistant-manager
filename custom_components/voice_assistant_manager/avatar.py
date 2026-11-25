@@ -34,8 +34,9 @@ CONF_AVATAR_ID = "avatar_id"
 
 # A clip bigger than this is not copied or sent: a few minutes of speech at most.
 MAX_CLIP_BYTES = 10 * 1024 * 1024
-# LiveTalking makes a session per viewer; more than this is not a household setup.
-MAX_SESSIONS = 8
+# LiveTalking makes a session per viewer, and refuses one past its --max_session (4 on the
+# household server). Satellites' own sessions count toward it too.
+MAX_SESSIONS = 4
 CONNECT_TIMEOUT = 2.0
 TOTAL_TIMEOUT = 10.0
 
