@@ -79,6 +79,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **The end of a line is no longer cut on the chat stage.** On a cast device, the last
+  syllable of a line could be cut when the other avatar took over or the chat ended:
+  LiveTalking says it stopped speaking while the end of the line is still on its way to
+  the device. Each line is now given at least as long as its audio lasts, plus a second
+  for the device, and the avatars stay on screen for a few seconds after the last line
+  before the stage closes. A chat started on the same device in those seconds is no longer
+  stopped by the one before it ending.
 - **A wake word reaches its own assistant, also right after the other one asked
   something.** On a satellite with two wake words, Home Assistant keeps one conversation
   for both, and sends a request in it to the assistant that last asked a question, so for

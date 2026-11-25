@@ -18,8 +18,11 @@ chat goes on as before: the line is played as audio on the device.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import logging
 import time
+import wave
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -62,9 +65,11 @@ CONNECT_WAIT = 45.0
 # can take over ten seconds.
 FIRST_SOUND = 15.0
 POLL = 0.3
-# is_speaking turns false a little before the last of the audio has played.
-TAIL = 0.6
-# How long the last avatar stays on screen after the chat, before the cast is stopped.
+# How far the device's sound is behind LiveTalking: is_speaking turns false when LiveTalking
+# has sent the last of a line, while it is still on its way and in the device's buffer.
+TAIL = 1.0
+# How long the avatars stay on screen after the chat, before the streams close and the cast
+# is stopped: the last line is still finishing on the device.
 LINGER = 3.0
 CALL_TIMEOUT = 10.0
 # The cast app the stage runs in, as the cast media player names it.
@@ -300,6 +305,32 @@ def _end(stage: Stage, show: Show) -> None:
         stage.publish({"event": "end", "token": show.token})
 
 
+def clip_seconds(extension: str, audio: bytes) -> float | None:
+    """How long a clip (as prepare_clip gives it) plays, or None when that is not known."""
+    if extension == "wav":
+        with contextlib.suppress(wave.Error, EOFError, ValueError):
+            with wave.open(io.BytesIO(audio)) as wav:
+                frame = wav.getsampwidth() * wav.getnchannels()
+                rate = wav.getframerate()
+                if not frame or not rate:
+                    return None
+                # A streamed WAV header often claims more samples than the clip has.
+                samples = len(audio) - (audio.find(b"data") + 8)
+                frames = min(wav.getnframes(), samples // frame)
+                return frames / rate
+        return None
+    if extension == "mp3":
+        try:
+            from mutagen import MutagenError  # noqa: PLC0415 - Home Assistant's tts has it
+            from mutagen.mp3 import MP3  # noqa: PLC0415
+        except ImportError:
+            return None
+        with contextlib.suppress(MutagenError, ValueError):
+            length = float(MP3(io.BytesIO(audio)).info.length)
+            return length if length > 0 else None
+    return None
+
+
 async def async_say(
     hass: HomeAssistant, show: Show, key: str, line: str, extension: str, audio: bytes,
     timeout: float,
@@ -321,7 +352,7 @@ async def async_say(
     client = show.client(hass, actor)
     try:
         await client.async_say(actor.session, extension, audio)
-        await _async_wait_spoken(client, actor, timeout)
+        await _async_wait_spoken(client, actor, timeout, clip_seconds(extension, audio))
     except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
         _LOGGER.warning(
             "Chat stage: %s could not say a line on %s (%s); the chat plays as audio",
@@ -332,9 +363,13 @@ async def async_say(
     return True
 
 
-async def _async_wait_spoken(client: LiveTalkingClient, actor: Actor, timeout: float) -> None:
-    """Wait until the session has started and then stopped speaking, at most `timeout`
-    after it started."""
+async def _async_wait_spoken(
+    client: LiveTalkingClient, actor: Actor, timeout: float, length: float | None = None
+) -> None:
+    """Wait until the session has started and then stopped speaking, and the device has
+    played the line: at least the clip's `length` after it started, then TAIL. At most
+    `timeout` after it started, or the clip's length if that is longer."""
+    limit = max(timeout, length or 0.0)
     sent = time.monotonic()
     began: float | None = None
     while True:
@@ -347,18 +382,24 @@ async def _async_wait_spoken(client: LiveTalkingClient, actor: Actor, timeout: f
                 "Chat stage: %s did not start speaking within %.0f s", actor.name, FIRST_SOUND
             )
             return
-        if began is not None and (not speaking or now - began > timeout):
-            await asyncio.sleep(TAIL)
+        if began is not None and (not speaking or now - began > limit):
+            # Speaking started at most one poll before it was seen, so this is never short.
+            left = began + length - now if length else 0.0
+            await asyncio.sleep(max(left, 0.0) + TAIL)
             return
         await asyncio.sleep(POLL)
 
 
 async def async_close(hass: HomeAssistant, show: Show) -> None:
-    """End the stage: the page closes its sessions, and the cast stops shortly after, if
-    the device still shows it. Never raises."""
+    """End the stage a moment after the last line: the page closes its sessions, and the
+    cast stops, if the device still shows it. Never raises."""
     stage = get_stage(hass)
-    _end(stage, show)
-    await asyncio.sleep(LINGER)
+    try:
+        await asyncio.sleep(LINGER)
+    finally:
+        _end(stage, show)
+    if stage.show is not None and stage.show.speaker == show.speaker:
+        return  # A new chat shows the stage there now.
     state = hass.states.get(show.speaker)
     app = str(state.attributes.get("app_name") or "") if state is not None else ""
     if CAST_APP not in app:

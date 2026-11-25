@@ -3,7 +3,10 @@
 """A chat show on a Google Cast device shows the avatars talking on the chat stage."""
 
 import asyncio
+import io
 import logging
+import time
+import wave
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -91,6 +94,7 @@ class FakeCast:
         self.shown: list[dict[str, Any]] = []
         self.turned_off: list[str] = []
         self.events: list[str] = []
+        self.times: list[float] = []
         self.connects = True
         self._stop = None
         hass.services.async_register("cast", "show_lovelace_view", self._show)
@@ -104,6 +108,7 @@ class FakeCast:
     @callback
     def _card(self, message: dict[str, Any]) -> None:
         self.events.append(message["event"])
+        self.times.append(time.monotonic())
         if message["event"] == "start" and self.connects:
             for actor in message["actors"]:
                 self.hass.async_create_task(self._connect(message["token"], actor["key"]))
@@ -345,6 +350,114 @@ async def test_a_line_that_never_starts_speaking_is_given_up_on(hass, show, cast
     assert len(cast.live.said) == 2
     assert show.speakers.played == []
     assert any("did not start speaking" in r.getMessage() for r in caplog.records)
+
+
+async def test_the_avatars_stay_on_screen_a_moment_after_the_last_line(hass, show, cast):
+    # LiveTalking and the device's own buffer are still playing the end of the last line
+    # when the chat ends: the card must not close the streams under it.
+    original = FakeLiveTalking.async_speaking
+    done: list[float] = []
+
+    async def speaking(self, session_id):
+        result = await original(self, session_id)
+        if not result:
+            done.append(time.monotonic())
+        return result
+
+    with (
+        patch.object(FakeLiveTalking, "async_speaking", speaking),
+        patch.object(stage, "LINGER", 0.1),
+    ):
+        await chat_on_tv(hass, show)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert cast.device.events[-1] == "end"
+    assert cast.device.times[-1] - done[-1] >= 0.1
+    assert cast.device.turned_off == [TV]
+
+
+async def test_a_new_chat_on_the_stage_is_not_stopped_by_the_last_one_ending(hass, cast):
+    hass.states.async_set(TV, "playing", {"app_name": "Home Assistant Cast"})
+    old = stage.Show("old", TV, {}, captions=False)
+    stage.get_stage(hass).show = stage.Show("new", TV, {}, captions=False)
+
+    await stage.async_close(hass, old)
+
+    assert stage.get_stage(hass).show.token == "new"
+    assert cast.device.turned_off == []
+
+
+class OneQuickPoll:
+    """A session that says it is speaking at the first poll and is done at the next."""
+
+    def __init__(self) -> None:
+        self.polls = 0
+
+    async def async_speaking(self, session_id: str) -> bool:
+        self.polls += 1
+        return self.polls == 1
+
+
+async def test_a_line_is_waited_for_as_long_as_its_audio_lasts(cast):
+    # is_speaking turns false before the device has played the end of the clip.
+    actor = stage.Actor("jeeves", "Jeeves", "http://livetalking.local:8010", "jeeves", "s1")
+    began = time.monotonic()
+
+    await stage._async_wait_spoken(OneQuickPoll(), actor, timeout=5, length=0.2)
+
+    assert time.monotonic() - began >= 0.2
+
+
+async def test_without_a_known_length_the_line_ends_when_speaking_stops(cast):
+    actor = stage.Actor("jeeves", "Jeeves", "http://livetalking.local:8010", "jeeves", "s1")
+    began = time.monotonic()
+
+    await stage._async_wait_spoken(OneQuickPoll(), actor, timeout=5, length=None)
+
+    assert time.monotonic() - began < 0.1
+
+
+async def test_a_line_longer_than_its_timeout_is_still_waited_for(cast):
+    class Forever:
+        async def async_speaking(self, session_id):
+            return True
+
+    actor = stage.Actor("jeeves", "Jeeves", "http://livetalking.local:8010", "jeeves", "s1")
+    began = time.monotonic()
+
+    await stage._async_wait_spoken(Forever(), actor, timeout=0.05, length=0.2)
+
+    assert time.monotonic() - began >= 0.2
+
+
+def _wav(seconds: float, rate: int = 16000) -> bytes:
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(b"\0\0" * int(rate * seconds))
+    return out.getvalue()
+
+
+def _mp3(frames: int) -> bytes:
+    # MPEG-1 layer 3, 128 kbit/s, 44.1 kHz, no padding: 417 bytes and 1152 samples a frame.
+    return (b"\xff\xfb\x90\x00" + b"\0" * 413) * frames
+
+
+def test_clip_lengths():
+    assert stage.clip_seconds("wav", _wav(1.5)) == pytest.approx(1.5)
+    assert stage.clip_seconds("mp3", _mp3(38)) == pytest.approx(38 * 1152 / 44100, abs=0.05)
+    assert stage.clip_seconds("mp3", b"audio") is None
+    assert stage.clip_seconds("wav", b"not a wav") is None
+    assert stage.clip_seconds("ogg", b"OggS") is None
+
+
+def test_a_wav_that_claims_more_samples_than_it_has_counts_what_it_has():
+    # Streamed WAV headers often carry a placeholder size.
+    audio = bytearray(_wav(0.5))
+    audio[40:44] = b"\xff\xff\xff\x7f"
+    assert stage.clip_seconds("wav", bytes(audio)) == pytest.approx(0.5)
 
 
 # What the card may ask
