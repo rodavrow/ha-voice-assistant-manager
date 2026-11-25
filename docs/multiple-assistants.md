@@ -39,3 +39,9 @@ To add another assistant, add the integration again with a new name and a main a
 - **Memory.** Each assistant keeps its own memory lists. Facts saved for all assistants are shared, so every assistant knows those, live or not.
 
 **Make a new assistant known to your own scripts.** Wherever your scripts list assistants by name, add the new one, using its [assistant name](reminders.md#assistant-names). The usual place is the script that speaks reminders, with its voice per assistant. If the new assistant is missing there, its reminders are spoken in whatever voice that script falls back to, typically the satellite's default.
+
+## Two wake words on one satellite
+
+Home Assistant keeps one conversation per satellite, whichever wake word was said, for five minutes after its last use. When an assistant's reply asks something, Home Assistant sends the next request in that conversation to that assistant, whatever pipeline the next wake word runs. Without a fix, the other wake word said within those minutes reaches the first assistant.
+
+Voice Assistant Manager fixes this for its own assistants, on satellites that report a **Last wake word** sensor (the LANovo and EchoLocal firmware do). When a request reaches one of its assistants right after a wake word whose pipeline uses another of them, it hands the request to that one, in a conversation of its own, and the follow-ups go there too until another wake word is said. The log says when it does. Requests that started without a wake word, and assistants of other integrations, are left as Home Assistant sends them.

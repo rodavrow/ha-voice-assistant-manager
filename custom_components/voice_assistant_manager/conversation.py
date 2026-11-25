@@ -49,6 +49,7 @@ from homeassistant.util import ulid
 from .announce import safe_toolless_agent
 from .chat_show import GUEST, get_manager, is_stop_phrase
 from .const import REPLY_AGENT_TIMEOUT
+from .wake_handoff import async_hand_off
 from .favorites import async_get_favorites, favorites_on, find, lists_for, parse_play
 from .favorites_context import Asker, forget, remember
 from .favorites_play import (
@@ -922,7 +923,13 @@ class PersonaRouter(conversation.ConversationEntity):
         When that cannot be worked out, the request is refused: the lookup failed, the
         router has neither saved settings nor a "who is speaking" script, or the script
         answered with nothing.
+
+        A request that a wake word of another of these assistants started, but Home
+        Assistant sent here, goes to that assistant (wake_handoff.py).
         """
+        handed = await async_hand_off(self.hass, self.entity_id, user_input)
+        if handed is not None:
+            return handed
         resp = None
         try:
             settings = self._entry.options

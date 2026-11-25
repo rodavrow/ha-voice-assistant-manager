@@ -72,6 +72,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A wake word reaches its own assistant, also right after the other one asked
+  something.** On a satellite with two wake words, Home Assistant keeps one conversation
+  for both, and sends a request in it to the assistant that last asked a question, so for
+  five minutes after that the other wake word reached the wrong assistant. A request right
+  after a wake word now goes to that wake word's assistant, with its follow-ups. It needs
+  the satellite's **Last wake word** sensor. See
+  [Two wake words on one satellite](docs/multiple-assistants.md#two-wake-words-on-one-satellite).
 - **A satellite that drops its connection for a moment no longer ends the chat.** A satellite
   that reconnects during a line, as some do after a firmware update, ended the chat with
   "The speaker could not play a line". The chat now waits up to 15 seconds for it to come
