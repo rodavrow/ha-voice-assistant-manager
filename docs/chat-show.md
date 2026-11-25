@@ -67,7 +67,7 @@ On a Nest Hub, a Chromecast or a Google TV, a chat can show the assistants' avat
 - Home Assistant reachable over https, through Home Assistant Cloud or your own certificate, as Home Assistant Cast needs it
 - room for two more sessions on LiveTalking (4 at most, satellites' own included)
 
-**During a chat:** when the chat starts, the device is cast the stage, and the chat waits for both avatars to connect (up to 45 seconds) before the first line. Each line goes only to the speaking avatar. The next line starts once LiveTalking says that avatar has finished. When the chat ends, the device is stopped a few seconds after the last line, unless something else has been cast to it meanwhile.
+**During a chat:** when the chat starts, the device is cast the stage, and the chat waits for both avatars to connect (up to 45 seconds) before the first line. Each line goes only to the speaking avatar. The next line starts once that avatar has finished: when LiveTalking says it stopped speaking, but never before the line's audio has had time to play, plus a second for the sound to reach the device. When the chat ends, the avatars stay on screen for a few seconds, so the last line finishes, and then the device is stopped, unless something else has been cast to it meanwhile.
 
 **Captions:** switch on **Show each line as a caption** to show the text of each line at the bottom of the screen.
 
