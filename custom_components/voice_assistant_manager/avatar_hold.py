@@ -46,8 +46,8 @@ def hold_switch(hass: HomeAssistant, satellite: str) -> str | None:
     return None
 
 
-async def _async_wait_available(hass: HomeAssistant, switch: str) -> State | None:
-    """The switch's state once it is available again, or None after OFF_WAIT seconds."""
+async def async_wait_available(hass: HomeAssistant, entity_id: str) -> State | None:
+    """The entity's state once it is available again, or None after OFF_WAIT seconds."""
     back = asyncio.Event()
 
     @callback
@@ -56,7 +56,7 @@ async def _async_wait_available(hass: HomeAssistant, switch: str) -> State | Non
         if new_state is not None and new_state.state != STATE_UNAVAILABLE:
             back.set()
 
-    unwatch = async_track_state_change_event(hass, [switch], changed)
+    unwatch = async_track_state_change_event(hass, [entity_id], changed)
     try:
         async with asyncio.timeout(OFF_WAIT):
             await back.wait()
@@ -64,7 +64,7 @@ async def _async_wait_available(hass: HomeAssistant, switch: str) -> State | Non
         return None
     finally:
         unwatch()
-    return hass.states.get(switch)
+    return hass.states.get(entity_id)
 
 
 async def async_set(hass: HomeAssistant, satellite: str, on: bool) -> None:
@@ -76,7 +76,7 @@ async def async_set(hass: HomeAssistant, satellite: str, on: bool) -> None:
     if state.state == STATE_UNAVAILABLE:
         # Turning it on can wait for the next line. Off cannot: a satellite that dropped
         # as the chat ended comes back with the hold still on.
-        state = None if on else await _async_wait_available(hass, switch)
+        state = None if on else await async_wait_available(hass, switch)
         if state is None:
             return
     if state.state == (STATE_ON if on else STATE_OFF):
