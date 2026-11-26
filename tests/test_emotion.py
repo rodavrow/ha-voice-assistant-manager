@@ -40,6 +40,11 @@ SAMPLES = [
     ("[abcdefghijklmnopqrs] Hi.", "neutral", "[abcdefghijklmnopqrs] Hi."),
     (" " * 25 + "[happy] Hi.", "neutral", " " * 25 + "[happy] Hi."),
     ("[happy] [sad] Hi.", "happy", "[sad] Hi."),
+    # Only a word of letters is a tag: a number or code at the start stays in the reply.
+    ("[1] First step.", "neutral", "[1] First step."),
+    ("[2b] Second.", "neutral", "[2b] Second."),
+    ("[x_y] Hi.", "neutral", "[x_y] Hi."),
+    ("[Fröhlich] Hallo.", "neutral", "Hallo."),
 ]
 
 

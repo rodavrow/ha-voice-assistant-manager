@@ -103,7 +103,9 @@ show lines and announcements.
   satellite's display and the log, also while a reply streams in (only its first 20
   characters are held back to tell). Assistants without an avatar have it taken off too.
   The conversation history keeps it, so the agent sees how it answered before.
-- **A missing or unknown tag is neutral.** The reply always goes ahead.
+- **A missing or unknown tag is neutral.** An unknown word, such as `[excited]`, is still
+  taken off. Only a word of letters counts as a tag, so a reply that starts with `[1]` or
+  `[2b]` keeps it. The reply always goes ahead.
 - **LiveTalking is told the emotion** just before the reply's audio:
   `POST /set_emotion` with `{"avatar_id": …, "emotion": …}`, once for each avatar of the
   assistant that is on. It goes by avatar, not session, so a satellite in avatar mode gets
