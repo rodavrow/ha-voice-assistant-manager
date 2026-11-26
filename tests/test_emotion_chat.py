@@ -97,3 +97,19 @@ async def test_a_media_player_line_tells_its_emotion_before_it_plays(
 
     assert tagged == ["emotion Jeeves happy", "play", "emotion Ada neutral", "play"]
     assert all("[happy]" not in call["media_content_id"] for call in show.speakers.played)
+
+
+async def test_on_the_stage_the_log_says_which_face_went_with_each_line(
+    hass, show, cast, tagged, caplog
+):
+    import logging  # noqa: PLC0415
+
+    show.agents.replies[ADA_WRITER] = "[smug] Oh, Jeeves."
+    with caplog.at_level(logging.DEBUG, logger=emotion.__name__):
+        await run_chat(hass, show, speaker=TV, limits=TWO_LINES)
+
+    assert "Emotion: Jeeves told to look happy with its line on the stage (face tag)" in caplog.text
+    assert (
+        "Emotion: Ada told to look sarcastic with its line on the stage (from audio tag [smug])"
+        in caplog.text
+    )

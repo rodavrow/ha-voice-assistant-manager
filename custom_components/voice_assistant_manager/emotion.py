@@ -491,6 +491,18 @@ class StreamedReply:
         self._on_emotion(emotion)
 
 
+def log_face_with_clip(name: str, emotion: Emotion, why: str = "") -> None:
+    """Note a face that went to LiveTalking with a clip, not through /set_emotion.
+
+    On the chat stage each line's face travels with its audio, so no call is made here;
+    the log line is the same as for a call, so a face is never sent unseen.
+    """
+    _LOGGER.debug(
+        "Emotion: %s told to look %s with its line on the stage%s",
+        name, emotion, f" ({why})" if why else "",
+    )
+
+
 def avatar_targets(entry: ConfigEntry) -> list[tuple[str, str]]:
     """(LiveTalking address, avatar id) of each avatar of the assistant that is switched on.
 
