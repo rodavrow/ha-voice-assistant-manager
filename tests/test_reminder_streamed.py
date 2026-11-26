@@ -105,12 +105,12 @@ async def test_a_streamed_true_cancellation_is_spoken_whole(hass, sent):  # noqa
     assert pipeline.spoken == "".join(pieces)
 
 
-async def test_a_reply_that_is_not_about_a_reminder_still_streams_as_it_comes(hass, sent):  # noqa: F811
+async def test_every_reply_reaches_the_voice_only_once_it_is_complete(hass, sent):  # noqa: F811
     entry = await add_router(
         hass, options_with(reminders=REMINDERS, memory={"enabled": False})
     )
-    pipeline = Pipeline(sent)
     heard_when: list[str] = []
+    seen: list[str] = []
     pieces = ["The kitchen lights are on, ", "and the hall is off."]
 
     class Watching(Pipeline):
@@ -119,7 +119,6 @@ async def test_a_reply_that_is_not_about_a_reminder_still_streams_as_it_comes(ha
             if delta.get("content"):
                 heard_when.append(f"heard after {len(seen)} written")
 
-    seen: list[str] = []
     pipeline = Watching(sent)
     with patch.object(
         conversation, "async_converse", streaming_agent(pieces, seen=seen)
@@ -127,11 +126,11 @@ async def test_a_reply_that_is_not_about_a_reminder_still_streams_as_it_comes(ha
         await ask_streamed(hass, entry, "Which lights are on?", pipeline)
 
     assert pipeline.spoken == "".join(pieces)
-    # The first piece reached the voice before the second was written.
-    assert heard_when[0] == "heard after 0 written"
+    # Checked before it is spoken: nothing reached the voice until all of it was written.
+    assert heard_when == ["heard after 2 written"]
 
 
-async def test_with_reminders_off_a_reply_streams_as_it_comes(hass, sent):  # noqa: F811
+async def test_with_reminders_off_the_reply_is_still_spoken(hass, sent):  # noqa: F811
     entry = await add_router(hass, options_with(memory={"enabled": False}))
     pipeline = Pipeline(sent)
 

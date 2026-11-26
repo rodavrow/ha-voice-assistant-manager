@@ -461,6 +461,21 @@ class StreamedReply:
         if self._hold and (text := kept.rstrip() if replacement is None else replacement):
             self.listener(self._chat_log, {"content": text})
 
+    def checkpoint(self) -> int:
+        """Close the message so far and mark the place in the held text (keep_from,
+        keep_until): what follows is another answer to the same request."""
+        self._flush()
+        self._filter = self._audio = None
+        return len(self._kept)
+
+    def keep_from(self, mark: int) -> None:
+        """Drop the held text before the mark: the answer after it replaces it."""
+        self._kept = self._kept[mark:]
+
+    def keep_until(self, mark: int) -> None:
+        """Drop the held text after the mark: the answer before it stands."""
+        self._kept = self._kept[:mark]
+
     def _keep(self, text: str) -> None:
         if not text:
             return
