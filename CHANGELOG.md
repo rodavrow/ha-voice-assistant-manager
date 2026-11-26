@@ -50,7 +50,9 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   tag counts as neutral; only a word of letters is a tag, so a reply that starts with
   `[1]` keeps it. For an assistant with an avatar, LiveTalking is told the emotion
   (`POST /set_emotion`) just before the audio, so the avatar can look the part. A
-  LiveTalking without it is not affected. See [Avatar](docs/avatar.md#emotions).
+  LiveTalking without it is not affected. On the chat stage the emotion goes with each
+  line's audio instead (an `emotion` field on `/humanaudio`). See
+  [Avatar](docs/avatar.md#emotions).
 
 ### Changed
 

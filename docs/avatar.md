@@ -112,6 +112,9 @@ show lines and announcements.
   it too. An avatar without a **LiveTalking avatar** set is not told. The call gives up
   after 300 ms and never holds up or fails the reply. A LiveTalking without
   `/set_emotion` answers 404, which is logged only at debug level.
+- **On the chat stage**, each line's emotion goes with its audio instead (an `emotion` field
+  on `/humanaudio`), so it reaches exactly the stage's session and no other session showing
+  the same avatar. A LiveTalking that does not know emotions ignores the field.
 
 ## What it never does
 

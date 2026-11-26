@@ -73,7 +73,9 @@ class FakeLiveTalking:
         self.offers.append((sdp, avatar_id))
         return f"answer-{avatar_id}", f"session-{avatar_id}"
 
-    async def async_say(self, session_id: str, extension: str, audio: bytes) -> None:
+    async def async_say(
+        self, session_id: str, extension: str, audio: bytes, emotion: str | None = None
+    ) -> None:
         if self.fail_say_at == len(self.said) + 1:
             raise aiohttp.ClientError("LiveTalking went away")
         self.said.append((session_id, extension))
@@ -217,8 +219,8 @@ async def test_the_stage_sessions_never_get_a_copy_of_the_avatars_speech(hass, s
 async def test_the_cast_is_left_alone_when_something_else_took_the_device(hass, show, cast):
     original = FakeLiveTalking.async_say
 
-    async def say(self, session_id, extension, audio):
-        await original(self, session_id, extension, audio)
+    async def say(self, session_id, extension, audio, **kwargs):
+        await original(self, session_id, extension, audio, **kwargs)
         hass.states.async_set(TV, "playing", {"app_name": "YouTube"})
 
     with patch.object(FakeLiveTalking, "async_say", say):
@@ -308,8 +310,8 @@ async def test_a_line_that_cannot_be_said_is_played_and_so_is_the_rest(hass, sho
 async def test_a_lost_stream_plays_the_rest_as_audio(hass, show, cast):
     original = FakeLiveTalking.async_say
 
-    async def say(self, session_id, extension, audio):
-        await original(self, session_id, extension, audio)
+    async def say(self, session_id, extension, audio, **kwargs):
+        await original(self, session_id, extension, audio, **kwargs)
         current = stage.get_stage(hass).show
         stage.connected(hass, current.token, show.ada.entry_id, False)
 

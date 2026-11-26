@@ -333,7 +333,7 @@ def clip_seconds(extension: str, audio: bytes) -> float | None:
 
 async def async_say(
     hass: HomeAssistant, show: Show, key: str, line: str, extension: str, audio: bytes,
-    timeout: float,
+    timeout: float, emotion: str | None = None,
 ) -> bool:
     """Have the assistant's avatar say the line, and return once it has.
 
@@ -351,7 +351,7 @@ async def async_say(
     )
     client = show.client(hass, actor)
     try:
-        await client.async_say(actor.session, extension, audio)
+        await client.async_say(actor.session, extension, audio, emotion=emotion)
         await _async_wait_spoken(client, actor, timeout, clip_seconds(extension, audio))
     except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
         _LOGGER.warning(

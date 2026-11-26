@@ -415,6 +415,26 @@ async def test_say_goes_to_one_session_only(hass, aioclient_mock):
     assert form_fields(aioclient_mock.mock_calls[1][2])["sessionid"] == (None, "s1")
 
 
+async def test_say_sends_the_emotion_with_the_clip_when_given(hass, aioclient_mock):
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    await client.async_say("s1", "mp3", MP3, emotion="sad")
+
+    assert form_fields(aioclient_mock.mock_calls[1][2])["emotion"] == (None, "sad")
+
+
+async def test_say_sends_no_emotion_when_none_is_given(hass, aioclient_mock):
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    client = avatar.LiveTalkingClient(async_get_clientsession(hass), BASE)
+
+    await client.async_say("s1", "mp3", MP3)
+
+    assert "emotion" not in form_fields(aioclient_mock.mock_calls[1][2])
+
+
 @pytest.mark.parametrize(("data", "speaking"), [(True, True), (False, False)])
 async def test_speaking_asks_the_session(hass, aioclient_mock, data, speaking):
     aioclient_mock.post(IS_SPEAKING, json={"code": 0, "data": data})

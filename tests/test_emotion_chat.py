@@ -60,11 +60,13 @@ async def test_each_line_tells_its_emotion_just_before_it_is_announced(hass, sho
     assert tagged == ["emotion Jeeves happy", "announce", "emotion Ada neutral", "announce"]
 
 
-async def test_on_the_stage_each_line_tells_its_emotion_before_the_avatar_says_it(
+async def test_on_the_stage_each_line_sends_its_emotion_with_its_audio(
     hass, show, cast, tagged
 ):
-    async def say(session_id, extension, audio):
-        tagged.append(f"say {session_id}")
+    # The upload carries the emotion for exactly the stage's session, so no /set_emotion
+    # is sent: it would also leave the emotion pending on a satellite showing the avatar.
+    async def say(session_id, extension, audio, emotion=None):
+        tagged.append(f"say {session_id} {emotion}")
 
     with patch.object(cast.live, "async_say", say), patch(
         "custom_components.voice_assistant_manager.stage._async_wait_spoken",
@@ -72,9 +74,7 @@ async def test_on_the_stage_each_line_tells_its_emotion_before_the_avatar_says_i
     ):
         await run_chat(hass, show, speaker=TV, limits=TWO_LINES)
 
-    assert tagged == [
-        "emotion Jeeves happy", "say session-jeeves", "emotion Ada neutral", "say session-ada",
-    ]
+    assert tagged == ["say session-jeeves happy", "say session-ada neutral"]
 
 
 async def _done() -> None:

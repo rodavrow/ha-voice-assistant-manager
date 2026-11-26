@@ -1058,11 +1058,12 @@ class ChatShowManager:
             _LOGGER.warning("The chat voice gave audio the avatar cannot play")
             return False
         chat.speaking = True
-        emotion.send_emotion(self.hass, entry, chat.line_emotion)
         try:
+            # With the clip, not /set_emotion: that would also leave the emotion pending on
+            # any other session showing this avatar, such as a satellite's.
             return await stage.async_say(
                 self.hass, chat.on_stage, entry.entry_id, line, *clip,
-                timeout=play_timeout(len(line.split())),
+                timeout=play_timeout(len(line.split())), emotion=chat.line_emotion,
             )
         finally:
             chat.speaking = False
