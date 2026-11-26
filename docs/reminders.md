@@ -112,6 +112,8 @@ With `weekdays`, `weekends` or `repeat_on`, the first reminder moves to the firs
 > [!TIP]
 > [`examples/cancel_reminder.yaml`](../examples/cancel_reminder.yaml) is a complete script. Use the same names in it as in `create_reminder`.
 
+**A person can cancel their own reminders and the household's, never the other person's.** The script passes `for_whom` to the action, and the action compares it with the person speaking, which it takes from the assistant and not from the main agent (as for [looking up](#asking-which-reminders-there-are)). A request through an assistant from a script that does not pass `for_whom` is refused, so update `cancel_reminder` from the example. Outside a conversation (an automation), a call that names a person is refused and one that names `household` or nobody works as before.
+
 Both actions refuse a person who may not control the calendar, as the calendar page does. Automations and scripts without a person are allowed.
 
 **The main agent can cancel reminders** under Settings > Reminders turns this on or off for each assistant, on by default. Off, the main agent is told it cannot cancel reminders and to point to the reminder calendar. That is an instruction, not a lock: to make sure no assistant can cancel, also stop exposing `script.cancel_reminder` to Assist.

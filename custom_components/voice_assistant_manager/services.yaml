@@ -181,6 +181,11 @@ cancel_reminder_event:
       example: pills
       selector:
         text:
+    for_whom:
+      required: false
+      example: alex
+      selector:
+        text:
 
 list_reminder_events:
   fields:

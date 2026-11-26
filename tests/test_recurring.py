@@ -15,6 +15,7 @@ from pytest_homeassistant.common import MockConfigEntry
 from custom_components.voice_assistant_manager import recurring
 from custom_components.voice_assistant_manager.const import DOMAIN
 from custom_components.voice_assistant_manager.recurring import RepeatError, plan_repeat
+from custom_components.voice_assistant_manager.reminder_actions import note_asker
 
 from .router_helpers import add_router
 
@@ -316,9 +317,12 @@ async def test_the_example_scripts_set_and_cancel_a_repeating_reminder(hass, cal
     )
     assert len(week["calendar.alex_reminders_announce"]["events"]) == 5
 
+    # Alex asks an assistant: a person cancels only their own and the household's.
+    turn = Context()
+    note_asker(hass, turn, "Alex")
     cancelled = await hass.services.async_call(
         "script", "cancel_reminder", {"title": "pills", "for_whom": "alex"},
-        blocking=True, return_response=True,
+        blocking=True, return_response=True, context=turn,
     )
 
     assert cancelled == {"status": "ok", "removed": 1, "title": "Take the pills"}

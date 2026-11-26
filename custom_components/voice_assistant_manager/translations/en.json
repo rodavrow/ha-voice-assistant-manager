@@ -792,7 +792,8 @@
       "description": "Removes an upcoming reminder by its title, a repeating one as a whole. Used by the cancel_reminder example script. When several reminders match, nothing is removed and the answer lists them. Refuses a user who may not control the calendars.",
       "fields": {
         "calendar": {"name": "Calendars", "description": "The calendars to look in."},
-        "title": {"name": "Title", "description": "The reminder's title, or a word from it."}
+        "title": {"name": "Title", "description": "The reminder's title, or a word from it."},
+        "for_whom": {"name": "For whom", "description": "Whose calendars these are: a person's name in lower case, or household. A person speaking to an assistant can only cancel their own reminders and the household's; without this field such a request is refused."}
       }
     },
     "list_reminder_events": {

@@ -482,7 +482,13 @@ def reminder_guidance(
             f"reminder\" cancels one: call the {CANCEL_TOOL} tool (script.{CANCEL_TOOL}) "
             "with the reminder's title, or a word from it, and for_whom. A repeating "
             "reminder is cancelled as a whole. If it says several reminders match, ask "
-            "which one and call it again with that title.",
+            "which one and call it again with that title."
+            + (
+                f" Only the person speaking's own reminders and the household's can be "
+                f"cancelled: {other_name.strip()}'s cannot, so say that and do not try."
+                if other
+                else ""
+            ),
             f"- Say a reminder is cancelled only after {CANCEL_TOOL} returned status ok in "
             "this turn. If it returned an error, tell the person what its message says.",
         ]
