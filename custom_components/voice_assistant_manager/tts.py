@@ -22,7 +22,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import avatar_stream
+from . import avatar_stream, emotion
 from .avatar import (
     CONF_AVATAR_ID,
     CONF_ENABLED,
@@ -102,6 +102,9 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
         self, message: str, language: str, options: dict[str, Any]
     ) -> tts.TtsAudioType:
         engine = self._required_engine()
+        # A reply that was not streamed comes as the text that is shown: the voice gets
+        # it back with its audio tags, when this assistant just gave that reply.
+        message = emotion.take_spoken(self.hass, self._entry.entry_id, message)
         if engine.async_supports_streaming_input():
             # Only when the engine changed to a streaming one since this request started.
             response = await engine.internal_async_stream_tts_audio(
@@ -125,11 +128,24 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
 
     async def async_stream_tts_audio(self, request: tts.TTSAudioRequest) -> tts.TTSAudioResponse:
         engine = self._required_engine()
+        request = tts.TTSAudioRequest(
+            request.language, request.options, self._voiced(request.message_gen)
+        )
         response = await engine.internal_async_stream_tts_audio(request)
         return tts.TTSAudioResponse(
             response.extension,
             self._copying(response.extension, response.data_gen, request.options),
         )
+
+    async def _voiced(self, pieces: AsyncGenerator[str]) -> AsyncGenerator[str]:
+        """The text for the engine. A reply that was not streamed arrives as one piece,
+        the text that is shown: it is given its audio tags back (emotion.take_spoken)."""
+        first = True
+        async for piece in pieces:
+            if first:
+                first = False
+                piece = emotion.take_spoken(self.hass, self._entry.entry_id, piece)
+            yield piece
 
     async def _copying(
         self, extension: str, chunks: AsyncGenerator[bytes], options: Mapping[str, Any]

@@ -198,6 +198,7 @@
               "no_helper_role": "A device without speaker recognition is",
               "avatar_connection": "Avatar connection",
               "avatar_stream": "Stream replies to the avatar",
+              "voice_tags": "Pass audio tags to the voice",
               "agent_down_line": "When the main agent fails, say",
               "emotion_tags": "Emotion tags",
               "match_within": "The voice match arrives within"
@@ -206,6 +207,7 @@
               "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
               "no_helper_role": "Used for a request that neither a voice_speaker helper nor a Home Assistant user decides: a typed request when no user is chosen under Person 1 or Person 2, or a request from a device that has no helper and no user.",
               "avatar_connection": "For satellites in avatar mode. Connect when woken: the satellite connects to LiveTalking when it wakes, about a second before the avatar shows. Always connected: the avatar is there at once, and each satellite keeps a LiveTalking session open. Recommended for the Chat show.",
+              "voice_tags": "For a voice that understands audio tags, such as [laughs], [whispers] or [out of breath after running]: directions in square brackets, without digits. On: this assistant's voice is given the tags and they are never shown. Off: the tags are taken out, so no voice reads one aloud. A one-word tag at the very start that is on the Emotion tags list sets the avatar's face and is never passed to the voice. A short reply keeps its tags only when the assistant speaks through its avatar voice; announcements never do.",
               "avatar_stream": "For satellites in avatar mode whose firmware has the switch \"Avatar fed by Home Assistant\". On: a reply goes to the satellite's avatar while it is still being made, so the avatar starts speaking sooner, and that switch is turned on. The satellite keeps the normal audio as a backup. Off: the satellite waits for the whole reply and sends it to the avatar itself, as before. Other satellites are not affected.",
               "agent_down_line": "Spoken when the main agent cannot answer, for example because its AI provider is down, instead of ending the turn in silence. When empty: Sorry, I can't think right now. Please try again in a moment.",
               "emotion_tags": "The tags this assistant's avatar is told about, separated by commas, such as happy, sad, excited. A reply that starts with one, such as [excited], tells LiveTalking that emotion. Any other tag of letters is still never spoken and counts as neutral. Each tag is one word of letters, at most 18. LiveTalking needs talking frames for a tag, or it shows neutral. When empty: neutral, happy, sad, angry, sarcastic.",

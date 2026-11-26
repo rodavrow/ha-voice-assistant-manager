@@ -132,6 +132,38 @@ LiveTalking needs talking frames for a tag, or it shows neutral, so add a tag th
   on `/humanaudio`), so it reaches exactly the stage's session and no other session showing
   the same avatar. A LiveTalking that does not know emotions ignores the field.
 
+## Audio tags for the voice
+
+Some voices take directions in square brackets, such as `[laughs]`, `[whispers]`,
+`[whispering, fearful]` or `[out of breath after running up the stairs]`. **Pass audio tags
+to the voice** under Advanced says whether an assistant's voice is one of them. It is off
+unless you turn it on.
+
+- **On:** the voice is given the tags, and they are never shown: not on a satellite's
+  display, in captions, or in the reply Home Assistant shows.
+- **Off:** the tags are taken out of what is spoken too, so a voice that does not understand
+  them never reads one aloud.
+- **What counts as a tag:** square brackets around text that starts with a letter and has no
+  digit, at most 80 characters. `[1]` and `[2b]` are never tags and stay in the reply.
+- **The emotion tag comes first and is separate.** One word at the very start that is on the
+  assistant's **Emotion tags** list sets the avatar's face and is never passed to the voice:
+  in `[happy] [laughs] Good one.`, `[happy]` is for the face and `[laughs]` for the voice. A
+  reply that starts with a tag that is not on that list, such as `[whispers]`, gives it to
+  the voice, and the face is neutral.
+
+Where the voice gets its tags:
+
+| What is spoken | Tags reach the voice |
+| --- | --- |
+| A longer reply (streamed) | Yes |
+| A short reply | Yes, when the assistant's text-to-speech is its avatar voice |
+| A chat show line | Yes, when the assistant has a **Voice for chats**, and the line was not cut to the word limit |
+| An announcement or reminder | No |
+
+Home Assistant's own Assist window shows the tags while such a reply streams in. Home
+Assistant keeps the speech of a short reply by its shown text, so the same sentence with
+other tags is spoken as it was the first time.
+
 ## What it never does
 
 - **It never delays or changes the speech.** The copy is sent after the clip is complete, from a background task.

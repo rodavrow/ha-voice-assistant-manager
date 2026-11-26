@@ -571,9 +571,11 @@ class PersonaRouter(conversation.ConversationEntity):
                 name=str(resp.get("label") or ""),
                 other_name=self._person_name(OTHER_PERSON[resp["who"]]),
                 user_text=user_input.text,
-                reply_text=emotion.split_tag(
-                    str((result.response.speech.get("plain") or {}).get("speech") or "")
-                )[1],
+                reply_text=emotion.strip_audio_tags(
+                    emotion.split_tag(
+                        str((result.response.speech.get("plain") or {}).get("speech") or "")
+                    )[1]
+                ),
                 language=user_input.language,
                 context=user_input.context,
             )
@@ -967,7 +969,10 @@ class PersonaRouter(conversation.ConversationEntity):
         if log is not None and log.delta_listener is not None:
             # What a voice pipeline speaks and shows while the reply streams in.
             stream = emotion.StreamedReply(
-                log.delta_listener, self._tell_emotion, emotion.accepted_emotions(self._entry)
+                log.delta_listener,
+                self._tell_emotion,
+                emotion.accepted_emotions(self._entry),
+                emotion.voice_tags_on(self._entry),
             )
             log.delta_listener = stream
         # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
@@ -999,7 +1004,16 @@ class PersonaRouter(conversation.ConversationEntity):
         try:
             plain = result.response.speech.get("plain") or {}
             said = str(plain.get("speech") or "")
-            found, spoken = emotion.split_tag(said, emotion.accepted_emotions(self._entry))
+            voice_tags = emotion.voice_tags_on(self._entry)
+            found, voiced = emotion.split_tag(
+                said, emotion.accepted_emotions(self._entry), keep_unknown=voice_tags
+            )
+            # What is shown never has an audio tag. The voice of an assistant that takes
+            # them gets the tagged text: streamed in the deltas, or asked back by its
+            # avatar voice for a reply that was not streamed.
+            spoken = emotion.strip_audio_tags(voiced)
+            if voice_tags:
+                emotion.remember_spoken(self.hass, self._entry.entry_id, spoken, voiced)
             if spoken != said:
                 result.response.async_set_speech(spoken, extra_data=plain.get("extra_data"))
             told = stream is not None and stream.emotion is not None

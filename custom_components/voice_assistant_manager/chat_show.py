@@ -548,6 +548,8 @@ class _Chat:
     on_stage: stage.Show | None = None
     # The emotion of the line being or last spoken, from its tag (emotion.py).
     line_emotion: emotion.Emotion = emotion.NEUTRAL
+    # That line as its chat voice is given it: with audio tags, for a voice that takes them.
+    line_voiced: str = ""
 
     def add(self, who: str, text: str) -> None:
         self.lines.append(ChatLine(who, text, dt_util.utcnow().isoformat()))
@@ -560,6 +562,7 @@ class _Prepared:
     heard: int
     line: str = ""
     emotion: emotion.Emotion = emotion.NEUTRAL
+    voiced: str = ""
 
 
 class ChatShowManager:
@@ -932,10 +935,12 @@ class ChatShowManager:
             ready = await prepared.pop() if prepared else None
             use_prepared = ready is not None and bool(ready.line) and ready.heard == heard
             if ready is not None and use_prepared:
-                line, chat.line_emotion = ready.line, ready.emotion
+                line, chat.line_emotion, chat.line_voiced = (
+                    ready.line, ready.emotion, ready.voiced,
+                )
             else:
                 # Nothing prepared, or someone joined in since: it must answer them.
-                line, chat.line_emotion = await self._async_write(
+                line, chat.line_emotion, chat.line_voiced = await self._async_write(
                     chat, entry, own, other, writer
                 )
             _LOGGER.debug(
@@ -995,20 +1000,21 @@ class ChatShowManager:
             writer = writer_agent(self.hass, entry, quiet=True) if entry is not None else None
             if entry is None or writer is None:
                 return _Prepared(heard)
-            line, found = await self._async_write(
+            line, found, voiced = await self._async_write(
                 chat, entry, chat.names[turn], chat.names[1 - turn], writer
             )
             if line:
-                await self._async_warm_voice(chat, entry, line)
-            return _Prepared(heard, line, found)
+                await self._async_warm_voice(chat, entry, voiced)
+            return _Prepared(heard, line, found, voiced)
         except Exception:  # noqa: BLE001 - the line is then written when its turn comes
             _LOGGER.debug("The next chat line could not be prepared", exc_info=True)
             return _Prepared(heard)
 
-    async def _async_warm_voice(self, chat: _Chat, entry: ConfigEntry, line: str) -> None:
+    async def _async_warm_voice(self, chat: _Chat, entry: ConfigEntry, voiced: str) -> None:
         """Make the line's audio now; Home Assistant keeps it for when it is spoken.
 
-        A satellite without a chat voice makes the audio itself, so nothing is made here.
+        `voiced` is the line as the chat voice is given it. A satellite without a chat
+        voice makes the audio itself, so nothing is made here.
         """
         from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
 
@@ -1016,9 +1022,12 @@ class ChatShowManager:
         # The same request as when the line is spoken, or the audio would be made twice.
         fmt = STAGE_FORMAT if chat.on_stage is not None and not chat.on_stage.broken else None
         if engine:
-            await _async_chat_media_id(self.hass, line, engine, voice, fmt)
+            await _async_chat_media_id(self.hass, voiced, engine, voice, fmt)
         elif not chat.speaker.startswith("assist_satellite."):
-            media_id = _tts_media_id(self.hass, line, None, "", fmt)
+            # Home Assistant's default engine is not the assistant's voice: no tags.
+            media_id = _tts_media_id(
+                self.hass, emotion.strip_audio_tags(voiced), None, "", fmt
+            )
             if media_id is not None:
                 with contextlib.suppress(Exception):
                     async with asyncio.timeout(CHAT_VOICE_TIMEOUT):
@@ -1077,9 +1086,13 @@ class ChatShowManager:
 
     async def _async_write(
         self, chat: _Chat, entry: ConfigEntry, own_name: str, other_name: str, writer: str
-    ) -> tuple[str, emotion.Emotion]:
-        """The assistant's next line, capped at the word limit, or "" when it failed, and
-        the emotion its tag gave it. The tag is never part of the line."""
+    ) -> tuple[str, emotion.Emotion, str]:
+        """The assistant's next line, capped at the word limit, or "" when it failed; the
+        emotion its tag gave it; and the line as its chat voice is given it.
+
+        Neither tag is ever part of the line. The voiced line keeps its audio tags when
+        the assistant's voice takes them and the line was not cut to the word limit.
+        """
         words = chat.limits.words
         rules = chat_instructions(own_name, other_name, words)
         prompt = "\n\n".join(part for part in (character_of(entry), rules) if part)
@@ -1096,19 +1109,25 @@ class ChatShowManager:
                 )
         except TimeoutError:
             _LOGGER.warning("%s took longer than %s s to write a chat line", writer, LINE_TIMEOUT)
-            return "", emotion.NEUTRAL
+            return "", emotion.NEUTRAL, ""
         except Exception:  # noqa: BLE001 - any agent failure ends the chat with a reason
             _LOGGER.warning("%s could not write a chat line", writer, exc_info=True)
-            return "", emotion.NEUTRAL
+            return "", emotion.NEUTRAL, ""
         if result.response.response_type == intent.IntentResponseType.ERROR:
             _LOGGER.warning("%s answered a chat line with an error", writer)
-            return "", emotion.NEUTRAL
+            return "", emotion.NEUTRAL, ""
         speech = str((result.response.speech.get("plain") or {}).get("speech") or "")
-        found, line = emotion.split_tag(clean_text(speech), emotion.accepted_emotions(entry))
+        voice_tags = emotion.voice_tags_on(entry)
+        found, voiced = emotion.split_tag(
+            clean_text(speech), emotion.accepted_emotions(entry), keep_unknown=voice_tags
+        )
         prefix = f"{own_name}:"
-        if line.casefold().startswith(prefix.casefold()):
-            line = line[len(prefix) :]
-        return fit_line(line, words), found
+        if voiced.casefold().startswith(prefix.casefold()):
+            voiced = voiced[len(prefix) :].strip()
+        shown = clean_text(emotion.strip_audio_tags(voiced))
+        line = fit_line(shown, words)
+        # A line cut to the word limit is spoken as it is shown, without its tags.
+        return line, found, voiced if voice_tags and line == shown else line
 
     async def _async_speak(
         self, chat: _Chat, entry: ConfigEntry, line: str, listen: bool = False
@@ -1141,7 +1160,9 @@ class ChatShowManager:
         assert chat.on_stage is not None
         engine, voice = _chat_voice(entry)
         media_id = (
-            await _async_chat_media_id(self.hass, line, engine, voice, STAGE_FORMAT)
+            await _async_chat_media_id(
+                self.hass, chat.line_voiced or line, engine, voice, STAGE_FORMAT
+            )
             if engine
             else None
         )
@@ -1211,7 +1232,9 @@ class ChatShowManager:
         """
         engine, voice = _chat_voice(entry)
         media_id = (
-            await _async_chat_media_id(self.hass, line, engine, voice) if engine else None
+            await _async_chat_media_id(self.hass, chat.line_voiced or line, engine, voice)
+            if engine
+            else None
         )
         service = "start_conversation" if listen else "announce"
         data: dict[str, Any] = {"entity_id": chat.speaker, "preannounce": False}
@@ -1324,7 +1347,9 @@ class ChatShowManager:
     async def _async_play(self, chat: _Chat, entry: ConfigEntry, line: str) -> str:
         engine, voice = _chat_voice(entry)
         media_id = (
-            await _async_chat_media_id(self.hass, line, engine, voice) if engine else None
+            await _async_chat_media_id(self.hass, chat.line_voiced or line, engine, voice)
+            if engine
+            else None
         )
         # No chat voice, or one that cannot be made: Home Assistant's default engine.
         media_id = media_id or _tts_media_id(self.hass, line, None, "")

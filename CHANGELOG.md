@@ -44,6 +44,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   The new `prepare_announcement` action does the same for any other announcement, such as
   calendar events. Other speakers are never touched. Switch it off with **Show which
   assistant is speaking** on the Voice Manager page.
+- **Audio tags for the voice.** A voice that takes directions in square brackets, such as
+  `[laughs]`, `[whispers]` or `[out of breath after running]`, is given them when **Pass
+  audio tags to the voice** is on under Advanced; they are never shown. With it off, the
+  tags are taken out of what is spoken too. The one-word emotion tag at the very start
+  still sets the avatar's face and is never passed to the voice. Replies and chat show
+  lines keep their tags for the voice; announcements do not. See
+  [Avatar](docs/avatar.md#audio-tags-for-the-voice).
 - **Chat shows keep moving.** While one assistant's line is spoken, the next line is already
   written and its audio made, so the silence between two lines is the pause you set and no
   longer also the time to write a line and make its voice. When someone joins in, the
