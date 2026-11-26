@@ -92,6 +92,25 @@ For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers
 - **At most 4 viewers** get a clip, LiveTalking's session limit on the household server, and a clip over 10 MB is not sent.
 - **Short time limits.** Two seconds to connect, ten seconds in all.
 
+## Emotions
+
+Each persona can start its replies with one emotion tag: `[neutral]`, `[happy]`, `[sad]`,
+`[angry]` or `[sarcastic]`, for example by adding to its prompt: "Start every reply with
+exactly one of [neutral], [happy], [sad], [angry] or [sarcastic]." The same holds for chat
+show lines and announcements.
+
+- **The tag is never spoken or shown.** It is taken off before text-to-speech, the
+  satellite's display and the log, also while a reply streams in (only its first 20
+  characters are held back to tell). Assistants without an avatar have it taken off too.
+  The conversation history keeps it, so the agent sees how it answered before.
+- **A missing or unknown tag is neutral.** The reply always goes ahead.
+- **LiveTalking is told the emotion** just before the reply's audio:
+  `POST /set_emotion` with `{"avatar_id": …, "emotion": …}`, once for each avatar of the
+  assistant that is on. It goes by avatar, not session, so a satellite in avatar mode gets
+  it too. An avatar without a **LiveTalking avatar** set is not told. The call gives up
+  after 300 ms and never holds up or fails the reply. A LiveTalking without
+  `/set_emotion` answers 404, which is logged only at debug level.
+
 ## What it never does
 
 - **It never delays or changes the speech.** The copy is sent after the clip is complete, from a background task.
