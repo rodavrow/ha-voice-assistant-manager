@@ -30,6 +30,7 @@ MEMORY_DEFAULTS = {
 }
 REMINDER_DEFAULTS = {
     "enabled": False,
+    "cancel": True,
     "owner_calendars": [],
     "partner_calendars": [],
     "household_calendars": [],

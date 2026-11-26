@@ -1345,6 +1345,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         "div",
         { class: "card" },
         this._switchField("reminders", "enabled", false),
+        this._switchField("reminders", "cancel", true),
         this._textField("reminders", "failure_line", { placeholder: "I could not set that reminder. Please ask me again." })
       ),
       h(

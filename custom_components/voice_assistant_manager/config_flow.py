@@ -48,6 +48,7 @@ MEMORY_DEFAULTS = {
 }
 REMINDER_DEFAULTS = {
     "enabled": False,
+    "cancel": True,
     "owner_calendars": [],
     "partner_calendars": [],
     "household_calendars": [],
@@ -267,6 +268,7 @@ def settings_schema(current, users):
                 vol.Schema(
                     {
                         _fixed("enabled", reminders, False): selector.BooleanSelector(),
+                        _fixed("cancel", reminders, True): selector.BooleanSelector(),
                         _opt("assistant", reminders): _text(),
                         _opt("agent", reminders): _agent(),
                         _opt("persona", reminders): _text(True),

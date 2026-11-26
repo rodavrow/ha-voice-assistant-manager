@@ -75,6 +75,7 @@
             "description": "For a Home Assistant set up with a create_reminder script exposed to the main agent. Tells the main agent how to use it, keeps reminders out of memory, and writes spoken reminder lines in this assistant's style.",
             "data": {
               "enabled": "The main agent can set reminders",
+              "cancel": "The main agent can cancel reminders",
               "assistant": "Assistant name",
               "agent": "Announcement agent (no tools)",
               "persona": "Extra instructions for announcements",
@@ -85,6 +86,7 @@
             },
             "data_description": {
               "enabled": "Adds reminder rules to the main agent's prompt, including who is speaking, and replaces a reply that says a reminder is set when the create_reminder tool did not set one.",
+              "cancel": "Tells the main agent it may cancel a reminder, one-off or repeating, with the cancel_reminder tool, and replaces a reply that says a reminder is cancelled when the tool did not cancel one. Off: the main agent is told it cannot, and to point to the reminder calendar. To make sure it never can, also stop exposing script.cancel_reminder to Assist.",
               "agent": "Writes every line this assistant announces: spoken reminders (the compose_announcement action) and calendar events. Must have no tool providers, and may not be the main agent or an assistant. When empty, the agent that writes the refusal is used.",
               "persona": "Used for spoken reminders and for calendar events alike, whoever they are for. The place for this assistant's character. Added after the recipient's persona and in front of the built-in announcement instructions. Not used for normal conversations.",
               "failure_line": "When empty, a plain line is used.",

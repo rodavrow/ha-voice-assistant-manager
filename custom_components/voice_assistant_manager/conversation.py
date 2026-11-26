@@ -81,10 +81,14 @@ from .memory import (
 )
 from .panel import speaker_overrides
 from .reminders import (
+    CANCEL_TOOL,
+    DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     assistant_name,
+    is_cancel_turn,
     is_reminder_exchange,
     is_reminder_turn,
+    needs_honest_cancel_failure,
     needs_honest_failure,
     reminder_guidance,
     reminder_tool_outcome,
@@ -472,7 +476,12 @@ class PersonaRouter(conversation.ConversationEntity):
         if not self._reminder_settings():
             return ""
         assistant = assistant_name(self._entry.title, self._reminder_settings().get("assistant"))
-        return reminder_guidance(name, self._person_name(OTHER_PERSON[who]), assistant)
+        return reminder_guidance(
+            name,
+            self._person_name(OTHER_PERSON[who]),
+            assistant,
+            cancel=bool(self._reminder_settings().get("cancel", True)),
+        )
 
     def _guard_reminder(self, user_input, result, log, log_start):
         """Check a finished turn for reminder trouble.
@@ -487,38 +496,57 @@ class PersonaRouter(conversation.ConversationEntity):
             visible = (
                 log is not None and log_start is not None and len(log.content) > log_start
             )
-            outcome = reminder_tool_outcome(log.content[log_start:]) if visible else "none"
-            about_reminder = outcome != "none" or is_reminder_turn(user_input.text)
+            turn = log.content[log_start:] if visible else []
+            outcome = reminder_tool_outcome(turn)
+            cancelled = reminder_tool_outcome(turn, CANCEL_TOOL)
+            about_reminder = (
+                outcome != "none" or cancelled != "none" or is_reminder_turn(user_input.text)
+            )
             if not visible:
                 return result, about_reminder
+            reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
+            if cancelled != "none" or is_cancel_turn(user_input.text):
+                # A cancellation: its reply mentions the reminder and when it was set for,
+                # which is no claim that one was set.
+                if not needs_honest_cancel_failure(reply, cancelled):
+                    return result, about_reminder
+                _LOGGER.warning(
+                    "The main agent confirmed a cancellation it did not make, correcting it"
+                )
+                return self._honest_reply(
+                    user_input, result, log, log_start, DEFAULT_CANCEL_FAILURE_LINE
+                ), True
             # Only an exchange about a reminder can falsely confirm one. A reply to "what
             # can you do?" that mentions reminders is not a claim that one was set.
             recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
             if outcome == "none" and not is_reminder_exchange(recent):
                 return result, about_reminder
-            reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
             passing_on = has_memory_keyword(user_input.text)
             if not needs_honest_failure(reply, outcome, passing_on):
                 return result, about_reminder
             _LOGGER.warning("The main agent confirmed a reminder it did not set, correcting it")
             line = str(self._reminder_settings().get("failure_line") or "").strip()
             line = line or DEFAULT_FAILURE_LINE
-            for index in range(len(log.content) - 1, log_start - 1, -1):
-                entry = log.content[index]
-                if entry.role == "assistant" and entry.content:
-                    log.content[index] = dataclasses.replace(entry, content=line)
-                    break
-            response = intent.IntentResponse(language=user_input.language)
-            response.async_set_speech(line)
-            corrected = conversation.ConversationResult(
-                response=response,
-                conversation_id=result.conversation_id,
-                continue_conversation=False,
-            )
-            return corrected, True
+            return self._honest_reply(user_input, result, log, log_start, line), True
         except Exception:  # noqa: BLE001 - the check must never cost the person their reply
             _LOGGER.exception("Could not check the reminder reply")
             return result, False
+
+    @staticmethod
+    def _honest_reply(user_input, result, log, log_start, line):
+        """The result with `line` as its reply, in the history too."""
+        for index in range(len(log.content) - 1, log_start - 1, -1):
+            entry = log.content[index]
+            if entry.role == "assistant" and entry.content:
+                log.content[index] = dataclasses.replace(entry, content=line)
+                break
+        response = intent.IntentResponse(language=user_input.language)
+        response.async_set_speech(line)
+        return conversation.ConversationResult(
+            response=response,
+            conversation_id=result.conversation_id,
+            continue_conversation=False,
+        )
 
     def _start_memory_pass(self, user_input, resp, result) -> None:
         """Let the memory agent look at a finished turn, in the background.

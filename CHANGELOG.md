@@ -63,6 +63,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   and the new example `cancel_reminder` script is the tool for "stop reminding me". The
   assistant tells the main agent how to use both. Update your `create_reminder` script and
   add `cancel_reminder` to get them. See [Reminders](docs/reminders.md#repeating-reminders).
+- **The main agent can cancel reminders**, under Settings > Reminders, on by default. Off,
+  the main agent is told it cannot, and to point to the reminder calendar.
 
 ### Changed
 
@@ -98,6 +100,12 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A cancelled reminder is no longer reported as a reminder that could not be set.** After
+  `cancel_reminder` removed a reminder, a reply such as "I've removed your reminder that was
+  set for 8" was taken for a false "reminder set" and replaced by "I could not set that
+  reminder", in the history too, so the assistant went on to believe it cannot cancel. A
+  cancellation is now checked on its own: only a reply that claims one when
+  `cancel_reminder` did not return ok is replaced, by "I could not cancel that reminder".
 - **The end of a line is no longer cut on the chat stage.** On a cast device, the last
   syllable of a line could be cut when the other avatar took over or the chat ended:
   LiveTalking says it stopped speaking while the end of the line is still on its way to
