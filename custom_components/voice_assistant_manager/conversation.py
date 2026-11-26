@@ -938,7 +938,9 @@ class PersonaRouter(conversation.ConversationEntity):
         stream = None
         if log is not None and log.delta_listener is not None:
             # What a voice pipeline speaks and shows while the reply streams in.
-            stream = emotion.StreamedReply(log.delta_listener, self._tell_emotion)
+            stream = emotion.StreamedReply(
+                log.delta_listener, self._tell_emotion, emotion.accepted_emotions(self._entry)
+            )
             log.delta_listener = stream
         try:
             result = await self._async_answer(user_input)
@@ -964,7 +966,7 @@ class PersonaRouter(conversation.ConversationEntity):
         try:
             plain = result.response.speech.get("plain") or {}
             said = str(plain.get("speech") or "")
-            found, spoken = emotion.split_tag(said)
+            found, spoken = emotion.split_tag(said, emotion.accepted_emotions(self._entry))
             if spoken != said:
                 result.response.async_set_speech(spoken, extra_data=plain.get("extra_data"))
             told = stream is not None and stream.emotion is not None

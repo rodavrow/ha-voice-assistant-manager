@@ -15,7 +15,8 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
-from typing import Any, Final, Literal, cast, get_args
+from collections.abc import Mapping
+from typing import Any, Final, cast
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
@@ -27,35 +28,66 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-Emotion = Literal["neutral", "happy", "sad", "angry", "sarcastic"]
-EMOTIONS: Final[frozenset[str]] = frozenset(get_args(Emotion))
+# An emotion as LiveTalking knows it: a lower-case word of letters.
+Emotion = str
 NEUTRAL: Final[Emotion] = "neutral"
+# What an assistant passes on when its Emotion tags setting is empty.
+DEFAULT_EMOTIONS: Final[frozenset[str]] = frozenset(
+    {NEUTRAL, "happy", "sad", "angry", "sarcastic"}
+)
+# The setting under Advanced: the tags an assistant passes on, separated by commas.
+CONF_EMOTION_TAGS: Final = "emotion_tags"
 
+_WORD = r"[^\W\d_]+"
 # A tag is a word of letters, so a reply that starts with "[1]" keeps it.
-_TAG = re.compile(r"^\s*\[([^\W\d_]+)\]\s*")
+_TAG = re.compile(rf"^\s*\[({_WORD})\]\s*")
+_ONE_WORD = re.compile(_WORD)
 # A tag's closing bracket comes within this many characters, or there is no tag. While
 # a reply streams in, at most this much is held back to tell.
 MAX_TAG_CHARS: Final = 20
+# The longest word that fits in a tag at the very start of a reply: "[" word "]".
+MAX_WORD_CHARS: Final = MAX_TAG_CHARS - 2
+# Settings already warned about, so a bad list is warned about once, not on every reply.
+_warned: set[str] = set()
 # Telling LiveTalking must never hold up the reply.
 SEND_TIMEOUT: Final = 0.3
 _SENDER_DATA: Final = "emotion_sender"
 
 
-def _emotion_of(word: str) -> Emotion:
-    word = word.lower()
-    return cast(Emotion, word) if word in EMOTIONS else NEUTRAL
+def accepted_emotions(entry: Any) -> frozenset[str]:  # Any: a ConfigEntry, or a stand-in
+    """The emotions the assistant passes on, from its Emotion tags setting.
+
+    Words are separated by commas or spaces and lower-cased. One that cannot be a tag (not
+    only letters, or too long) is left out, with one warning; with none left, or no
+    setting, the five default emotions apply.
+    """
+    advanced = (getattr(entry, "options", None) or {}).get("advanced")
+    raw = str((advanced if isinstance(advanced, Mapping) else {}).get(CONF_EMOTION_TAGS) or "")
+    words = [word.lower() for word in re.split(r"[\s,]+", raw) if word]
+    good = {w for w in words if _ONE_WORD.fullmatch(w) and len(w) <= MAX_WORD_CHARS}
+    bad = sorted(set(words) - good)
+    if bad and raw not in _warned:
+        _warned.add(raw)
+        _LOGGER.warning(
+            "Emotion tags of %s: %s left out, a tag is one word of at most %d letters",
+            getattr(entry, "title", "an assistant"), ", ".join(bad), MAX_WORD_CHARS,
+        )
+    return frozenset(good) or DEFAULT_EMOTIONS
 
 
-def split_tag(text: str) -> tuple[Emotion, str]:
-    """(emotion, the reply without its tag). No tag, or one not known, is neutral.
+def split_tag(
+    text: str, accepted: frozenset[str] = DEFAULT_EMOTIONS
+) -> tuple[Emotion, str]:
+    """(emotion, the reply without its tag). No tag, or one not `accepted`, is neutral.
 
     Any word of letters in brackets at the very start is a tag and is taken off, with
-    the spaces around it; the rest is left as it is.
+    the spaces around it, whether it is accepted or not; the rest is left as it is.
     """
     match = _TAG.match(text)
     if match is None or match.end(1) >= MAX_TAG_CHARS:
         return NEUTRAL, text
-    return _emotion_of(match.group(1)), text[match.end() :]
+    word = match.group(1).lower()
+    return (word if word in accepted else NEUTRAL), text[match.end() :]
 
 
 class TagFilter:
@@ -67,7 +99,8 @@ class TagFilter:
     spaces right after a tag. The pieces passed on add up to split_tag of the whole.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, accepted: frozenset[str] = DEFAULT_EMOTIONS) -> None:
+        self._accepted = accepted
         self._held = ""
         self._after_tag = False
         self.emotion: Emotion | None = None
@@ -87,7 +120,7 @@ class TagFilter:
         return self._decide() if self.emotion is None and self._held else ""
 
     def _decide(self) -> str:
-        self.emotion, rest = split_tag(self._held)
+        self.emotion, rest = split_tag(self._held, self._accepted)
         self._after_tag = rest != self._held
         self._held = ""
         return self._passed(rest)
@@ -112,8 +145,14 @@ class StreamedReply:
     finish() when the reply has ended, to pass on text still held back.
     """
 
-    def __init__(self, listener: DeltaListener, on_emotion: Callable[[Emotion], None]) -> None:
+    def __init__(
+        self,
+        listener: DeltaListener,
+        on_emotion: Callable[[Emotion], None],
+        accepted: frozenset[str] = DEFAULT_EMOTIONS,
+    ) -> None:
         self.listener = listener
+        self._accepted = accepted
         self._on_emotion = on_emotion
         self._filter: TagFilter | None = None
         self._chat_log: Any = None
@@ -123,7 +162,7 @@ class StreamedReply:
         self._chat_log = chat_log
         if (role := delta.get("role")) is not None:
             self._flush()
-            self._filter = TagFilter() if role == "assistant" else None
+            self._filter = TagFilter(self._accepted) if role == "assistant" else None
         content = delta.get("content")
         if self._filter is not None and isinstance(content, str) and content:
             passed = self._filter.feed(content)

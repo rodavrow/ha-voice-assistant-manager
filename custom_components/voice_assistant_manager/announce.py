@@ -332,7 +332,8 @@ async def _write_line(
     if result.response.response_type == intent.IntentResponseType.ERROR:
         return "", emotion.NEUTRAL
     found, line = emotion.split_tag(
-        clean_text(str((result.response.speech.get("plain") or {}).get("speech") or ""))
+        clean_text(str((result.response.speech.get("plain") or {}).get("speech") or "")),
+        emotion.accepted_emotions(entry),
     )
     return (line, found) if len(line) <= MAX_LINE_LENGTH else ("", emotion.NEUTRAL)
 
