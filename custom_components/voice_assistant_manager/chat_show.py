@@ -792,6 +792,17 @@ class ChatShowManager:
             speakers.add(chat.speaker)
         return any(self._device_of(speaker) == device_id for speaker in speakers)
 
+    def is_running(self) -> bool:
+        """Whether a chat runs, or ended at most REPLY_GRACE ago, on any speaker.
+
+        Its lines are heard by other satellites too, and may wake them.
+        """
+        now = dt_util.utcnow()
+        chat = self._chat
+        if chat is not None and chat.task is not None and not chat.task.done():
+            return True
+        return any(until > now for until in self._grace.values())
+
     def _device_of(self, entity_id: str) -> str | None:
         entity = er.async_get(self.hass).async_get(entity_id)
         return entity.device_id if entity is not None else None

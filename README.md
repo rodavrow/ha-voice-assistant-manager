@@ -173,7 +173,7 @@ The helper holds one of these values:
 | `partner` | Person 2 in the assistant's settings |
 | `stranger` | Anybody else |
 | `pending` | The wake word was heard and the voice match has not arrived yet |
-| anything else, or empty | Treated as an unknown voice, so a helper that is not kept up to date refuses instead of answering |
+| anything else, or empty | Nobody was told apart: the request is refused with "I can't tell who is speaking right now", as is a `pending` that never changes, so a helper that is not kept up to date refuses instead of answering |
 
 #### 2. Keep the helper up to date
 

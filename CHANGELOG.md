@@ -135,6 +135,17 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A recognised person is no longer told they are unknown when the voice match never
+  arrives.** When a satellite gave no voice match (its helper stayed on `pending`, for
+  example while its sensors were unavailable), the request was answered with the line for
+  unknown voices. It is still refused, but now with "Sorry, I can't tell who is speaking
+  right now. Please try again in a moment.", and a warning is logged once per satellite
+  until a match arrives again.
+- **Satellites no longer talk over a chat show playing elsewhere.** The assistants in a
+  chat say each other's names, so a chat on a television could wake a satellite in
+  earshot, which then refused the "unknown voice" aloud. While a chat plays on any
+  speaker, and for a short time after, a voice that is not recognised gets no answer. A
+  recognised person is answered as always.
 - **A satellite's avatar no longer says a reply twice after Home Assistant restarts.** While
   a satellite's sensors were unavailable (after a restart, or when it dropped off the
   network), its LiveTalking session was no longer known, so its avatar got each reply from
