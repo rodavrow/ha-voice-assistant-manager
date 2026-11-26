@@ -14,9 +14,11 @@ from typing import Any, Literal
 # Home Assistant names a script tool "script__<name>". Older versions used the bare name.
 REMINDER_TOOL = "create_reminder"
 CANCEL_TOOL = "cancel_reminder"
+LIST_TOOL = "list_reminders"
 HOUSEHOLD = "household"
 DEFAULT_FAILURE_LINE = "I could not set that reminder. Please ask me again."
 DEFAULT_CANCEL_FAILURE_LINE = "I could not cancel that reminder. Please ask me again."
+DEFAULT_LIST_FAILURE_LINE = "I could not look up the reminders. Please ask me again."
 # Spoken when a reply still says something was done, after a second try, with no tool call.
 DEFAULT_ACTION_FAILURE_LINE = "I could not do that. Please ask me again."
 # Said right after a reply the voice had already started on, when it turned out to be
@@ -90,6 +92,27 @@ _CANCEL_CLAIM = re.compile(
     r"\breminders?\b[^.?!]*\b(?:cancell?ed|removed|deleted|stopped|cleared|turned off)\b"
     r"|\b(?:cancell?ed|removed|deleted|stopped|cleared|turned off)\b[^.?!]*\breminders?\b"
     r"|\bstop reminding\b",
+    re.IGNORECASE,
+)
+
+
+# A question about reminders that exist: "what reminders are there on Wednesday", "do we
+# have a reminder for the car", "when is my bins reminder", "tell me about the car reminder".
+_LIST_REMINDERS = re.compile(
+    r"\b(?:what|which|when|list|show|any|how many|tell me|check"
+    r"|(?:do|did|have|are|is) (?:i|we|you|there))\b"
+    r"[^.?!]{0,60}?\b(?:reminders?|reminded)\b",
+    re.IGNORECASE,
+)
+# A question about what the assistant can do with reminders is not about the calendar.
+_ABOUT_ABILITY = re.compile(
+    r"\bhow (?:do|does|can|could|to|would|should)\b|\bwhat can you\b|\bare you able\b"
+    r"|\bcan you (?:set|make|create|add|cancel|delete|remove|do)\b",
+    re.IGNORECASE,
+)
+# A reply that says it could not look: no statement about which reminders there are.
+_COULD_NOT = re.compile(
+    r"\b(?:can(?:'|no)?t|cannot|could(?: not|n't)|unable|sorry|failed|error)\b",
     re.IGNORECASE,
 )
 
@@ -195,6 +218,12 @@ RETRY_NOTES: dict[str, str] = {
         f"Call {CANCEL_TOOL} now for the person's last request, then tell them the result "
         "in your usual way. Do not mention this note."
     ),
+    "list": (
+        f"Note from the system, not from the person: your last reply said which reminders "
+        f"there are, but you did not call the {LIST_TOOL} tool, so you cannot know. Call "
+        f"{LIST_TOOL} now for the person's last request, then answer from what it returns "
+        "in your usual way. Do not mention this note."
+    ),
     "action": (
         "Note from the system, not from the person: your last reply said something was "
         "done, but you called no tool, so nothing happened. If the person's last request "
@@ -240,6 +269,26 @@ def looks_like_cancellation(reply: str) -> bool:
         and not _HYPOTHETICAL.search(sentence[: claim.start()])
         for sentence in _SENTENCE_END.split(reply)
     )
+
+
+def is_list_turn(text: str) -> bool:
+    """Whether the person asked which reminders there are, not to set or cancel one."""
+    text = text or ""
+    if is_reminder_request(text) or is_cancel_turn(text) or _REMEMBER_THAT.search(text):
+        return False
+    if _ABOUT_ABILITY.search(text):
+        return False
+    return bool(_LIST_REMINDERS.search(text))
+
+
+def looks_like_listing(reply: str) -> bool:
+    """Whether a reply to such a question says which reminders there are, or that none are.
+
+    A question back and "I could not look that up" do not. "You have no reminders" does:
+    it is a statement about the calendar like any other.
+    """
+    reply = reply or ""
+    return bool(reply.strip()) and "?" not in reply and not _COULD_NOT.search(reply)
 
 
 def needs_honest_cancel_failure(reply: str, outcome: ToolOutcome) -> bool:
@@ -378,6 +427,22 @@ def reminder_guidance(
         f"- Say a reminder is set only after {REMINDER_TOOL} returned status ok in this turn. "
         "If it returned an error, tell the person what its message says. Never say a "
         "reminder is set without calling the tool.",
+    ]
+    lines += [
+        f"- Questions about reminders that exist (\"what reminders are there on "
+        f"Wednesday\", \"do we have one for charging the car\") are answered by calling "
+        f"the {LIST_TOOL} tool (script.{LIST_TOOL}), never from memory of the conversation. "
+        "Pass keywords for what it is about, on_day for a day, and until_day too for a "
+        "stretch of days; leave them out to get every reminder coming up, and pick what "
+        "is relevant yourself. Report a reminder's settings exactly as the tool returns "
+        "them. If it returns none, say there are none.",
+        "- The tool shows the reminders of the person speaking and the household's."
+        + (
+            f" {other_name.strip()}'s reminders are private to them: say you cannot look "
+            "those up."
+            if other
+            else ""
+        ),
     ]
     if cancel:
         lines += [

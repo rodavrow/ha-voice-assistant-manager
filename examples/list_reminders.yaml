@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Example: script.list_reminders, the tool the main agent calls for "what reminders are
+# there on Wednesday?" or "do we have a reminder for charging the car?".
+#
+# Paste it into a new script in YAML mode, save it with the entity id
+# script.list_reminders, and expose it to Assist.
+#
+# It looks in the reminder calendars that script.create_reminder writes to, through
+# Voice Assistant Manager's list_reminder_events action, and changes nothing. Each
+# reminder is reported once, with when it is next due, how it repeats and when that ends.
+#
+# The agent does not say whose reminders to show, and cannot: the action takes the person
+# speaking from the assistant. A person gets their own reminders and the household's,
+# never the other person's. When it is not known who is speaking, only the household's.
+#
+# Change the names under "reminders" to the same ones as in script.create_reminder, and
+# keep every calendar of a person under that person's own name.
+
+alias: List reminders
+description: >-
+  Looks up the reminders that are coming up for the person speaking and for the
+  household. Use it for every question about reminders that exist, and answer only
+  from what it returns. Pass keywords for what the reminder is about, on_day for one
+  day, and until_day as well for several days. Leave everything out to get all of
+  them. Never work out a date yourself.
+mode: parallel
+fields:
+  keywords:
+    description: >-
+      Words from what the reminder is about, for example "car" or "pills". Leave
+      out to get every reminder.
+    selector:
+      text:
+  on_day:
+    description: >-
+      The day to look at: today, tomorrow, a weekday name, or MM-DD. Leave out for
+      everything that is coming up.
+    selector:
+      text:
+  until_day:
+    description: >-
+      With on_day, the last day of a stretch of days, written the same way. For
+      "this week": on_day today, until_day sunday.
+    selector:
+      text:
+sequence:
+  - action: voice_assistant_manager.list_reminder_events
+    data:
+      keywords: "{{ keywords | default('') }}"
+      on_day: "{{ on_day | default('') }}"
+      until_day: "{{ until_day | default('') }}"
+      reminders:
+        - for_whom: alex
+          calendar: calendar.alex_reminders_announce
+          spoken: true
+        - for_whom: alex
+          calendar: calendar.alex_reminders
+          spoken: false
+        - for_whom: sam
+          calendar: calendar.sam_reminders_announce
+          spoken: true
+        - for_whom: sam
+          calendar: calendar.sam_reminders
+          spoken: false
+        - for_whom: household
+          calendar: calendar.household_reminders_announce
+          spoken: true
+        - for_whom: household
+          calendar: calendar.household_reminders
+          spoken: false
+    response_variable: result
+  - stop: Done
+    response_variable: result

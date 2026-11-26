@@ -794,6 +794,16 @@
         "calendar": {"name": "Calendars", "description": "The calendars to look in."},
         "title": {"name": "Title", "description": "The reminder's title, or a word from it."}
       }
+    },
+    "list_reminder_events": {
+      "name": "List reminders",
+      "description": "Looks up upcoming reminders by keyword and day and reports each one's settings. Used by the list_reminders example script. Changes nothing. Shows the reminders of the person speaking to the assistant and the household's, never another person's; when it is not known who is speaking, only the household's.",
+      "fields": {
+        "reminders": {"name": "Reminder calendars", "description": "A list of entries with for_whom (a person's name in lower case, or household), calendar (one or more calendars) and optionally spoken (whether reminders in it are spoken)."},
+        "keywords": {"name": "Keywords", "description": "Words that must be in the title or the notes. Empty for every reminder."},
+        "on_day": {"name": "Day", "description": "today, tomorrow, a weekday name, MM-DD or YYYY-MM-DD. Empty for everything coming up."},
+        "until_day": {"name": "Last day", "description": "The last day of a stretch of days, written like Day."}
+      }
     }
   },
   "config_subentries": {
