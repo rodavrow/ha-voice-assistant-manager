@@ -17,6 +17,7 @@ from homeassistant.helpers import llm
 from homeassistant.helpers.chat_session import async_get_chat_session
 
 from custom_components.voice_assistant_manager.reminders import (
+    a_tool_worked,
     DEFAULT_ACTION_FAILURE_LINE,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
@@ -412,3 +413,115 @@ async def test_a_short_false_claim_the_voice_had_not_started_on_is_just_replaced
 
     assert shown == DEFAULT_ACTION_FAILURE_LINE
     assert spoken == "I've turned them on."
+
+
+# Every tool call failed
+
+
+def failed_colour_call(number: int = 1) -> list:
+    """Chat log entries of a light call that Home Assistant refused, as it leaves them."""
+    return [
+        AssistantContent(
+            agent_id=MAIN_AGENT, content=None,
+            tool_calls=[
+                llm.ToolInput(
+                    tool_name="HassLightSet", tool_args={"name": "lamp", "color": "mauve"},
+                    id=f"f{number}",
+                )
+            ],
+        ),
+        ToolResultContent(
+            agent_id=MAIN_AGENT, tool_call_id=f"f{number}", tool_name="HassLightSet",
+            result=llm.ToolResult(
+                data={"error": "InvalidSlotInfo", "error_text": "Unknown color"}, error=True
+            ),
+        ),
+    ]
+
+
+def test_a_turn_whose_tool_calls_all_failed_had_no_tool_that_worked():
+    assert a_tool_worked(lights_call())
+    assert not a_tool_worked(failed_colour_call())
+    assert not a_tool_worked([AssistantContent(agent_id=MAIN_AGENT, content="Hello")])
+    assert a_tool_worked([*failed_colour_call(1), *lights_call()])
+
+
+def test_a_call_that_never_got_a_result_did_not_work():
+    assert not a_tool_worked(lights_call()[:1])
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"error": "InvalidSlotInfo"},
+        llm.ToolResult(data={"response_type": "error", "speech": {}}),
+        llm.ToolResult(data={"result": {"status": "error", "message": "No such light."}}),
+    ],
+)
+def test_other_ways_a_tool_says_it_failed(result):
+    entries = [
+        ToolResultContent(agent_id=MAIN_AGENT, tool_call_id="x", tool_name="t", result=result)
+    ]
+
+    assert not a_tool_worked(entries)
+
+
+async def test_regression_an_action_claimed_after_every_tool_call_failed_is_asked_again(hass):
+    # Seen in the house: three HassLightSet calls were refused ("Unknown color") and the
+    # assistant said it had changed the lights. A failed call counted as "a tool was
+    # used", so the reply was not checked.
+    agent = Scripted(
+        ("I've changed the lights to mauve.",
+         [*failed_colour_call(1), *failed_colour_call(2), *failed_colour_call(3)]),
+        ("I've set the lights to purple instead.", lights_call()),
+    )
+
+    said, log = await asked(hass, agent, "Make the lights mauve")
+
+    assert said == "I've set the lights to purple instead."
+    assert agent.texts[1] == RETRY_NOTES["failed"]
+    assert "I've changed the lights to mauve." not in texts(log)
+
+
+async def test_an_action_claimed_twice_after_failed_tool_calls_is_a_refusal(hass):
+    agent = Scripted(
+        ("I've changed the lights to mauve.", failed_colour_call(1)),
+        ("Done, the lights are now set to mauve.", failed_colour_call(2)),
+    )
+
+    said, log = await asked(hass, agent, "Make the lights mauve")
+
+    assert said == DEFAULT_ACTION_FAILURE_LINE
+    assert len(agent.texts) == 2
+    assert texts(log)[-1] == DEFAULT_ACTION_FAILURE_LINE
+
+
+async def test_saying_why_it_failed_on_the_second_try_is_spoken(hass):
+    agent = Scripted(
+        ("I've changed the lights to mauve.", failed_colour_call(1)),
+        ("Sorry, the lights do not know the colour mauve.", []),
+    )
+
+    said, _log = await asked(hass, agent, "Make the lights mauve")
+
+    assert said == "Sorry, the lights do not know the colour mauve."
+
+
+async def test_an_honest_reply_after_a_failed_tool_call_is_left_alone(hass):
+    agent = Scripted(("Sorry, I could not change the colour.", failed_colour_call()))
+
+    said, _log = await asked(hass, agent, "Make the lights mauve")
+
+    assert said == "Sorry, I could not change the colour."
+    assert len(agent.texts) == 1
+
+
+async def test_one_call_that_worked_among_failed_ones_backs_the_reply(hass):
+    agent = Scripted(
+        ("I've changed the lights.", [*failed_colour_call(1), *lights_call()]),
+    )
+
+    said, _log = await asked(hass, agent, "Make the lights mauve")
+
+    assert said == "I've changed the lights."
+    assert len(agent.texts) == 1

@@ -224,6 +224,14 @@ RETRY_NOTES: dict[str, str] = {
         f"{LIST_TOOL} now for the person's last request, then answer from what it returns "
         "in your usual way. Do not mention this note."
     ),
+    "failed": (
+        "Note from the system, not from the person: your last reply said something was "
+        "done, but every tool call you made failed, so nothing happened. Read the errors "
+        "the tools returned. If the request can be done another way (another value, "
+        "another tool), call the tool again now and then tell the person the result in "
+        "your usual way. If it cannot, tell them it did not work and why, without saying "
+        "anything was done. Do not mention this note."
+    ),
     "action": (
         "Note from the system, not from the person: your last reply said something was "
         "done, but you called no tool, so nothing happened. If the person's last request "
@@ -251,6 +259,30 @@ def used_a_tool(entries: Iterable[Any]) -> bool:
     return any(
         getattr(entry, "tool_calls", None) or getattr(entry, "tool_name", None)
         for entry in entries
+    )
+
+
+def _failed(result: Any) -> bool:
+    """Whether a tool result says the call failed.
+
+    Home Assistant marks a call it refused (ToolResult.error, or an "error" key); an
+    intent answers with response_type error; a script of ours with status error.
+    """
+    if getattr(result, "error", False):
+        return True
+    data = getattr(result, "data", result)
+    if not isinstance(data, Mapping):
+        return False
+    return "error" in data or data.get("response_type") == "error" or _status(data) == "error"
+
+
+def a_tool_worked(entries: Iterable[Any]) -> bool:
+    """Whether any tool call in these chat log entries of one turn got a result that is
+    not a failure. A call without a result, or refused by Home Assistant, did nothing."""
+    return any(
+        getattr(entry, "tool_name", None) and not _failed(getattr(entry, "result", None))
+        for entry in entries
+        if getattr(entry, "role", "") == "tool_result" or hasattr(entry, "tool_call_id")
     )
 
 

@@ -85,11 +85,13 @@ from .reminders import (
     CANCEL_TOOL,
     DEFAULT_ACTION_FAILURE_LINE,
     RETRY_NOTES,
+    a_tool_worked,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     DEFAULT_LIST_FAILURE_LINE,
     LIST_TOOL,
     PUT_RIGHT,
+    REMINDER_TOOL,
     SPOKE_TOO_SOON,
     assistant_name,
     is_cancel_turn,
@@ -1125,9 +1127,20 @@ class PersonaRouter(conversation.ConversationEntity):
         try:
             if log is None or log_start is None or len(log.content) <= log_start:
                 return None
-            if used_a_tool(log.content[log_start:]) or has_memory_keyword(user_input.text):
+            turn = log.content[log_start:]
+            if a_tool_worked(turn) or has_memory_keyword(user_input.text):
                 return None
             reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
+            if used_a_tool(turn):
+                # Every call failed: a reply that says it was done is no truer than one
+                # after no call at all. A reminder tool that failed has its own check,
+                # which answers in its own words.
+                if reminders and any(
+                    reminder_tool_outcome(turn, tool) != "none"
+                    for tool in (REMINDER_TOOL, CANCEL_TOOL, LIST_TOOL)
+                ):
+                    return None
+                return "failed" if looks_like_action_claim(reply) else None
             if reminders:
                 if is_cancel_turn(user_input.text) and looks_like_cancellation(reply):
                     return "cancel"
@@ -1150,7 +1163,7 @@ class PersonaRouter(conversation.ConversationEntity):
             return reminder_tool_outcome(turn, CANCEL_TOOL) == "ok"
         if kind == "list":
             return reminder_tool_outcome(turn, LIST_TOOL) == "ok"
-        return used_a_tool(turn) and looks_like_action_claim(self._shown(result))
+        return a_tool_worked(turn) and looks_like_action_claim(self._shown(result))
 
     def _shown(self, result) -> str:
         """The reply as it is shown: without its face tag and audio tags."""
@@ -1169,7 +1182,7 @@ class PersonaRouter(conversation.ConversationEntity):
         """
         note = RETRY_NOTES[kind]
         _LOGGER.warning(
-            "The main agent said something was done (%s) without calling a tool; asking "
+            "The main agent said something was done (%s) although no tool did it; asking "
             "it once more",
             kind,
         )
@@ -1374,11 +1387,12 @@ class PersonaRouter(conversation.ConversationEntity):
             # Still said and not done, or the second try failed: a refusal is better than
             # a confirmation of something that did not happen. (For a reminder the check
             # below says so in its own words.)
-            if kind == "action" and (
-                self._unbacked_claim(user_input, result, log, log_start, False) == "action"
+            if kind in ("action", "failed") and (
+                self._unbacked_claim(user_input, result, log, log_start, False)
+                in ("action", "failed")
             ):
                 _LOGGER.warning(
-                    "The main agent again said something was done without calling a tool"
+                    "The main agent again said something was done although no tool did it"
                 )
                 result = self._honest_reply(
                     user_input, result, log, log_start, DEFAULT_ACTION_FAILURE_LINE
