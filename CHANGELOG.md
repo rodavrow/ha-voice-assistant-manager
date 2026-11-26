@@ -153,6 +153,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **The avatar keeps its lips through a pause in a reply.** When the main agent calls a
+  tool mid-reply (a web search, say), the voice gets no text for a few seconds. The
+  satellite took that silence for a dropout and spoke the rest itself, with the avatar
+  idle. Voice Assistant Manager now tells LiveTalking to hold the reply open during a
+  pause of up to 90 seconds, so the avatar goes on speaking when the answer comes. Needs
+  a LiveTalking that reports the hold and satellite firmware that follows it; without
+  them nothing changes.
 - **A reply that says something was done after every tool call failed is now caught.**
   The main agent asked for a light colour Home Assistant did not know, all its calls were
   refused, and it still said the lights were changed. A failed call counted as "a tool
