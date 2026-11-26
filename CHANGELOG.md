@@ -47,7 +47,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 - **Emotion tags.** A reply, chat line or announcement may start with one tag: `[neutral]`,
   `[happy]`, `[sad]`, `[angry]` or `[sarcastic]`. The tag is never spoken or shown, also
   while a reply streams in, and on assistants without an avatar too. A missing or unknown
-  tag counts as neutral. For an assistant with an avatar, LiveTalking is told the emotion
+  tag counts as neutral; only a word of letters is a tag, so a reply that starts with
+  `[1]` keeps it. For an assistant with an avatar, LiveTalking is told the emotion
   (`POST /set_emotion`) just before the audio, so the avatar can look the part. A
   LiveTalking without it is not affected. See [Avatar](docs/avatar.md#emotions).
 

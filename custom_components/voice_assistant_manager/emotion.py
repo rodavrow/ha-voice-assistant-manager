@@ -31,7 +31,8 @@ Emotion = Literal["neutral", "happy", "sad", "angry", "sarcastic"]
 EMOTIONS: Final[frozenset[str]] = frozenset(get_args(Emotion))
 NEUTRAL: Final[Emotion] = "neutral"
 
-_TAG = re.compile(r"^\s*\[(\w+)\]\s*")
+# A tag is a word of letters, so a reply that starts with "[1]" keeps it.
+_TAG = re.compile(r"^\s*\[([^\W\d_]+)\]\s*")
 # A tag's closing bracket comes within this many characters, or there is no tag. While
 # a reply streams in, at most this much is held back to tell.
 MAX_TAG_CHARS: Final = 20
@@ -48,8 +49,8 @@ def _emotion_of(word: str) -> Emotion:
 def split_tag(text: str) -> tuple[Emotion, str]:
     """(emotion, the reply without its tag). No tag, or one not known, is neutral.
 
-    Any word in brackets at the very start is a tag and is taken off, with the spaces
-    around it; the rest is left as it is.
+    Any word of letters in brackets at the very start is a tag and is taken off, with
+    the spaces around it; the rest is left as it is.
     """
     match = _TAG.match(text)
     if match is None or match.end(1) >= MAX_TAG_CHARS:
