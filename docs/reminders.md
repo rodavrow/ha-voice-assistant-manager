@@ -47,6 +47,8 @@ The assistant is involved twice: when the reminder is set, and, if you want the 
 | --- | --- |
 | "Remind me at 5 pm to call the plumber." | A reminder for you. The main agent calls `create_reminder`. Nothing is saved to memory. |
 | "Remind us in 20 minutes to check the oven." | A reminder for the household. |
+| "Remind me every weekday at 7 to stretch." | A repeating reminder. See [Repeating reminders](#repeating-reminders). |
+| "Stop reminding me to take my pills." | Cancels that reminder, a repeating one as a whole. See [Cancelling a reminder](#cancelling-a-reminder). Nothing is saved to memory. |
 | "Remind Sam at 6 to call the plumber." | A reminder for Sam. |
 | "Remember that I like the lights warm in the evening." | A memory, never a reminder. See [Memory](memory.md). |
 | "Remind Sam the plumber comes on Friday." | No time to be alerted at, so it is a message for Sam that memory keeps. |
@@ -86,6 +88,31 @@ The other fields are between your script and the main agent, which reads them fr
 
 > [!TIP]
 > [`examples/create_reminder.yaml`](../examples/create_reminder.yaml) is a complete script that works this way. It writes to a Local Calendar per person, works out the date from `in_minutes`, `at_time` and `on_day`, and returns `status`, `message` and what was set. Change the names in it to your own.
+
+## Repeating reminders
+
+Home Assistant's `calendar.create_event` action cannot make an event repeat; only the calendar page can. So for a reminder that repeats, the example script asks this integration's `voice_assistant_manager.create_reminder_event` action, which adds a repeating event to a Local Calendar the same way the calendar page does. Your automation that checks for due reminders needs no change: `calendar.get_events` lists every time a repeating event comes round.
+
+The example `create_reminder` script takes these fields for it, next to `at_time` (the time of day) and `on_day` (when it starts):
+
+| Field | Value |
+| --- | --- |
+| `repeat` | `daily`, `weekdays`, `weekends`, `weekly`, `monthly` or `yearly`. Needs `at_time`, not `in_minutes`. |
+| `repeat_on` | With `weekly`, the weekdays, for example `monday, thursday`. |
+| `repeat_every` | `2` for every other day, week, month or year. |
+| `repeat_times` | How many times in all. Leave out for no end. |
+| `repeat_until` | The last day, `MM-DD`. Leave out for no end. Not with `repeat_times`. |
+
+With `weekdays`, `weekends` or `repeat_on`, the first reminder moves to the first of those days, at the same time. A monthly reminder on the 31st skips months without one. The script returns when the first reminder is due. The assistant tells the main agent how to use these fields, and never to work out dates itself.
+
+## Cancelling a reminder
+
+"Stop reminding me to take my pills" or "cancel the bins reminder" calls a second script, `script.cancel_reminder`, exposed to Assist like `create_reminder`. It passes the title, or a word from it, and `for_whom`, and uses this integration's `voice_assistant_manager.cancel_reminder_event` action, since Home Assistant has no action that deletes an event. It looks in both of the person's reminder calendars, and removes a repeating reminder as a whole. When several reminders match ("feed the cat", "feed the fish"), nothing is removed: the answer lists them, and the assistant asks which one.
+
+> [!TIP]
+> [`examples/cancel_reminder.yaml`](../examples/cancel_reminder.yaml) is a complete script. Use the same names in it as in `create_reminder`.
+
+Both actions refuse a person who may not control the calendar, as the calendar page does. Automations and scripts without a person are allowed.
 
 **A script that speaks due reminders**, for example `script.reminder_announce`, using `assist_satellite.announce` in the voice of the assistant that took the reminder. To have the reminder worded in that assistant's style too, it first calls this integration's action and falls back to plain text when that returns nothing:
 

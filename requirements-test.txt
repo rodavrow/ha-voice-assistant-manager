@@ -11,3 +11,6 @@ home-assistant-intents==2026.10.27
 # set up for real. Its two compiled libraries are stubbed in the tests instead.
 mutagen==1.48.1
 ha-ffmpeg==3.2.2
+# Requirement of Home Assistant's local_calendar in 2026.11.2: the repeating reminder tests
+# create and cancel events on a real Local Calendar.
+ical==14.3.1

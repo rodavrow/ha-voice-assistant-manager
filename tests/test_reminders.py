@@ -24,6 +24,7 @@ from custom_components.voice_assistant_manager.reminders import (
     DEFAULT_FAILURE_LINE,
     has_alert_time,
     is_reminder_request,
+    is_reminder_turn,
     is_unclear_remember_to,
     looks_like_confirmation,
     reminder_guidance,
@@ -237,6 +238,46 @@ def test_guidance_maps_the_speaker_to_for_whom():
     assert 'for_whom "sam"' in guidance
     assert "create_reminder" in guidance
     assert "status ok" in guidance
+
+
+def test_guidance_explains_repeating_reminders():
+    guidance = reminder_guidance("Alex", "Sam", "jeeves")
+
+    assert "repeat" in guidance
+    for kind in ("daily", "weekdays", "weekends", "weekly", "monthly", "yearly"):
+        assert kind in guidance
+    assert "repeat_on" in guidance and "repeat_every" in guidance
+    assert "repeat_times" in guidance and "repeat_until" in guidance
+
+
+def test_guidance_explains_cancelling_and_when_to_say_it_is_cancelled():
+    guidance = reminder_guidance("Alex", "Sam", "jeeves")
+
+    assert "script.cancel_reminder" in guidance
+    assert "cancelled only after cancel_reminder returned status ok" in guidance
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Stop reminding me to take my pills",
+        "Cancel the reminder about the bins",
+        "cancel my pills reminder",
+        "Delete the reminder to water the plants",
+        "Don't remind me about the bins any more",
+        "Remove the bins reminder",
+    ],
+)
+def test_cancelling_a_reminder_is_a_reminder_turn(text):
+    assert is_reminder_turn(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Remind me every weekday at 7 to stretch", "Remind us every other Friday to pay rent"],
+)
+def test_a_repeating_reminder_is_a_reminder_turn(text):
+    assert is_reminder_turn(text)
 
 
 async def test_main_agent_gets_the_guidance_for_person_1(hass: HomeAssistant):

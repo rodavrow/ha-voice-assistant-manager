@@ -22,6 +22,7 @@ from .memory import async_get_memory
 from .mine_api import async_register_mine_commands
 from .panel import async_setup_panel
 from .panel_api import async_register_chat_services, async_register_commands
+from .reminder_actions import async_register_reminder_actions
 from .stage_api import async_register_stage_commands
 
 PLATFORMS = [Platform.CONVERSATION]
@@ -33,6 +34,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register the services and the settings page, which belong to no one router entry."""
     async_register_services(hass)
+    async_register_reminder_actions(hass)
     async_register_chat_services(hass)
     await async_setup_panel(hass)
     async_register_commands(hass)

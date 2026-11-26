@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Example: script.cancel_reminder, the tool the main agent calls for "stop reminding me".
+#
+# Paste it into a new script in YAML mode, save it with the entity id
+# script.cancel_reminder, and expose it to Assist.
+#
+# It removes a reminder that script.create_reminder set, one-off or repeating, from the
+# person's two reminder calendars, through Voice Assistant Manager's
+# cancel_reminder_event action: Home Assistant has no action that deletes an event.
+# A repeating reminder goes as a whole. When several reminders match the title, nothing
+# is removed and the agent is told which ones, so it can ask.
+#
+# Change "people" to the same names as in script.create_reminder.
+
+alias: Cancel reminder
+description: >-
+  Cancels a reminder that was set with create_reminder, also a repeating one. Pass
+  its title, or a word from it, and who it is for. Only say it is cancelled when
+  this script returns status ok.
+mode: queued
+fields:
+  title:
+    description: The reminder's title, or a word from it, for example "pills".
+    required: true
+    selector:
+      text:
+  for_whom:
+    description: Who the reminder is for, as your instructions tell you.
+    required: true
+    selector:
+      text:
+sequence:
+  - variables:
+      people: [alex, sam, household]
+      who: "{{ for_whom | default('') | string | lower | trim }}"
+  - if:
+      - condition: template
+        value_template: "{{ who not in people }}"
+    then:
+      - variables:
+          result:
+            status: error
+            message: "Reminder not cancelled. for_whom must be one of {{ people | join(', ') }}."
+      - stop: Reminder not cancelled
+        response_variable: result
+  - action: voice_assistant_manager.cancel_reminder_event
+    data:
+      calendar:
+        - "calendar.{{ who }}_reminders_announce"
+        - "calendar.{{ who }}_reminders"
+      title: "{{ title }}"
+    response_variable: result
+  - stop: Done
+    response_variable: result
