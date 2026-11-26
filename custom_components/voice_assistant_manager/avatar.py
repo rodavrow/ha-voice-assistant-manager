@@ -122,6 +122,32 @@ def _container(audio: bytes) -> str | None:
     return None
 
 
+def _true_wav(audio: bytes) -> bytes:
+    """The WAV with the sizes in its header set to what it really holds.
+
+    An engine that streams a WAV writes the header before it knows the length, as a guess
+    or a placeholder. LiveTalking reads as many samples as the header says, so a header
+    that says too few cut the end of the clip. Anything that cannot be read is left as is.
+    """
+    at = 12  # After "RIFF", its size and "WAVE": the first chunk.
+    while at + 8 <= len(audio):
+        size = int.from_bytes(audio[at + 4 : at + 8], "little")
+        if audio[at : at + 4] == b"data":
+            real = len(audio) - (at + 8)
+            riff = len(audio) - 8
+            if size == real and int.from_bytes(audio[4:8], "little") == riff:
+                return audio
+            _LOGGER.debug(
+                "Avatar clip: the WAV header said %d bytes of audio, the clip has %d", size, real
+            )
+            return b"".join(
+                (audio[:4], riff.to_bytes(4, "little"), audio[8 : at + 4],
+                 real.to_bytes(4, "little"), audio[at + 8 :])
+            )
+        at += 8 + size + (size & 1)
+    return audio
+
+
 def _wrap_wav(pcm: bytes, rate: int, channels: int, width: int) -> bytes:
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as clip:
@@ -145,10 +171,10 @@ def prepare_clip(
     if not audio or len(audio) > MAX_CLIP_BYTES:
         return None
     kind = _container(audio)
+    if kind == "wav":
+        return kind, _true_wav(audio)
     if extension.lower() not in _RAW_EXTENSIONS:
         return (kind or extension), audio
-    if kind == "wav":
-        return kind, audio
     # Raw samples can start with bytes that look like an MPEG frame (FF FF is -1), so for
     # raw audio only a WAV header counts.
     rate = options.get("preferred_sample_rate")
