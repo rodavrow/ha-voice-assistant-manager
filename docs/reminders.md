@@ -114,6 +114,8 @@ With `weekdays`, `weekends` or `repeat_on`, the first reminder moves to the firs
 
 Both actions refuse a person who may not control the calendar, as the calendar page does. Automations and scripts without a person are allowed.
 
+**The main agent can cancel reminders** under Settings > Reminders turns this on or off for each assistant, on by default. Off, the main agent is told it cannot cancel reminders and to point to the reminder calendar. That is an instruction, not a lock: to make sure no assistant can cancel, also stop exposing `script.cancel_reminder` to Assist.
+
 **A script that speaks due reminders**, for example `script.reminder_announce`, using `assist_satellite.announce` in the voice of the assistant that took the reminder. To have the reminder worded in that assistant's style too, it first calls this integration's action and falls back to plain text when that returns nothing:
 
 ```yaml
@@ -248,5 +250,7 @@ A language model can say "your reminder is set" without having called the tool. 
 
 - The main agent is told it may only confirm a reminder after `create_reminder` returned status `ok` in that turn, and must pass on the message of an error.
 - After each reply the assistant looks at the tools that were actually called in that turn. If the reply says a reminder is set ("your reminder is set", "I'll remind you at five") and `create_reminder` did not return `ok`, the reply is replaced by "I could not set that reminder. Please ask me again." You can change that line in the settings.
+
+The same goes for cancelling: a reply that says a reminder is cancelled or removed when `cancel_reminder` did not return `ok` is replaced by "I could not cancel that reminder. Please ask me again." A reply after a cancellation is never taken for a reminder that was set, even when it says when the reminder was set for.
 
 This is a safety net, not a guarantee. It only reacts to a reply that clearly claims a reminder, so a vaguer false confirmation ("Okay, five o'clock it is.") gets through. A reply that asks something back, reports a failure, or is about something else ("I've set a timer") is left alone, and so is "I'll remind Sam" after a message for Sam with no time.

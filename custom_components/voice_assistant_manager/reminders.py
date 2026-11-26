@@ -16,6 +16,7 @@ REMINDER_TOOL = "create_reminder"
 CANCEL_TOOL = "cancel_reminder"
 HOUSEHOLD = "household"
 DEFAULT_FAILURE_LINE = "I could not set that reminder. Please ask me again."
+DEFAULT_CANCEL_FAILURE_LINE = "I could not cancel that reminder. Please ask me again."
 
 ToolOutcome = Literal["none", "ok", "error"]
 
@@ -77,6 +78,14 @@ _HYPOTHETICAL = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_END = re.compile(r"(?<=[.!])\s+")
+# A reply claims a reminder was cancelled: "I've cancelled your pills reminder", "that
+# reminder is removed", "I'll stop reminding you".
+_CANCEL_CLAIM = re.compile(
+    r"\breminders?\b[^.?!]*\b(?:cancell?ed|removed|deleted|stopped|cleared|turned off)\b"
+    r"|\b(?:cancell?ed|removed|deleted|stopped|cleared|turned off)\b[^.?!]*\breminders?\b"
+    r"|\bstop reminding\b",
+    re.IGNORECASE,
+)
 
 
 def has_alert_time(text: str) -> bool:
@@ -156,8 +165,30 @@ def _status(result: Any) -> str | None:
     return None
 
 
-def reminder_tool_outcome(entries: Iterable[Any]) -> ToolOutcome:
-    """What happened to create_reminder in the chat log entries of one turn.
+def is_cancel_turn(text: str) -> bool:
+    """Whether the person asked to cancel a reminder ("stop reminding me …")."""
+    return bool(_CANCEL_REMINDER.search(text or ""))
+
+
+def looks_like_cancellation(reply: str) -> bool:
+    """Whether a reply claims a reminder was cancelled. Questions and failures do not."""
+    reply = reply or ""
+    if not reply.strip() or "?" in reply or _NEGATIVE.search(reply):
+        return False
+    return any(
+        (claim := _CANCEL_CLAIM.search(sentence)) is not None
+        and not _HYPOTHETICAL.search(sentence[: claim.start()])
+        for sentence in _SENTENCE_END.split(reply)
+    )
+
+
+def needs_honest_cancel_failure(reply: str, outcome: ToolOutcome) -> bool:
+    """Whether a reply confirms a cancellation that cancel_reminder did not make."""
+    return outcome != "ok" and looks_like_cancellation(reply)
+
+
+def reminder_tool_outcome(entries: Iterable[Any], tool: str = REMINDER_TOOL) -> ToolOutcome:
+    """What happened to the tool (create_reminder unless told) in one turn's chat log.
 
     "ok" when a call returned status ok, "error" when it was called and none did,
     "none" when it was never called.
@@ -165,9 +196,9 @@ def reminder_tool_outcome(entries: Iterable[Any]) -> ToolOutcome:
     called = False
     for entry in entries:
         for call in getattr(entry, "tool_calls", None) or []:
-            if str(getattr(call, "tool_name", "")).endswith(REMINDER_TOOL):
+            if str(getattr(call, "tool_name", "")).endswith(tool):
                 called = True
-        if str(getattr(entry, "tool_name", "")).endswith(REMINDER_TOOL):
+        if str(getattr(entry, "tool_name", "")).endswith(tool):
             called = True
             # Home Assistant wraps what the script returned in llm.ToolResult(data, error).
             result = getattr(entry, "result", None)
@@ -233,11 +264,14 @@ def assistant_aliases(title: str, setting: str | None) -> set[str]:
     return {name for name in (full, without_brackets, assistant_name(title, None)) if name}
 
 
-def reminder_guidance(speaker_name: str, other_name: str, assistant: str = "") -> str:
+def reminder_guidance(
+    speaker_name: str, other_name: str, assistant: str = "", cancel: bool = True
+) -> str:
     """Instructions for the main agent about reminders, for the person speaking now.
 
     `assistant` is this router's assistant name, which the tool wants back so the due
-    reminder is spoken by the same assistant.
+    reminder is spoken by the same assistant. Without `cancel`, the agent is told it
+    cannot cancel reminders.
     """
     speaker, other = for_whom(speaker_name), for_whom(other_name)
     lines = [
@@ -281,14 +315,23 @@ def reminder_guidance(speaker_name: str, other_name: str, assistant: str = "") -
         "\"monday, thursday\". repeat_every 2 means every other day, week, month or "
         "year. To end it, repeat_times is how many times, or repeat_until the last day "
         "(MM-DD); leave both out for no end. Never work out the dates yourself.",
-        f"- \"Stop reminding me …\" or \"cancel the … reminder\" cancels one: call the "
-        f"{CANCEL_TOOL} tool (script.{CANCEL_TOOL}) with the reminder's title and for_whom. "
-        "If it says several reminders match, ask which one and call it again with that "
-        "title.",
         f"- Say a reminder is set only after {REMINDER_TOOL} returned status ok in this turn. "
         "If it returned an error, tell the person what its message says. Never say a "
         "reminder is set without calling the tool.",
-        f"- Say a reminder is cancelled only after {CANCEL_TOOL} returned status ok in this "
-        "turn. If it returned an error, tell the person what its message says.",
     ]
+    if cancel:
+        lines += [
+            f"- You can cancel reminders. \"Stop reminding me …\" or \"cancel the … "
+            f"reminder\" cancels one: call the {CANCEL_TOOL} tool (script.{CANCEL_TOOL}) "
+            "with the reminder's title, or a word from it, and for_whom. A repeating "
+            "reminder is cancelled as a whole. If it says several reminders match, ask "
+            "which one and call it again with that title.",
+            f"- Say a reminder is cancelled only after {CANCEL_TOOL} returned status ok in "
+            "this turn. If it returned an error, tell the person what its message says.",
+        ]
+    else:
+        lines.append(
+            "- You cannot cancel reminders. When asked to, say so, and that it can be "
+            "removed in the reminder calendar in Home Assistant."
+        )
     return "\n".join(lines)
