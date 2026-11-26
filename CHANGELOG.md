@@ -146,6 +146,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A reply that says something was done after every tool call failed is now caught.**
+  The main agent asked for a light colour Home Assistant did not know, all its calls were
+  refused, and it still said the lights were changed. A failed call counted as "a tool
+  was used", so the reply was not checked. Now a turn in which no tool call succeeded is
+  treated like one without any: the main agent is asked once more, told that its calls
+  failed, and if it still says it was done the person hears "I could not do that. Please
+  ask me again."
 - **A recognised person is no longer told they are unknown when the voice match never
   arrives.** When a satellite gave no voice match (its helper stayed on `pending`, for
   example while its sensors were unavailable), the request was answered with the line for
