@@ -204,11 +204,19 @@ class LiveTalkingClient:
             raise LiveTalkingError("offer reply has no session id")
         return answer, session_id
 
-    async def async_say(self, session_id: str, extension: str, audio: bytes) -> None:
-        """Stop what one session says and have it say the clip."""
+    async def async_say(
+        self, session_id: str, extension: str, audio: bytes, emotion: str | None = None
+    ) -> None:
+        """Stop what one session says and have it say the clip, with the emotion if given.
+
+        LiveTalking applies an upload's emotion to that upload's audio only; one that does
+        not know emotions ignores the field.
+        """
         await self._async_post("/interrupt_talk", json={"sessionid": session_id})
         form = aiohttp.FormData()
         form.add_field("sessionid", session_id)
+        if emotion is not None:
+            form.add_field("emotion", emotion)
         form.add_field("file", audio, filename=f"speech.{extension}")
         await self._async_post("/humanaudio", data=form)
 
