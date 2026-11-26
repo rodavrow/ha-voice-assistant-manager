@@ -80,6 +80,17 @@ LiveTalking's picture stutters for a moment on every session it is running whene
 - **It cannot stay on.** A satellite away when the chat ends is set back when it returns (up to 30 seconds), and otherwise by the next minute's check. The hold also ends by itself five minutes after the chat's time limit, and a restart of Home Assistant ends it at once.
 - Firmware without the `avatar_state_N` sensor is connected the same way, but the chat does not wait for it.
 
+### Replies streamed to the avatar
+
+A satellite in avatar mode normally waits until the whole reply has been made, downloads it and uploads it to LiveTalking before its avatar speaks, which takes longer the longer the answer is. With **Stream replies to the avatar** under Advanced (on by default), Voice Assistant Manager sends the speech to the satellite's LiveTalking session while the engine is still making it, so the avatar starts sooner.
+
+It needs satellite firmware with the switch **Avatar fed by Home Assistant** on each wake-word slot, and a LiveTalking with `/stream_audio`. Voice Assistant Manager turns that switch on and off with the setting; satellites without it are not touched and work as before.
+
+- **The satellite always keeps the normal audio as a backup.** It is passed on unchanged. If LiveTalking does not take the reply, or drops out part-way, the satellite speaks from the backup.
+- **Only when it is clear who asked.** The reply goes to the session of the satellite that asked. When that cannot be told (two satellites asking the same assistant at the same moment, or two wake words of one satellite on the same assistant), nothing is streamed and the satellite speaks as before.
+- **Not every reply is streamed.** A reply Home Assistant already has in its speech cache, an announcement or a chat line is not made again, so the satellite sends it to the avatar itself.
+- **It never holds up the speech.** LiveTalking gets 0.3 seconds to accept a reply. The audio is decoded with Home Assistant's ffmpeg. An interrupt on the satellite stops the stream.
+
 ### Voice for chats
 
 While an avatar is on, the **Avatar** card reminds you to choose its entity as the text-to-speech engine of **Voice for chats**, with a button to do so. Satellites in avatar mode speak chat lines through the avatar anyway; the setting makes the lines reach the LiveTalking page too. Once the avatar is off, it reminds you to choose the normal engine again.

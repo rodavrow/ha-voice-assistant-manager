@@ -66,6 +66,7 @@ EXPECTED_SETTINGS = {
         # the end of speech, the new setting from the wake word.
         **{k: v for k, v in EXISTING_OPTIONS["advanced"].items() if k != "wait_seconds"},
         "avatar_connection": "on_wake",
+        "avatar_stream": True,
         "match_within": 6,
     },
 }

@@ -11,6 +11,8 @@ no reload.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncGenerator, Mapping
 from typing import Any
 
@@ -20,6 +22,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from . import avatar_stream
 from .avatar import (
     CONF_AVATAR_ID,
     CONF_ENABLED,
@@ -31,6 +34,8 @@ from .avatar import (
     normalize_url,
 )
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -109,6 +114,12 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
                 message, language, options
             )
         if extension and data:
+            # A whole clip: fed in one piece, which still saves the satellite's download
+            # and upload of it.
+            feed = await self._async_open_feed(extension, options)
+            if feed is not None:
+                feed.write(data)
+                feed.finish()
             self._send_copy(extension, data, options)
         return extension, data
 
@@ -123,20 +134,69 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
     async def _copying(
         self, extension: str, chunks: AsyncGenerator[bytes], options: Mapping[str, Any]
     ) -> AsyncGenerator[bytes]:
-        """Pass each chunk on at once; send the copy only when the clip ended normally."""
+        """Pass each chunk on at once; send the copy only when the clip ended normally.
+
+        The asking satellite's avatar is fed each chunk as it comes (avatar_stream.py). Its
+        stream is opened while the engine makes the first chunk, and before that chunk is
+        passed on, so the satellite can tell that its avatar is being fed.
+        """
         copy: list[bytes] | None = []
         size = 0
-        async for chunk in chunks:
-            yield chunk
-            if copy is None:
-                continue
-            size += len(chunk)
-            if size > MAX_CLIP_BYTES:
-                copy = None
-            else:
-                copy.append(chunk)
+        opening: asyncio.Task[avatar_stream.ReplyFeed | None] | None = self.hass.async_create_task(
+            self._async_open_feed(extension, options), f"{DOMAIN} avatar stream open"
+        )
+        feed: avatar_stream.ReplyFeed | None = None
+        try:
+            async for chunk in chunks:
+                if opening is not None:
+                    feed, opening = await opening, None
+                if feed is not None:
+                    feed.write(chunk)
+                yield chunk
+                if copy is None:
+                    continue
+                size += len(chunk)
+                if size > MAX_CLIP_BYTES:
+                    copy = None
+                else:
+                    copy.append(chunk)
+        except BaseException:
+            # The engine failed or the request was dropped: the avatar says no more of it.
+            if opening is not None:
+                opening.cancel()
+            if feed is not None:
+                feed.abort()
+            raise
+        if opening is not None:
+            feed = await opening
+        if feed is not None:
+            feed.finish()
         if copy:
             self._send_copy(extension, b"".join(copy), options)
+
+    async def _async_open_feed(
+        self, extension: str, options: Mapping[str, Any]
+    ) -> avatar_stream.ReplyFeed | None:
+        """Open the asking satellite's avatar for this reply, or None. Never raises."""
+        try:
+            settings = self._settings()
+            url = normalize_url(str(settings.get(CONF_URL) or ""))
+            if not settings.get(CONF_ENABLED) or url is None:
+                return None
+            target = avatar_stream.feed_target(self.hass, self._entry, url)
+            if target is None:
+                return None
+            feed = avatar_stream.ReplyFeed(self.hass, target, extension, options)
+            if not await feed.async_open():
+                return None
+            # Cancelled with the assistant when it unloads.
+            self._entry.async_create_background_task(
+                self.hass, feed.async_run(), f"{DOMAIN} avatar stream {self.entity_id}"
+            )
+        except Exception:  # noqa: BLE001 - the speech must never fail because of this
+            _LOGGER.warning("Avatar stream: could not be opened", exc_info=True)
+            return None
+        return feed
 
     def _send_copy(self, extension: str, audio: bytes, options: Mapping[str, Any]) -> None:
         settings = self._settings()
