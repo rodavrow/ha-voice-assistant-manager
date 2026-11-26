@@ -99,6 +99,8 @@ The chat ends at whichever limit it reaches first.
 
 The words limit is a hard maximum: the assistants are asked for a little under it, and a line that still runs over is cut back to its last complete sentence.
 
+**Seconds between lines** is the silence you hear. While one line is spoken, the next assistant's line is already written and its audio made, so nothing else is added to it. When someone joins in, that prepared line is thrown away and written again so it answers them, which costs one extra call to the agent. A satellite without a chat voice makes its own audio only when the line is spoken.
+
 **Save as defaults** keeps the values on the card for the next chat.
 
 On a satellite that supports it, **Listen after each round (best effort)** makes the satellite listen after the second assistant's line, so someone can join in without waking it first. The chat goes on if nobody speaks. The last line of a chat never listens. Listening is only offered on a satellite whose first wake word uses an assistant, so a reply always reaches an assistant and never your main agent. Not every satellite or voice pipeline supports this, and it is not offered for the others.
