@@ -451,3 +451,56 @@ async def test_speaking_refuses_an_unexpected_reply(hass, aioclient_mock, reply)
 
     with pytest.raises(avatar.LiveTalkingError):
         await client.async_speaking("s1")
+
+
+# A streamed WAV's header
+
+
+def wav_clip(samples: int, *, claimed: int | None = None, extra_chunk: bool = False) -> bytes:
+    """A 16 kHz mono 16-bit WAV with `samples` samples, whose header claims `claimed` bytes."""
+    data = b"\x01\x02" * samples
+    claimed_bytes = len(data) if claimed is None else claimed
+    fmt = b"fmt " + (16).to_bytes(4, "little") + (1).to_bytes(2, "little") + (
+        (1).to_bytes(2, "little") + (16000).to_bytes(4, "little")
+        + (32000).to_bytes(4, "little") + (2).to_bytes(2, "little") + (16).to_bytes(2, "little")
+    )
+    extra = b"LIST" + (4).to_bytes(4, "little") + b"INFO" if extra_chunk else b""
+    body = b"WAVE" + fmt + extra + b"data" + claimed_bytes.to_bytes(4, "little") + data
+    riff = (4 + len(fmt) + len(extra) + 8 + claimed_bytes) & 0xFFFFFFFF
+    return b"RIFF" + riff.to_bytes(4, "little") + body
+
+
+def wav_frames(audio: bytes) -> int:
+    with wave.open(io.BytesIO(audio)) as clip:
+        return clip.getnframes()
+
+
+@pytest.mark.parametrize("claimed", [200, 0, 0xFFFFFFFF])
+def test_regression_clip_end_a_wav_header_with_the_wrong_length_is_corrected(claimed):
+    # LiveTalking reads as many samples as the header says: a streamed WAV whose header
+    # says fewer than it has lost the end of the line.
+    clip = wav_clip(16000, claimed=claimed)
+
+    _extension, sent = avatar.prepare_clip("wav", clip, {})
+
+    assert wav_frames(sent) == 16000
+    assert len(sent) == len(clip)
+    assert int.from_bytes(sent[4:8], "little") == len(sent) - 8
+
+
+def test_a_wav_with_a_correct_header_is_sent_unchanged():
+    clip = wav_clip(16000)
+
+    assert avatar.prepare_clip("wav", clip, {}) == ("wav", clip)
+
+
+def test_a_wav_header_is_corrected_past_other_chunks():
+    clip = wav_clip(8000, claimed=20, extra_chunk=True)
+
+    _extension, sent = avatar.prepare_clip("wav", clip, {})
+
+    assert wav_frames(sent) == 8000
+
+
+def test_a_wav_without_a_data_chunk_is_sent_unchanged():
+    assert avatar.prepare_clip("wav", WAV, {}) == ("wav", WAV)

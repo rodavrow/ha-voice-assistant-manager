@@ -112,6 +112,10 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A streamed WAV no longer loses its end on the avatar.** An engine that streams a WAV
+  writes its header before it knows the length. LiveTalking read only as many samples as
+  that header said, so a header that said too few cut the end of the line. The header is
+  now set to what the clip really holds before it is sent.
 - **A reply streamed to the avatar no longer loses its first words.** The audio sent to
   LiveTalking was missing its first 1.26 seconds ("Why did the scarecrow" of a joke), while
   the avatar stood idle: an ffmpeg option meant to cut delay made it throw that audio away.
