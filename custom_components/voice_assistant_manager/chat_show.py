@@ -1187,6 +1187,7 @@ class ChatShowManager:
             _LOGGER.warning("The chat voice gave audio the avatar cannot play")
             return False
         chat.speaking = True
+        emotion.log_face_with_clip(entry.title, chat.line_emotion, chat.line_why)
         try:
             # With the clip, not /set_emotion: that would also leave the emotion pending on
             # any other session showing this avatar, such as a satellite's.
