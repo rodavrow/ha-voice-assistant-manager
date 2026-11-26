@@ -98,6 +98,11 @@ SELF_WAKE_TTL = 20.0
 SELF_WAKE_WARN_AFTER = 3
 PLAYER_PLAYING = "playing"
 TTS_VOICE = "voice"  # tts.ATTR_VOICE
+TTS_FORMAT = "preferred_format"  # tts.ATTR_PREFERRED_FORMAT
+# What a line on the stage is made as. LiveTalking reads a WAV's length exactly; an MP3
+# that Home Assistant converted on the fly has no length in it, and LiveTalking's decoder
+# guessed it short and dropped the end of the line.
+STAGE_FORMAT = "wav"
 # How long a chat voice may take to make a line's audio before the line is spoken without.
 CHAT_VOICE_TIMEOUT = 20
 # Not a chat end reason: the conversation could not start, so the line is announced.
@@ -448,11 +453,18 @@ def _is_busy_error(err: BaseException) -> bool:
     return any(cls.__name__ == "SatelliteBusyError" for cls in type(err).__mro__)
 
 
-def _tts_media_id(hass: HomeAssistant, line: str, engine: str | None, voice: str) -> str | None:
-    """A text-to-speech media source id for the line, or None if it cannot be made."""
+def _tts_media_id(
+    hass: HomeAssistant, line: str, engine: str | None, voice: str, fmt: str | None = None
+) -> str | None:
+    """A text-to-speech media source id for the line, or None if it cannot be made.
+
+    `fmt` asks Home Assistant for the audio in that format, whatever the engine makes.
+    """
     from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
 
-    options = {TTS_VOICE: voice} if voice else None
+    options: dict[str, Any] | None = {TTS_VOICE: voice} if voice else None
+    if fmt:
+        options = {**(options or {}), TTS_FORMAT: fmt}
     try:
         return tts.generate_media_source_id(hass, line, engine, None, options)
     except HomeAssistantError as err:
@@ -461,7 +473,7 @@ def _tts_media_id(hass: HomeAssistant, line: str, engine: str | None, voice: str
 
 
 async def _async_chat_media_id(
-    hass: HomeAssistant, line: str, engine: str, voice: str
+    hass: HomeAssistant, line: str, engine: str, voice: str, fmt: str | None = None
 ) -> str | None:
     """A media source id for the line in the chat voice, or None if it makes no audio.
 
@@ -471,7 +483,7 @@ async def _async_chat_media_id(
     """
     from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
 
-    media_id = _tts_media_id(hass, line, engine, voice)
+    media_id = _tts_media_id(hass, line, engine, voice, fmt)
     if media_id is None:
         return None
     try:
@@ -1001,10 +1013,12 @@ class ChatShowManager:
         from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
 
         engine, voice = _chat_voice(entry)
+        # The same request as when the line is spoken, or the audio would be made twice.
+        fmt = STAGE_FORMAT if chat.on_stage is not None and not chat.on_stage.broken else None
         if engine:
-            await _async_chat_media_id(self.hass, line, engine, voice)
+            await _async_chat_media_id(self.hass, line, engine, voice, fmt)
         elif not chat.speaker.startswith("assist_satellite."):
-            media_id = _tts_media_id(self.hass, line, None, "")
+            media_id = _tts_media_id(self.hass, line, None, "", fmt)
             if media_id is not None:
                 with contextlib.suppress(Exception):
                     async with asyncio.timeout(CHAT_VOICE_TIMEOUT):
@@ -1127,9 +1141,11 @@ class ChatShowManager:
         assert chat.on_stage is not None
         engine, voice = _chat_voice(entry)
         media_id = (
-            await _async_chat_media_id(self.hass, line, engine, voice) if engine else None
+            await _async_chat_media_id(self.hass, line, engine, voice, STAGE_FORMAT)
+            if engine
+            else None
         )
-        media_id = media_id or _tts_media_id(self.hass, line, None, "")
+        media_id = media_id or _tts_media_id(self.hass, line, None, "", STAGE_FORMAT)
         if media_id is None:
             return False
         try:

@@ -546,3 +546,38 @@ async def test_the_page_reports_and_saves_the_stage(hass, hass_ws_client, show, 
     saved = (await client.receive_json())["result"]
     assert saved["stage"]["captions"] is True
     assert stage.settings(hass).captions is True
+
+
+# Clips for the stage
+
+
+async def test_regression_clip_end_the_stage_asks_for_wav_not_mp3(hass, show, cast, chat_audio):
+    # LiveTalking cut the end off an MP3 that Home Assistant converted on the fly: such a
+    # file has no length in it, and the decoder guessed it short. A WAV's length is exact.
+    await chat_on_tv(hass, show)
+
+    assert chat_audio.asked
+    assert all("'preferred_format': 'wav'" in asked for asked in chat_audio.asked)
+
+
+async def test_a_prepared_stage_line_is_made_once_in_the_format_it_is_said_in(
+    hass, show, cast, chat_audio
+):
+    await chat_on_tv(hass, show)
+
+    # The second line is made while the first plays and asked for again when it is said:
+    # the same request both times, so Home Assistant makes the audio only once.
+    second = [asked for asked in chat_audio.asked if ADA_LINE in asked]
+    assert len(second) == 2
+    assert len(set(second)) == 1
+
+
+async def test_a_device_that_is_not_cast_still_gets_the_usual_format(
+    hass, show, cast, chat_audio
+):
+    from .test_chat_show import add_speaker  # noqa: PLC0415
+
+    add_speaker(hass, "media_player.kitchen_speaker", "idle", 1 << 9)
+    await run_chat(hass, show, speaker="media_player.kitchen_speaker", limits=TWO_LINES)
+
+    assert all("preferred_format" not in asked for asked in chat_audio.asked)
