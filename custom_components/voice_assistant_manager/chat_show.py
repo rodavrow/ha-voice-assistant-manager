@@ -1005,7 +1005,7 @@ class ChatShowManager:
             _LOGGER.warning("%s answered a chat line with an error", writer)
             return "", emotion.NEUTRAL
         speech = str((result.response.speech.get("plain") or {}).get("speech") or "")
-        found, line = emotion.split_tag(clean_text(speech))
+        found, line = emotion.split_tag(clean_text(speech), emotion.accepted_emotions(entry))
         prefix = f"{own_name}:"
         if line.casefold().startswith(prefix.casefold()):
             line = line[len(prefix) :]

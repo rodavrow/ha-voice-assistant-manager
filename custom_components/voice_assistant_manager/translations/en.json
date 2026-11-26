@@ -196,6 +196,7 @@
               "no_helper_role": "A device without speaker recognition is",
               "avatar_connection": "Avatar connection",
               "agent_down_line": "When the main agent fails, say",
+              "emotion_tags": "Emotion tags",
               "match_within": "The voice match arrives within"
             },
             "data_description": {
@@ -203,6 +204,7 @@
               "no_helper_role": "Used for a request that neither a voice_speaker helper nor a Home Assistant user decides: a typed request when no user is chosen under Person 1 or Person 2, or a request from a device that has no helper and no user.",
               "avatar_connection": "For satellites in avatar mode. Connect when woken: the satellite connects to LiveTalking when it wakes, about a second before the avatar shows. Always connected: the avatar is there at once, and each satellite keeps a LiveTalking session open. Recommended for the Chat show.",
               "agent_down_line": "Spoken when the main agent cannot answer, for example because its AI provider is down, instead of ending the turn in silence. When empty: Sorry, I can't think right now. Please try again in a moment.",
+              "emotion_tags": "The tags this assistant's avatar is told about, separated by commas, such as happy, sad, excited. A reply that starts with one, such as [excited], tells LiveTalking that emotion. Any other tag of letters is still never spoken and counts as neutral. Each tag is one word of letters, at most 18. LiveTalking needs talking frames for a tag, or it shows neutral. When empty: neutral, happy, sad, angry, sarcastic.",
               "match_within": "Seconds after the satellite starts listening. Until then, a turn whose helper still says pending waits for the voice match; after a longer request it has already arrived. A turn without a match by then counts as an unknown voice, or as the same person in a follow-up. LANovo and EchoLocal displays match 4.6 to 5.5 seconds after the wake word."
             }
           }

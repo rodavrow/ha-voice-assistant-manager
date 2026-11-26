@@ -99,6 +99,11 @@ Each persona can start its replies with one emotion tag: `[neutral]`, `[happy]`,
 exactly one of [neutral], [happy], [sad], [angry] or [sarcastic]." The same holds for chat
 show lines and announcements.
 
+**Emotion tags** under Advanced sets the tags an assistant passes on, separated by commas,
+for example `neutral, happy, sad, excited`. Each is one word of letters, at most 18; any
+other entry is left out, with one warning in the log. When empty, the five above apply.
+LiveTalking needs talking frames for a tag, or it shows neutral, so add a tag there too.
+
 - **The tag is never spoken or shown.** It is taken off before text-to-speech, the
   satellite's display and the log, also while a reply streams in (only its first 20
   characters are held back to tell). Assistants without an avatar have it taken off too.
