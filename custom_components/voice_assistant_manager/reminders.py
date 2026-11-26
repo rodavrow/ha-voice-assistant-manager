@@ -165,6 +165,60 @@ def _status(result: Any) -> str | None:
     return None
 
 
+# A reply says something was done: "I've turned on the lights", "Done, it's locked".
+_ACTION_CLAIM = re.compile(
+    r"\bI(?:'ve| have)?(?: now| just| already)? (?:turned|switched|set|started|stopped|paused|"
+    r"resumed|added|removed|deleted|cancell?ed|created|scheduled|sent|played|opened|closed|"
+    r"locked|unlocked|dimmed|changed|adjusted|activated|enabled|disabled|booked|ordered|"
+    r"updated|triggered|muted|skipped|queued)\b"
+    r"|\b(?:is|are|it's|they're) now (?:on|off|open|closed|locked|unlocked|playing|paused|set)\b"
+    r"|^\s*(?:done|all done|consider it done)\b",
+    re.IGNORECASE,
+)
+# What the main agent is told when it is asked once more (see conversation.py).
+RETRY_NOTES: dict[str, str] = {
+    "reminder": (
+        f"Note from the system, not from the person: your last reply said a reminder was "
+        f"set, but you did not call the {REMINDER_TOOL} tool, so nothing was set. Call "
+        f"{REMINDER_TOOL} now with the details of the person's last request, then tell "
+        "them the result in your usual way. Do not mention this note."
+    ),
+    "cancel": (
+        f"Note from the system, not from the person: your last reply said a reminder was "
+        f"cancelled, but you did not call the {CANCEL_TOOL} tool, so nothing was cancelled. "
+        f"Call {CANCEL_TOOL} now for the person's last request, then tell them the result "
+        "in your usual way. Do not mention this note."
+    ),
+    "action": (
+        "Note from the system, not from the person: your last reply said something was "
+        "done, but you called no tool, so nothing happened. If the person's last request "
+        "needs an action, call the right tool now and then tell them the result in your "
+        "usual way. If it needs none, answer it again without saying anything was done. "
+        "Do not mention this note."
+    ),
+}
+
+
+def looks_like_action_claim(reply: str) -> bool:
+    """Whether a reply says something was done. Questions, failures and offers do not."""
+    reply = reply or ""
+    if not reply.strip() or "?" in reply or _NEGATIVE.search(reply):
+        return False
+    return any(
+        (claim := _ACTION_CLAIM.search(sentence)) is not None
+        and not _HYPOTHETICAL.search(sentence[: claim.start()])
+        for sentence in _SENTENCE_END.split(reply)
+    )
+
+
+def used_a_tool(entries: Iterable[Any]) -> bool:
+    """Whether any tool was called in these chat log entries of one turn."""
+    return any(
+        getattr(entry, "tool_calls", None) or getattr(entry, "tool_name", None)
+        for entry in entries
+    )
+
+
 def is_cancel_turn(text: str) -> bool:
     """Whether the person asked to cancel a reminder ("stop reminding me …")."""
     return bool(_CANCEL_REMINDER.search(text or ""))

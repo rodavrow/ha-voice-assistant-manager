@@ -83,17 +83,21 @@ from .memory import (
 from .panel import speaker_overrides
 from .reminders import (
     CANCEL_TOOL,
-    REMINDER_TOOL,
+    RETRY_NOTES,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     assistant_name,
     is_cancel_turn,
     is_reminder_exchange,
     is_reminder_turn,
+    looks_like_action_claim,
+    looks_like_cancellation,
+    looks_like_confirmation,
     needs_honest_cancel_failure,
     needs_honest_failure,
     reminder_guidance,
     reminder_tool_outcome,
+    used_a_tool,
 )
 from .avatar import esphome_entity
 from .speaker import (
@@ -108,6 +112,11 @@ _LOGGER = logging.getLogger(__name__)
 # The line the reminder check put in place of this turn's reply, if it did (_honest_reply):
 # a reply that streams in is then spoken as that line.
 _HONEST_LINE: ContextVar[str | None] = ContextVar(f"{__name__}.honest_line", default=None)
+# The stream of this turn's reply to the voice, if it has one, so a second answer can
+# replace the first in it (_async_retry).
+_STREAM: ContextVar["emotion.StreamedReply | None"] = ContextVar(
+    f"{__name__}.stream", default=None
+)
 SCRIPT_TIMEOUT = 8
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 # Spoken when the main agent fails (its provider is down, say), unless set under Advanced.
@@ -980,11 +989,13 @@ class PersonaRouter(conversation.ConversationEntity):
                 emotion.accepted_emotions(self._entry),
                 emotion.voice_tags_on(self._entry),
                 emotion.face_table(self._entry),
-                hold=self._may_be_corrected(user_input, log),
-                hold_tools=(REMINDER_TOOL, CANCEL_TOOL) if self._reminder_settings() else (),
+                # Every reply is checked before it is spoken (_unbacked_claim,
+                # _guard_reminder): a voice cannot take back "I've set a reminder".
+                hold=True,
             )
             log.delta_listener = stream
         corrected = _HONEST_LINE.set(None)
+        streaming = _STREAM.set(stream)
         # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
         turn = avatar_stream.turn_started(
             self.hass, self._entry.entry_id, user_input.satellite_id
@@ -995,6 +1006,7 @@ class PersonaRouter(conversation.ConversationEntity):
             avatar_stream.turn_ended(turn)
             honest = _HONEST_LINE.get()
             _HONEST_LINE.reset(corrected)
+            _STREAM.reset(streaming)
             if stream is not None:
                 # A reply the reminder check replaced is spoken as replaced.
                 stream.finish(honest)
@@ -1002,22 +1014,72 @@ class PersonaRouter(conversation.ConversationEntity):
                     log.delta_listener = stream.listener
         return self._without_tag(result, stream)
 
-    def _may_be_corrected(self, user_input, log) -> bool:
-        """Whether the reminder check may replace this turn's reply (see _guard_reminder).
+    def _unbacked_claim(self, user_input, result, log, log_start, reminders) -> str | None:
+        """What the reply says was done although no tool was called this turn, or None.
 
-        Such a reply is not passed to the voice while it streams in, only once the check
-        has seen it: a voice that already said "I've set a reminder" cannot take it back.
+        "reminder" or "cancel" when reminders are on and the conversation is about one;
+        "action" for anything else a reply says it did. Only where the turn's tool calls
+        can be seen. A message to remember is the memory's business, which has no tool.
         """
         try:
-            if not self._reminder_settings():
-                return False
-            earlier = _earlier_user_texts(log, len(log.content), EARLIER_TURNS)
-            return is_cancel_turn(user_input.text) or is_reminder_exchange(
-                [user_input.text, *earlier]
-            )
+            if log is None or log_start is None or len(log.content) <= log_start:
+                return None
+            if used_a_tool(log.content[log_start:]) or has_memory_keyword(user_input.text):
+                return None
+            reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
+            if reminders:
+                if is_cancel_turn(user_input.text) and looks_like_cancellation(reply):
+                    return "cancel"
+                recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
+                if is_reminder_exchange(recent) and looks_like_confirmation(reply):
+                    return "reminder"
+            return "action" if looks_like_action_claim(reply) else None
         except Exception:  # noqa: BLE001 - the reply always goes ahead
-            _LOGGER.exception("Could not tell whether the reply is about a reminder")
-            return False
+            _LOGGER.exception("Could not check the reply for a claim without a tool call")
+            return None
+
+    async def _async_retry(self, kind, result, log, log_start, ask):
+        """Ask the main agent once more after a reply that claimed what no tool did.
+
+        Returns its second answer, with the first reply and the note taken out of the
+        history and out of what the voice is given. When the second try fails, the first
+        result stands (and the reminder check still corrects it).
+        """
+        note = RETRY_NOTES[kind]
+        _LOGGER.warning(
+            "The main agent said something was done (%s) without calling a tool; asking "
+            "it once more",
+            kind,
+        )
+        stream = _STREAM.get()
+        mark = stream.checkpoint() if stream is not None else 0
+        false_at = next(
+            (
+                index
+                for index in range(len(log.content) - 1, log_start - 1, -1)
+                if log.content[index].role == "assistant" and log.content[index].content
+            ),
+            None,
+        )
+        note_at = len(log.content)
+        try:
+            again = await ask(note)
+        except Exception:  # noqa: BLE001 - the first reply stands, see above
+            _LOGGER.exception("The main agent failed when asked once more")
+            again = None
+        if again is None or again.response.response_type is intent.IntentResponseType.ERROR:
+            if stream is not None:
+                stream.keep_until(mark)
+            del log.content[note_at:]
+            return result
+        if stream is not None:
+            stream.keep_from(mark)
+        # The history reads as if the second answer had been the first.
+        if len(log.content) > note_at and log.content[note_at].role == "user":
+            del log.content[note_at]
+        if false_at is not None:
+            del log.content[false_at]
+        return dataclasses.replace(again, conversation_id=result.conversation_id)
 
     def _tell_emotion(self, found: emotion.Emotion, why: str = "") -> None:
         emotion.send_emotion(self.hass, self._entry, found, why)
@@ -1129,27 +1191,38 @@ class PersonaRouter(conversation.ConversationEntity):
         if context_id and who in ("owner", "wife"):
             # The favorites tools read who is asking from the request's context.
             remembered = context_id
-            remember(
-                self.hass, context_id, Asker(self._entry.entry_id, who, user_input.device_id)
-            )
+
+        async def ask(words: str, in_conversation: str | None):
+            """Put `words` to the main agent, as this person on this satellite."""
+            if remembered:
+                remember(
+                    self.hass,
+                    remembered,
+                    Asker(self._entry.entry_id, who, user_input.device_id),
+                )
+            try:
+                return await conversation.async_converse(
+                    self.hass,
+                    text=words,
+                    conversation_id=in_conversation,
+                    context=user_input.context,
+                    language=user_input.language,
+                    agent_id=main_agent,
+                    device_id=user_input.device_id,
+                    satellite_id=user_input.satellite_id,
+                    extra_system_prompt=self._main_prompt(
+                        resp, user_input.extra_system_prompt
+                    ),
+                )
+            finally:
+                if remembered:
+                    forget(self.hass, remembered)
+
         try:
-            result = await conversation.async_converse(
-                self.hass,
-                text=text,
-                conversation_id=conversation_id,
-                context=user_input.context,
-                language=user_input.language,
-                agent_id=main_agent,
-                device_id=user_input.device_id,
-                satellite_id=user_input.satellite_id,
-                extra_system_prompt=self._main_prompt(resp, user_input.extra_system_prompt),
-            )
+            result = await ask(text, conversation_id)
         except Exception:  # noqa: BLE001 - the person hears a line, not a failed turn
             _LOGGER.exception("The main agent %s failed, answering with a short line", main_agent)
             return self._speak(user_input, self._agent_down_line())
-        finally:
-            if remembered:
-                forget(self.hass, remembered)
         if _silent_error(result):
             _LOGGER.error(
                 "The main agent %s answered with an error and no words, answering with a "
@@ -1157,9 +1230,17 @@ class PersonaRouter(conversation.ConversationEntity):
                 main_agent,
             )
             return self._speak(user_input, self._agent_down_line())
+        asked_in = conversation_id
         if conversation_id != user_input.conversation_id:
+            asked_in = result.conversation_id
             result, log, log_start = self._after_clean_conversation(user_input, result)
         reminders = bool(resp.get("reminders"))
+        kind = self._unbacked_claim(user_input, result, log, log_start, reminders)
+        if kind is not None:
+            # It said it did something and called no tool: one more try, with a note.
+            result = await self._async_retry(
+                kind, result, log, log_start, lambda note: ask(note, asked_in)
+            )
         if reminders:
             result, about_reminder = self._guard_reminder(user_input, result, log, log_start)
             if about_reminder:

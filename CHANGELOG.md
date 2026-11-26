@@ -92,6 +92,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 - **The main agent can cancel reminders**, under Settings > Reminders, on by default. Off,
   the main agent is told it cannot, and to point to the reminder calendar.
 
+- **One more try when the main agent says it did something it did not.** When a reply says
+  something was done ("I've set a reminder", "I've turned on the lights") and no tool was
+  called in that turn, the main agent is asked once more, with a note that it called no
+  tool. Its second answer is the one spoken and kept in the history. For a reminder or a
+  cancellation that is still not made, the honest line follows as before ("I could not set
+  that reminder"); for anything else the second answer is spoken as it is.
+
 ### Changed
 
 - **A clip is copied to at most 4 LiveTalking viewers**, down from 8, to match the
@@ -129,9 +136,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 - **A reminder that was not set is no longer spoken as set.** When the main agent said "I've
   set a reminder" without setting one, the text was corrected, but a reply long enough to be
   streamed had already been spoken: the voice said the reminder was set while the screen
-  said it was not. A reply in a conversation about a reminder now reaches the voice only
-  once it has been checked, so the voice says the corrected line. The same goes for a
-  cancellation that was not made. Other replies still stream as they come.
+  said it was not. Every reply now reaches the voice only once it is complete and has been
+  checked, so the voice says what the text says. A long reply starts a little later for it.
 - **Chat lines on a cast device no longer lose their last syllables.** A voice whose engine
   makes WAV reached LiveTalking as an MP3 that Home Assistant converted on the fly. Such
   a file has no length in it, and LiveTalking's decoder guessed it short and dropped the
