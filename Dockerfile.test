@@ -5,6 +5,10 @@
 #   docker run --rm -v "$PWD:/src" voice-assistant-manager-test
 FROM python:3.14.10-slim
 
+# ffmpeg: the avatar stream's decoding is tested against the real program.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /src
 COPY requirements-test.txt /tmp/requirements-test.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-test.txt
