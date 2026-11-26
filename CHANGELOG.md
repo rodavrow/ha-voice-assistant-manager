@@ -126,6 +126,12 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A reminder that was not set is no longer spoken as set.** When the main agent said "I've
+  set a reminder" without setting one, the text was corrected, but a reply long enough to be
+  streamed had already been spoken: the voice said the reminder was set while the screen
+  said it was not. A reply in a conversation about a reminder now reaches the voice only
+  once it has been checked, so the voice says the corrected line. The same goes for a
+  cancellation that was not made. Other replies still stream as they come.
 - **Chat lines on a cast device no longer lose their last syllables.** A voice whose engine
   makes WAV reached LiveTalking as an MP3 that Home Assistant converted on the fly. Such
   a file has no length in it, and LiveTalking's decoder guessed it short and dropped the

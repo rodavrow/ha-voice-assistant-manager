@@ -397,8 +397,16 @@ class StreamedReply:
         accepted: frozenset[str] = DEFAULT_EMOTIONS,
         voice_tags: bool = False,
         table: Mapping[str, str] | None = None,
+        hold: bool = False,
+        hold_tools: tuple[str, ...] = (),
     ) -> None:
         self.listener = listener
+        # While holding, the reply's text is kept back until finish(), which may replace
+        # it: a reply that may yet be corrected must not reach the voice as it streams.
+        # A call to one of `hold_tools` starts the holding.
+        self._hold = hold
+        self._hold_tools = hold_tools
+        self._kept = ""
         self._accepted = accepted
         self._table = table
         # How the face was chosen, for the log (split_face).
@@ -421,19 +429,42 @@ class StreamedReply:
                 TagFilter(self._accepted, self._voice_tags, self._table) if speaks else None
             )
             self._audio = AudioTagFilter() if speaks and not self._voice_tags else None
+        if self._hold_tools and any(
+            str(getattr(call, "tool_name", "")).endswith(self._hold_tools)
+            for call in delta.get("tool_calls") or []
+        ):
+            self._hold = True
         content = delta.get("content")
         if self._filter is not None and isinstance(content, str) and content:
             passed = self._filter.feed(content)
             if self._audio is not None:
                 passed = self._audio.feed(passed)
             self._note(self._filter.emotion, self._filter.why)
+            if self._hold:
+                self._keep(passed)
+                passed = ""
             if not passed and delta.keys() == {"content"}:
                 return
             delta = {**delta, "content": passed}
+            if self._hold:
+                del delta["content"]
         self.listener(chat_log, delta)
 
-    def finish(self) -> None:
+    def finish(self, replacement: str | None = None) -> None:
+        """The reply has ended: pass on what is still held back.
+
+        With a `replacement`, text that was held is dropped and the replacement is passed
+        on in its place. Text that already went out cannot be taken back.
+        """
         self._flush()
+        kept, self._kept = self._kept, ""
+        if self._hold and (text := kept.rstrip() if replacement is None else replacement):
+            self.listener(self._chat_log, {"content": text})
+
+    def _keep(self, text: str) -> None:
+        if not text:
+            return
+        self._kept += text
 
     def _flush(self) -> None:
         if self._filter is None:
@@ -442,7 +473,12 @@ class StreamedReply:
         if self._audio is not None:
             passed = self._audio.feed(passed) + self._audio.flush()
         self._note(self._filter.emotion, self._filter.why)
-        if passed:
+        if self._hold:
+            self._keep(passed)
+            # The next message of the reply must not run into this one.
+            if self._kept and not self._kept[-1].isspace():
+                self._kept += " "
+        elif passed:
             self.listener(self._chat_log, {"content": passed})
 
     def _note(self, emotion: Emotion | None, why: str) -> None:
