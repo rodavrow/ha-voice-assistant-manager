@@ -113,6 +113,112 @@ def voice_tags_on(entry: Any) -> bool:  # Any: a ConfigEntry, or a stand-in
     return isinstance(advanced, Mapping) and advanced.get(CONF_VOICE_TAGS) is True
 
 
+# The setting under Advanced: which face an opening audio tag gives, one "face: tag, tag"
+# per line. Used when a reply does not start with a face tag.
+CONF_FACE_FOR_TAGS: Final = "face_for_tags"
+DEFAULT_FACE_FOR_TAGS: Final = """\
+sarcastic: mischievous, playful, smug, snappy, drawn out, disbelief
+happy: excited, amazed, proud, triumphant, hopeful, content, intrigued, curious
+laughing: laughs
+sad: sighs, let down, tired, sad, softly
+angry: shouts, bitter, groans, angry
+flirty: whispers, hushed
+"""
+# How much of a reply's start is looked at for its opening tags.
+MAX_OPENING_CHARS: Final = 200
+
+
+def _tag_words(tag: str) -> str:
+    return " ".join(tag.lower().split())
+
+
+def _face_lines(raw: str) -> list[tuple[str, list[str]]]:
+    """(face, its tags) of each "face: tag, tag" line, in order."""
+    lines: list[tuple[str, list[str]]] = []
+    for line in raw.splitlines():
+        face, colon, tags = line.partition(":")
+        face = face.strip().lower()
+        if colon and face:
+            lines.append((face, [w for tag in tags.split(",") if (w := _tag_words(tag))]))
+    return lines
+
+
+def _face_setting(entry: Any) -> str:
+    advanced = (getattr(entry, "options", None) or {}).get("advanced")
+    raw = (advanced if isinstance(advanced, Mapping) else {}).get(CONF_FACE_FOR_TAGS)
+    return str(raw or "").strip()
+
+
+def face_table(entry: Any) -> dict[str, str]:  # Any: a ConfigEntry, or a stand-in
+    """audio tag (lower case) -> the face it gives, from the assistant's setting.
+
+    A line whose face is not one of the assistant's emotions is left out; the first line
+    that names a tag wins. An empty setting uses DEFAULT_FACE_FOR_TAGS.
+    """
+    accepted = accepted_emotions(entry)
+    table: dict[str, str] = {}
+    for face, tags in _face_lines(_face_setting(entry) or DEFAULT_FACE_FOR_TAGS):
+        if face in accepted:
+            for tag in tags:
+                table.setdefault(tag, face)
+    return table
+
+
+def unknown_faces(entry: Any) -> list[str]:
+    """The faces in the assistant's own table that are not on its Emotion tags list."""
+    accepted = accepted_emotions(entry)
+    faces = [face for face, _tags in _face_lines(_face_setting(entry))]
+    return sorted({face for face in faces if face not in accepted})
+
+
+def _opening_tag(text: str) -> tuple[bool, str | None]:
+    """(whether the opening is complete, its first audio tag or None).
+
+    The opening is the run of bracketed groups a reply starts with. It is complete once an
+    audio tag is found, once other text starts, or once a group can no longer be a tag.
+    """
+    at = 0
+    while True:
+        while at < len(text) and text[at].isspace():
+            at += 1
+        if at >= len(text):
+            return False, None
+        if text[at] != "[":
+            return True, None
+        end = text.find("]", at)
+        if end == -1:
+            return len(text) - at >= MAX_AUDIO_TAG_CHARS, None
+        group = text[at : end + 1]
+        if _AUDIO_TAG.fullmatch(group):
+            return True, group[1:-1]
+        at = end + 1
+
+
+def split_face(
+    text: str,
+    accepted: frozenset[str] = DEFAULT_EMOTIONS,
+    table: Mapping[str, str] | None = None,
+    keep_unknown: bool = False,
+) -> tuple[Emotion, str, str]:
+    """(face, the reply as split_tag leaves it, how the face was chosen).
+
+    A face tag at the very start sets the face and is taken off. Without one, the first
+    audio tag of the opening is looked up in `table`; the text is not changed for it.
+    """
+    found, rest = split_tag(text, accepted, keep_unknown)
+    match = _TAG.match(text)
+    if match is not None and match.end(1) < MAX_TAG_CHARS and found == match.group(1).lower():
+        return found, rest, "face tag"
+    _complete, tag = _opening_tag(text[:MAX_OPENING_CHARS])
+    if tag is None:
+        return NEUTRAL, rest, "no tag"
+    words = _tag_words(tag)
+    face = (table or {}).get(words) or (words if words in accepted else None)
+    if face is None or face not in accepted:
+        return NEUTRAL, rest, f"no match for [{tag}]"
+    return face, rest, f"from audio tag [{tag}]"
+
+
 def strip_audio_tags(text: str) -> str:
     """The text without its audio tags, as it is shown: no gap is left where one was."""
     if "[" not in text:
@@ -220,30 +326,35 @@ def take_spoken(hass: HomeAssistant, entry_id: str, shown: str) -> str:
 
 
 class TagFilter:
-    """Takes the tag off one streamed message: feed it each piece, then flush it.
+    """Reads the face off one streamed message: feed it each piece, then flush it.
 
-    Text is held back only while it may still be a tag: until the closing bracket or
-    MAX_TAG_CHARS characters, and not at all once the first character that is not a
-    space is not "[". From then on every piece passes through unchanged, apart from the
-    spaces right after a tag. The pieces passed on add up to split_tag of the whole.
+    Text is held back only while the opening of the message may still hold a tag: not at
+    all once it starts with other text, and at most until the first audio tag closes or
+    MAX_OPENING_CHARS characters. From then on every piece passes through unchanged, apart
+    from the spaces right after a face tag. The pieces passed on add up to split_tag of
+    the whole; `emotion` and `why` are split_face's.
     """
 
     def __init__(
-        self, accepted: frozenset[str] = DEFAULT_EMOTIONS, keep_unknown: bool = False
+        self,
+        accepted: frozenset[str] = DEFAULT_EMOTIONS,
+        keep_unknown: bool = False,
+        table: Mapping[str, str] | None = None,
     ) -> None:
         self._accepted = accepted
         self._keep_unknown = keep_unknown
+        self._table = table
         self._held = ""
         self._after_tag = False
         self.emotion: Emotion | None = None
+        self.why = ""
 
     def feed(self, piece: str) -> str:
         if self.emotion is not None:
             return self._passed(piece)
         self._held += piece
-        start = self._held.lstrip()
-        undecided = (not start or start.startswith("[")) and "]" not in self._held
-        if undecided and len(self._held) < MAX_TAG_CHARS:
+        complete, _tag = _opening_tag(self._held)
+        if not complete and len(self._held) < MAX_OPENING_CHARS:
             return ""
         return self._decide()
 
@@ -252,7 +363,9 @@ class TagFilter:
         return self._decide() if self.emotion is None and self._held else ""
 
     def _decide(self) -> str:
-        self.emotion, rest = split_tag(self._held, self._accepted, self._keep_unknown)
+        self.emotion, rest, self.why = split_face(
+            self._held, self._accepted, self._table, self._keep_unknown
+        )
         self._after_tag = rest != self._held
         self._held = ""
         return self._passed(rest)
@@ -283,9 +396,13 @@ class StreamedReply:
         on_emotion: Callable[[Emotion], None],
         accepted: frozenset[str] = DEFAULT_EMOTIONS,
         voice_tags: bool = False,
+        table: Mapping[str, str] | None = None,
     ) -> None:
         self.listener = listener
         self._accepted = accepted
+        self._table = table
+        # How the face was chosen, for the log (split_face).
+        self.why = ""
         # With voice tags the deltas keep their audio tags: they are what the voice is
         # given. Without, every audio tag is taken out, so no voice reads one aloud.
         self._voice_tags = voice_tags
@@ -300,14 +417,16 @@ class StreamedReply:
         if (role := delta.get("role")) is not None:
             self._flush()
             speaks = role == "assistant"
-            self._filter = TagFilter(self._accepted, self._voice_tags) if speaks else None
+            self._filter = (
+                TagFilter(self._accepted, self._voice_tags, self._table) if speaks else None
+            )
             self._audio = AudioTagFilter() if speaks and not self._voice_tags else None
         content = delta.get("content")
         if self._filter is not None and isinstance(content, str) and content:
             passed = self._filter.feed(content)
             if self._audio is not None:
                 passed = self._audio.feed(passed)
-            self._note(self._filter.emotion)
+            self._note(self._filter.emotion, self._filter.why)
             if not passed and delta.keys() == {"content"}:
                 return
             delta = {**delta, "content": passed}
@@ -322,14 +441,14 @@ class StreamedReply:
         passed = self._filter.flush()
         if self._audio is not None:
             passed = self._audio.feed(passed) + self._audio.flush()
-        self._note(self._filter.emotion)
+        self._note(self._filter.emotion, self._filter.why)
         if passed:
             self.listener(self._chat_log, {"content": passed})
 
-    def _note(self, emotion: Emotion | None) -> None:
+    def _note(self, emotion: Emotion | None, why: str) -> None:
         if emotion is None or self.emotion is not None:
             return
-        self.emotion = emotion
+        self.emotion, self.why = emotion, why
         self._on_emotion(emotion)
 
 
@@ -360,7 +479,9 @@ class EmotionSender:
         self._hass = hass
         self._failing: set[str] = set()
 
-    async def async_send(self, base_url: str, avatar_id: str, emotion: Emotion) -> None:
+    async def async_send(
+        self, base_url: str, avatar_id: str, emotion: Emotion, why: str = ""
+    ) -> None:
         try:
             async with async_get_clientsession(self._hass).post(
                 f"{base_url}/set_emotion",
@@ -379,7 +500,9 @@ class EmotionSender:
             self._log_failure(base_url, err, unexpected=True)
             return
         self._failing.discard(base_url)
-        _LOGGER.debug("Emotion: %s told to look %s", avatar_id, emotion)
+        _LOGGER.debug(
+            "Emotion: %s told to look %s%s", avatar_id, emotion, f" ({why})" if why else ""
+        )
 
     def _log_failure(self, base_url: str, err: Exception, *, unexpected: bool = False) -> None:
         first = base_url not in self._failing
@@ -401,15 +524,20 @@ def _sender(hass: HomeAssistant) -> EmotionSender:
     return cast(EmotionSender, sender)
 
 
-def send_emotion(hass: HomeAssistant, entry: ConfigEntry, emotion: Emotion) -> None:
-    """Tell each avatar of the assistant the emotion, in the background. Never raises."""
+def send_emotion(
+    hass: HomeAssistant, entry: ConfigEntry, emotion: Emotion, why: str = ""
+) -> None:
+    """Tell each avatar of the assistant the emotion, in the background. Never raises.
+
+    `why` says how the face was chosen (split_face), for the log.
+    """
     try:
         targets = avatar_targets(entry)
         if not targets:
             return
         sender = _sender(hass)
         for base_url, avatar_id in targets:
-            send = sender.async_send(base_url, avatar_id, emotion)
+            send = sender.async_send(base_url, avatar_id, emotion, why)
             try:
                 # Started at once, so the call is on its way before the reply's audio is made.
                 entry.async_create_background_task(

@@ -550,6 +550,8 @@ class _Chat:
     line_emotion: emotion.Emotion = emotion.NEUTRAL
     # That line as its chat voice is given it: with audio tags, for a voice that takes them.
     line_voiced: str = ""
+    # How that line's emotion was chosen, for the log (emotion.split_face).
+    line_why: str = ""
 
     def add(self, who: str, text: str) -> None:
         self.lines.append(ChatLine(who, text, dt_util.utcnow().isoformat()))
@@ -563,6 +565,7 @@ class _Prepared:
     line: str = ""
     emotion: emotion.Emotion = emotion.NEUTRAL
     voiced: str = ""
+    why: str = ""
 
 
 class ChatShowManager:
@@ -935,14 +938,14 @@ class ChatShowManager:
             ready = await prepared.pop() if prepared else None
             use_prepared = ready is not None and bool(ready.line) and ready.heard == heard
             if ready is not None and use_prepared:
-                line, chat.line_emotion, chat.line_voiced = (
-                    ready.line, ready.emotion, ready.voiced,
+                line, chat.line_emotion, chat.line_voiced, chat.line_why = (
+                    ready.line, ready.emotion, ready.voiced, ready.why,
                 )
             else:
                 # Nothing prepared, or someone joined in since: it must answer them.
-                line, chat.line_emotion, chat.line_voiced = await self._async_write(
-                    chat, entry, own, other, writer
-                )
+                (
+                    line, chat.line_emotion, chat.line_voiced, chat.line_why,
+                ) = await self._async_write(chat, entry, own, other, writer)
             _LOGGER.debug(
                 "Chat line %d (%s): %s, waited %.1f s for it",
                 spoken + 1, own, "prepared" if use_prepared else "written now",
@@ -1000,12 +1003,12 @@ class ChatShowManager:
             writer = writer_agent(self.hass, entry, quiet=True) if entry is not None else None
             if entry is None or writer is None:
                 return _Prepared(heard)
-            line, found, voiced = await self._async_write(
+            line, found, voiced, why = await self._async_write(
                 chat, entry, chat.names[turn], chat.names[1 - turn], writer
             )
             if line:
                 await self._async_warm_voice(chat, entry, voiced)
-            return _Prepared(heard, line, found, voiced)
+            return _Prepared(heard, line, found, voiced, why)
         except Exception:  # noqa: BLE001 - the line is then written when its turn comes
             _LOGGER.debug("The next chat line could not be prepared", exc_info=True)
             return _Prepared(heard)
@@ -1086,9 +1089,10 @@ class ChatShowManager:
 
     async def _async_write(
         self, chat: _Chat, entry: ConfigEntry, own_name: str, other_name: str, writer: str
-    ) -> tuple[str, emotion.Emotion, str]:
+    ) -> tuple[str, emotion.Emotion, str, str]:
         """The assistant's next line, capped at the word limit, or "" when it failed; the
-        emotion its tag gave it; and the line as its chat voice is given it.
+        emotion its tag gave it; the line as its chat voice is given it; and how the
+        emotion was chosen.
 
         Neither tag is ever part of the line. The voiced line keeps its audio tags when
         the assistant's voice takes them and the line was not cut to the word limit.
@@ -1109,17 +1113,20 @@ class ChatShowManager:
                 )
         except TimeoutError:
             _LOGGER.warning("%s took longer than %s s to write a chat line", writer, LINE_TIMEOUT)
-            return "", emotion.NEUTRAL, ""
+            return "", emotion.NEUTRAL, "", ""
         except Exception:  # noqa: BLE001 - any agent failure ends the chat with a reason
             _LOGGER.warning("%s could not write a chat line", writer, exc_info=True)
-            return "", emotion.NEUTRAL, ""
+            return "", emotion.NEUTRAL, "", ""
         if result.response.response_type == intent.IntentResponseType.ERROR:
             _LOGGER.warning("%s answered a chat line with an error", writer)
-            return "", emotion.NEUTRAL, ""
+            return "", emotion.NEUTRAL, "", ""
         speech = str((result.response.speech.get("plain") or {}).get("speech") or "")
         voice_tags = emotion.voice_tags_on(entry)
-        found, voiced = emotion.split_tag(
-            clean_text(speech), emotion.accepted_emotions(entry), keep_unknown=voice_tags
+        found, voiced, why = emotion.split_face(
+            clean_text(speech),
+            emotion.accepted_emotions(entry),
+            emotion.face_table(entry),
+            keep_unknown=voice_tags,
         )
         prefix = f"{own_name}:"
         if voiced.casefold().startswith(prefix.casefold()):
@@ -1127,7 +1134,7 @@ class ChatShowManager:
         shown = clean_text(emotion.strip_audio_tags(voiced))
         line = fit_line(shown, words)
         # A line cut to the word limit is spoken as it is shown, without its tags.
-        return line, found, voiced if voice_tags and line == shown else line
+        return line, found, voiced if voice_tags and line == shown else line, why
 
     async def _async_speak(
         self, chat: _Chat, entry: ConfigEntry, line: str, listen: bool = False
@@ -1266,7 +1273,7 @@ class ChatShowManager:
             returned = False
             try:
                 chat.speaking = True
-                emotion.send_emotion(self.hass, entry, chat.line_emotion)
+                emotion.send_emotion(self.hass, entry, chat.line_emotion, chat.line_why)
                 async with asyncio.timeout(timeout):
                     await self.hass.services.async_call(
                         "assist_satellite", service, data, blocking=True
@@ -1381,7 +1388,7 @@ class ChatShowManager:
 
         unsubscribe = async_track_state_change_event(self.hass, [chat.speaker], changed)
         chat.speaking = True
-        emotion.send_emotion(self.hass, entry, chat.line_emotion)
+        emotion.send_emotion(self.hass, entry, chat.line_emotion, chat.line_why)
         try:
             async with asyncio.timeout(timeout):
                 await self.hass.services.async_call(

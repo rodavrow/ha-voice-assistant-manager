@@ -66,7 +66,7 @@ def test_streaming_one_character_at_a_time_gives_the_same_as_the_whole_reply(
     found, passed = _streamed(list(reply))
 
     assert passed == spoken
-    assert found == (expected_emotion if reply else None)
+    assert found == (emotion.split_face(reply)[0] if reply else None)
 
 
 @pytest.mark.parametrize(("reply", "expected_emotion", "spoken"), SAMPLES)
@@ -76,7 +76,7 @@ def test_streaming_in_two_chunks_at_every_split_gives_the_same_as_the_whole_repl
     for cut in range(len(reply) + 1):
         found, passed = _streamed([reply[:cut], reply[cut:]])
 
-        assert (passed, found) == (spoken, expected_emotion if reply else None), cut
+        assert (passed, found) == (spoken, emotion.split_face(reply)[0] if reply else None), cut
 
 
 def test_streaming_decides_at_once_when_the_reply_does_not_start_with_a_bracket():
@@ -95,11 +95,11 @@ def test_streaming_holds_text_back_until_the_closing_bracket():
     assert tag_filter.emotion == "happy"
 
 
-def test_streaming_gives_up_on_a_tag_after_20_characters():
+def test_streaming_gives_up_on_a_tag_that_is_too_long_to_be_one():
     tag_filter = emotion.TagFilter()
 
-    assert tag_filter.feed("[" + "a" * 18) == ""
-    assert tag_filter.feed("a") == "[" + "a" * 19
+    assert tag_filter.feed("[" + "a" * 78) == ""
+    assert tag_filter.feed("a") == "[" + "a" * 79
     assert tag_filter.emotion == "neutral"
 
 

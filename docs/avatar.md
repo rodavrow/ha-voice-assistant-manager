@@ -151,6 +151,37 @@ unless you turn it on.
   reply that starts with a tag that is not on that list, such as `[whispers]`, gives it to
   the voice, and the face is neutral.
 
+### The face when a reply has no emotion tag
+
+A model sometimes skips the emotion tag and opens with an audio tag, as in `[mischievous]
+Well, my dear friend…`. The avatar's face then comes from that opening audio tag, through
+**Face for audio tags** under Advanced. The reply itself is not changed: the audio tag still
+goes to the voice (or is taken out, when the voice takes no tags).
+
+- **One line per face:** the face, a colon, then the audio tags that give it, separated by
+  commas, for example `sarcastic: mischievous, smug, drawn out`.
+- **The whole tag is compared,** in any case. `[smug, tired]` is not `smug`. The first line
+  that has the tag wins.
+- **Only the opening counts:** the tags a reply starts with, before its first words. A tag
+  with a digit, such as `[pause 2]`, is skipped and the next one is used. A tag later in the
+  reply never changes the face.
+- **A face must be on the Emotion tags list,** or its line is ignored, with a warning on the
+  page for a table of your own. A tag found in no line gives neutral.
+- **When the field is empty** this table is used:
+
+```
+sarcastic: mischievous, playful, smug, snappy, drawn out, disbelief
+happy: excited, amazed, proud, triumphant, hopeful, content, intrigued, curious
+laughing: laughs
+sad: sighs, let down, tired, sad, softly
+angry: shouts, bitter, groans, angry
+flirty: whispers, hushed
+```
+
+With debug logging for `custom_components.voice_assistant_manager.emotion`, each face told to
+LiveTalking says how it was chosen: `(face tag)`, `(from audio tag [mischievous])` or
+`(no match for [thoughtful])`.
+
 Where the voice gets its tags:
 
 | What is spoken | Tags reach the voice |

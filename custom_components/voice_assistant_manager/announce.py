@@ -331,9 +331,10 @@ async def _write_line(
     )
     if result.response.response_type == intent.IntentResponseType.ERROR:
         return "", emotion.NEUTRAL
-    found, line = emotion.split_tag(
+    found, line, _why = emotion.split_face(
         clean_text(str((result.response.speech.get("plain") or {}).get("speech") or "")),
         emotion.accepted_emotions(entry),
+        emotion.face_table(entry),
     )
     # The caller speaks the line through a voice of its own choosing: no audio tags.
     line = clean_text(emotion.strip_audio_tags(line))

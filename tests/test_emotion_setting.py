@@ -86,7 +86,7 @@ def test_the_stream_filter_passes_on_only_an_accepted_emotion():
 def told():
     calls: list[tuple[str, str]] = []
     with patch.object(
-        emotion, "send_emotion", lambda _hass, entry, found: calls.append((entry.title, found))
+        emotion, "send_emotion", lambda _hass, entry, found, *_why: calls.append((entry.title, found))
     ):
         yield calls
 
@@ -103,7 +103,8 @@ async def test_a_reply_passes_on_a_tag_from_the_assistants_list(hass, told):
 
 async def test_a_reply_with_a_tag_not_on_the_list_is_neutral(hass, told):
     entry = await add_router(hass)
-    agents = FakeAgents(main_reply="[excited] We won!")
+    # Not on the Emotion tags list, and not in the Face for audio tags table either.
+    agents = FakeAgents(main_reply="[thrilled] We won!")
 
     with agents.patched():
         await ask(hass, entry, "Score?")
@@ -113,14 +114,14 @@ async def test_a_reply_with_a_tag_not_on_the_list_is_neutral(hass, told):
 
 async def test_a_chat_line_passes_on_a_tag_from_its_assistants_list(hass, show, told):
     options = dict(show.jeeves.options)
-    options["advanced"] = {**options.get("advanced", {}), "emotion_tags": "smug"}
+    options["advanced"] = {**options.get("advanced", {}), "emotion_tags": "dour"}
     hass.config_entries.async_update_entry(show.jeeves, options=options)
-    show.agents.writer_reply = "[smug] Quite so."
-    show.agents.replies[ADA_WRITER] = "[smug] Hardly."
+    show.agents.writer_reply = "[dour] Quite so."
+    show.agents.replies[ADA_WRITER] = "[dour] Hardly."
 
     await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
 
-    assert told == [("Jeeves", "smug"), ("Ada", "neutral")]
+    assert told == [("Jeeves", "dour"), ("Ada", "neutral")]
     assert show.speakers.messages == ["Quite so.", "Hardly."]
 
 
