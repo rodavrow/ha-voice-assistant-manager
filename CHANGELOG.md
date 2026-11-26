@@ -44,6 +44,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   The new `prepare_announcement` action does the same for any other announcement, such as
   calendar events. Other speakers are never touched. Switch it off with **Show which
   assistant is speaking** on the Voice Manager page.
+- **Replies streamed to the avatar.** For a satellite in avatar mode whose firmware has the
+  switch **Avatar fed by Home Assistant**, a reply goes to its LiveTalking session
+  (`/stream_audio`) while the engine is still making it, so the avatar starts speaking
+  sooner instead of after the whole clip was downloaded and uploaded. The satellite keeps
+  the normal audio as its backup. **Stream replies to the avatar** under Advanced turns it
+  off; Voice Assistant Manager sets the satellite's switch to match. Other satellites are
+  not affected. See [Avatar](docs/avatar.md#replies-streamed-to-the-avatar).
 - **Emotion tags.** A reply, chat line or announcement may start with one tag: `[neutral]`,
   `[happy]`, `[sad]`, `[angry]` or `[sarcastic]`. The tag is never spoken or shown, also
   while a reply streams in, and on assistants without an avatar too. A missing or unknown

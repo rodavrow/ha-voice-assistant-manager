@@ -13,6 +13,8 @@ word), and they are found by the ESPHome type and name in their unique_id:
     select       "Avatar connection"  "Always connected" or "Connect when woken"
     text_sensor  "Avatar session"     the device's LiveTalking session, while it has one
     text_sensor  "Avatar state"       off, connecting, connected or failed
+    switch       "Avatar fed by Home Assistant"  the device follows its session by itself
+                                      and lets Home Assistant feed it (avatar_stream.py)
 
 A chat show may hold a slot's connection at "Always connected" for the length of the chat
 (avatar_chat.py). That hold lives in memory only and never changes the assistant's own
@@ -54,6 +56,9 @@ from .setup_guide import find_satellites
 
 _LOGGER = logging.getLogger(__name__)
 
+# The setting under Advanced: whether replies are streamed to the avatar (avatar_stream.py,
+# which imports this module, so the name is repeated here).
+CONF_STREAM = "avatar_stream"
 # The connection setting under Advanced, and the option the device's select offers for it.
 CONNECTION_OPTIONS = {"always": "Always connected", "on_wake": "Connect when woken"}
 DEFAULT_CONNECTION = "on_wake"
@@ -79,6 +84,8 @@ ENTITY_NAMES = {
     "id": ("text", "Avatar ID"),
     "connection": ("select", "Avatar connection"),
     "state": ("sensor", "Avatar state"),
+    "session": ("sensor", "Avatar session"),
+    "fed": ("switch", "Avatar fed by Home Assistant"),
 }
 
 
@@ -90,6 +97,8 @@ class SlotWish:
     url: str = ""
     avatar_id: str = ""
     connection: str = CONNECTION_OPTIONS[DEFAULT_CONNECTION]
+    # Whether Home Assistant feeds the slot's session with the reply as it is made.
+    fed: bool = False
 
     @classmethod
     def off(cls) -> SlotWish:
@@ -104,6 +113,9 @@ class SlotEntities:
     connection: str | None
     # Older firmware has no state sensor.
     state: str | None = None
+    session: str | None = None
+    # Only firmware that can follow its session while Home Assistant feeds it has this.
+    fed: str | None = None
 
 
 def wish_for(entry: ConfigEntry | None) -> SlotWish:
@@ -127,6 +139,7 @@ def wish_for(entry: ConfigEntry | None) -> SlotWish:
         url=str(avatar[CONF_URL]),
         avatar_id=str(avatar.get(CONF_AVATAR_ID) or ""),
         connection=CONNECTION_OPTIONS.get(connection, CONNECTION_OPTIONS[DEFAULT_CONNECTION]),
+        fed=advanced.get(CONF_STREAM) is not False,
     )
 
 
@@ -199,7 +212,7 @@ def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntitie
         return None  # Never avatar mode without a place for the address.
     return SlotEntities(
         named["mode"], named.get("url"), named.get("id"), named.get("connection"),
-        named.get("state"),
+        named.get("state"), named.get("session"), named.get("fed"),
     )
 
 
@@ -344,12 +357,23 @@ async def _async_apply(
             return None
         if not await async_call(hass, domain, service, entity_id, {field: value}):
             return None  # Never turn avatar mode on with settings the device did not take.
+    await _async_set_fed(hass, entities.fed, wish.fed)
     state = _state(hass, entities.switch)
     if state == "on":
         return True
     if state == "off" and await async_call(hass, "switch", "turn_on", entities.switch, {}):
         return True
     return None
+
+
+async def _async_set_fed(hass: HomeAssistant, switch: str | None, fed: bool) -> None:
+    """Set the slot's "fed by Home Assistant" switch. Avatar mode does not depend on it:
+    a device that refuses keeps speaking through its avatar by itself."""
+    wanted = "on" if fed else "off"
+    if switch is None or _state(hass, switch) not in ("on", "off"):
+        return
+    if _state(hass, switch) != wanted:
+        await async_call(hass, "switch", f"turn_{wanted}", switch, {})
 
 
 async def _async_turn_off(hass: HomeAssistant, switch: str) -> bool | None:

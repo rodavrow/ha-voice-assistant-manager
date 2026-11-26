@@ -217,6 +217,7 @@ def current_settings(hass, entry):
             "match_within": 6,
             "no_helper_role": "owner",
             "avatar_connection": "on_wake",
+            "avatar_stream": True,
         },
     }
 
@@ -373,6 +374,7 @@ def settings_schema(current, users):
                                 ("stranger", "An unknown voice"),
                             ]
                         ),
+                        _fixed("avatar_stream", advanced, True): selector.BooleanSelector(),
                         _fixed("avatar_connection", advanced, "on_wake"): _choice(
                             [
                                 ("on_wake", "Connect when woken"),

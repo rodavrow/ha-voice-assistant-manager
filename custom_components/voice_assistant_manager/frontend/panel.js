@@ -1158,6 +1158,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
           ],
           { fallback: "owner" }
         ),
+        this._switchField("advanced", "avatar_stream", true),
         this._choiceField(
           "advanced",
           "avatar_connection",

@@ -46,7 +46,7 @@ from homeassistant.helpers import intent
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
-from . import emotion
+from . import avatar_stream, emotion
 from .announce import safe_toolless_agent
 from .chat_show import GUEST, get_manager, is_stop_phrase
 from .const import REPLY_AGENT_TIMEOUT
@@ -970,9 +970,14 @@ class PersonaRouter(conversation.ConversationEntity):
                 log.delta_listener, self._tell_emotion, emotion.accepted_emotions(self._entry)
             )
             log.delta_listener = stream
+        # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
+        turn = avatar_stream.turn_started(
+            self.hass, self._entry.entry_id, user_input.satellite_id
+        )
         try:
             result = await self._async_answer(user_input)
         finally:
+            avatar_stream.turn_ended(turn)
             if stream is not None:
                 stream.finish()
                 if log.delta_listener is stream:
