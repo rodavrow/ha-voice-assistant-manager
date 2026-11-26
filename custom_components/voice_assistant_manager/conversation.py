@@ -968,11 +968,12 @@ class PersonaRouter(conversation.ConversationEntity):
         stream = None
         if log is not None and log.delta_listener is not None:
             # What a voice pipeline speaks and shows while the reply streams in.
-            stream = emotion.StreamedReply(
+            streamed = stream = emotion.StreamedReply(
                 log.delta_listener,
-                self._tell_emotion,
+                lambda found: self._tell_emotion(found, streamed.why),
                 emotion.accepted_emotions(self._entry),
                 emotion.voice_tags_on(self._entry),
+                emotion.face_table(self._entry),
             )
             log.delta_listener = stream
         # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
@@ -989,8 +990,8 @@ class PersonaRouter(conversation.ConversationEntity):
                     log.delta_listener = stream.listener
         return self._without_tag(result, stream)
 
-    def _tell_emotion(self, found: emotion.Emotion) -> None:
-        emotion.send_emotion(self.hass, self._entry, found)
+    def _tell_emotion(self, found: emotion.Emotion, why: str = "") -> None:
+        emotion.send_emotion(self.hass, self._entry, found, why)
 
     def _without_tag(
         self, result: conversation.ConversationResult, stream: emotion.StreamedReply | None
@@ -1005,8 +1006,13 @@ class PersonaRouter(conversation.ConversationEntity):
             plain = result.response.speech.get("plain") or {}
             said = str(plain.get("speech") or "")
             voice_tags = emotion.voice_tags_on(self._entry)
-            found, voiced = emotion.split_tag(
-                said, emotion.accepted_emotions(self._entry), keep_unknown=voice_tags
+            # A face tag at the start sets the face; without one, the opening audio tag
+            # does, through the assistant's table. The text is not changed for that.
+            found, voiced, why = emotion.split_face(
+                said,
+                emotion.accepted_emotions(self._entry),
+                emotion.face_table(self._entry),
+                keep_unknown=voice_tags,
             )
             # What is shown never has an audio tag. The voice of an assistant that takes
             # them gets the tagged text: streamed in the deltas, or asked back by its
@@ -1018,7 +1024,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 result.response.async_set_speech(spoken, extra_data=plain.get("extra_data"))
             told = stream is not None and stream.emotion is not None
             if not told and spoken.strip():
-                self._tell_emotion(found)
+                self._tell_emotion(found, why)
         except Exception:  # noqa: BLE001 - the reply always goes ahead
             _LOGGER.exception("Could not read the reply's emotion tag")
         return result

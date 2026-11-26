@@ -35,7 +35,7 @@ def tagged(show):
     with patch.object(
         emotion,
         "send_emotion",
-        lambda _hass, entry, found: order.append(f"emotion {entry.title} {found}"),
+        lambda _hass, entry, found, *_why: order.append(f"emotion {entry.title} {found}"),
     ):
         yield order
 

@@ -368,6 +368,7 @@ def settings_schema(current, users):
                         _opt("agent_down_line", advanced): _text(),
                         _opt("emotion_tags", advanced): _text(),
                         _fixed("voice_tags", advanced, False): selector.BooleanSelector(),
+                        _opt("face_for_tags", advanced): _text(True),
                         _fixed("match_within", advanced, 6): _number(0, 15, 0.5, "s"),
                         _fixed("no_helper_role", advanced, "owner"): _choice(
                             [

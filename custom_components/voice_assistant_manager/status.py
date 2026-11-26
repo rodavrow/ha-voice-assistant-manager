@@ -3,6 +3,7 @@
 """What the settings page says about a router: what works, and what needs attention."""
 
 from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import Any, Literal, NotRequired, TypedDict
 
 from homeassistant.config_entries import ConfigEntry
@@ -10,6 +11,7 @@ from homeassistant.const import CONF_LLM_HASS_API
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from . import emotion
 from .announce import chosen_writer, safe_toolless_agent, writer_agent
 from .calendar_watch import calendar_rows
 from .const import DOMAIN
@@ -288,6 +290,19 @@ def router_status(
         lines.append(_line("ok", "memory", "Memory is on."))
     if memory.get("use_global", True):
         lines.extend(_shared_list_lines(hass))
+
+    # Checked against the settings as given, which may not be saved yet.
+    unknown = emotion.unknown_faces(SimpleNamespace(options=settings))
+    if unknown:
+        lines.append(
+            _line(
+                "warn",
+                "assistant",
+                f"Face for audio tags names {', '.join(unknown)}, which "
+                f"{'is' if len(unknown) == 1 else 'are'} not on the Emotion tags list, so "
+                f"{'that line is' if len(unknown) == 1 else 'those lines are'} ignored.",
+            )
+        )
 
     reminders = bool(section("reminders").get("enabled"))
     lines.append(

@@ -1159,6 +1159,11 @@ class VoicePersonaRouterPanel extends HTMLElement {
           { fallback: "owner" }
         ),
         this._switchField("advanced", "voice_tags", false),
+        this._textField("advanced", "face_for_tags", {
+          multiline: true,
+          placeholder:
+            "sarcastic: mischievous, playful, smug, snappy, drawn out, disbelief\nhappy: excited, amazed, proud, triumphant, hopeful, content, intrigued, curious\nlaughing: laughs\nsad: sighs, let down, tired, sad, softly\nangry: shouts, bitter, groans, angry\nflirty: whispers, hushed",
+        }),
         this._switchField("advanced", "avatar_stream", true),
         this._choiceField(
           "advanced",

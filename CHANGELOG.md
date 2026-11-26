@@ -51,6 +51,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   still sets the avatar's face and is never passed to the voice. Replies and chat show
   lines keep their tags for the voice; announcements do not. See
   [Avatar](docs/avatar.md#audio-tags-for-the-voice).
+- **The face from an opening audio tag.** When a reply opens with an audio tag and no
+  emotion tag, the avatar's face comes from that tag, through the new **Face for audio
+  tags** table under Advanced (`sarcastic: mischievous, smug`, one face per line), where it
+  used to be neutral. The reply is not changed. A face must be on the Emotion tags list.
+  With an empty field a built-in table is used, so `[excited]` now gives a happy face and
+  `[smug]` a sarcastic one. See
+  [Avatar](docs/avatar.md#the-face-when-a-reply-has-no-emotion-tag).
 - **Chat shows keep moving.** While one assistant's line is spoken, the next line is already
   written and its audio made, so the silence between two lines is the pause you set and no
   longer also the time to write a line and make its voice. When someone joins in, the

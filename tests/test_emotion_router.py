@@ -34,7 +34,7 @@ def sent():
     """The emotions the router told the avatar, as (entry title, emotion)."""
     calls: list[tuple[str, str]] = []
     with patch.object(
-        emotion, "send_emotion", lambda _hass, entry, found: calls.append((entry.title, found))
+        emotion, "send_emotion", lambda _hass, entry, found, *_why: calls.append((entry.title, found))
     ):
         yield calls
 

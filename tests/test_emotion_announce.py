@@ -17,7 +17,7 @@ from .test_compose_announcement import compose, setup
 def sent():
     calls: list[tuple[str, str]] = []
     with patch.object(
-        emotion, "send_emotion", lambda _hass, entry, found: calls.append((entry.title, found))
+        emotion, "send_emotion", lambda _hass, entry, found, *_why: calls.append((entry.title, found))
     ):
         yield calls
 
