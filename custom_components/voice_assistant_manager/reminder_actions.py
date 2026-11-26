@@ -10,7 +10,8 @@ cannot be set or found is not an error of the action: the answer says why, with 
 error, so the script can pass it on to the agent.
 
 Looking up (script.list_reminders) changes nothing, but is not open to everyone: a person
-is shown their own reminders and the household's, never the other person's. Who is asking
+is shown their own reminders and the household's, never the other person's, and
+cancelling goes by the same rule. Who is asking
 is not taken from the agent. The assistant notes the person speaking for each turn
 (note_asker), and the action finds that note by the turn's context, which Home Assistant
 passes from the assistant through the main agent and the script to the action. Without a
@@ -91,6 +92,7 @@ CANCEL_SCHEMA = vol.Schema(
     {
         vol.Required("calendar"): vol.All(cv.entity_ids, [cv.entity_domain("calendar")]),
         vol.Required("title"): vol.All(cv.string, vol.Length(min=1, max=MAX_TITLE)),
+        vol.Optional("for_whom"): vol.All(_blank_as_none, vol.Any(None, cv.string)),
     }
 )
 
@@ -225,9 +227,39 @@ async def _async_create(hass: HomeAssistant, call: ServiceCall) -> ServiceRespon
     }
 
 
+def _may_not_cancel(hass: HomeAssistant, call: ServiceCall) -> str | None:
+    """Why this call may not cancel in these calendars, or None when it may.
+
+    A person cancels their own reminders and the household's, never the other person's.
+    Whose calendars these are is `for_whom`, which the script passes; who is asking is
+    the assistant's note for the turn. A call from a turn that does not say whose
+    calendars they are is refused, so an older script cannot get round this. A call that
+    is no turn of a known person (an automation) may cancel the household's, or, as
+    before, anything when it names nobody.
+    """
+    who = asker(hass, call.context)
+    for_whom = " ".join(str(call.data.get("for_whom") or "").split()).casefold()
+    if not for_whom:
+        if who is None:
+            return None
+        return (
+            "Reminder not cancelled. The cancel_reminder script must pass for_whom to "
+            "cancel_reminder_event: it needs updating. Tell the person you cannot cancel "
+            "reminders right now."
+        )
+    if for_whom in {HOUSEHOLD, who}:
+        return None
+    return (
+        "Reminder not cancelled. A person can only cancel their own reminders and the "
+        f"household's, and this one is for {for_whom}. Tell them so."
+    )
+
+
 async def _async_cancel(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     calendars: list[str] = call.data["calendar"]
     title = call.data["title"].strip()
+    if (refusal := _may_not_cancel(hass, call)) is not None:
+        return _error(refusal)
     await _check_user(hass, call, calendars)
     now = dt_util.now()
     # (calendar entity, uid) -> title, for each reminder still to come.

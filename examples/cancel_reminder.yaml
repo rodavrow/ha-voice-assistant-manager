@@ -11,6 +11,11 @@
 # A repeating reminder goes as a whole. When several reminders match the title, nothing
 # is removed and the agent is told which ones, so it can ask.
 #
+# A person can cancel their own reminders and the household's, never the other person's.
+# The script passes for_whom to the action, which compares it with the person speaking:
+# that comes from the assistant, not from the agent. Without for_whom the action refuses
+# a request made through an assistant.
+#
 # Change "people" to the same names as in script.create_reminder.
 
 alias: Cancel reminder
@@ -50,6 +55,7 @@ sequence:
         - "calendar.{{ who }}_reminders_announce"
         - "calendar.{{ who }}_reminders"
       title: "{{ title }}"
+      for_whom: "{{ who }}"
     response_variable: result
   - stop: Done
     response_variable: result

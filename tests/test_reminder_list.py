@@ -269,3 +269,60 @@ async def one_off_in(hass, calendar, title):
          "start_date_time": "2026-12-02 10:00:00", "end_date_time": "2026-12-02 10:05:00"},
         blocking=True,
     )
+
+
+# Cancelling goes by the same rule
+
+
+async def cancel(hass, who, for_whom, title="car", context=None):
+    context = context or Context()
+    note_asker(hass, context, who)
+    data = {"calendar": [f"calendar.{for_whom or 'sam'}_reminders"], "title": title}
+    if for_whom:
+        data["for_whom"] = for_whom
+    return await hass.services.async_call(
+        DOMAIN, "cancel_reminder_event", data,
+        blocking=True, return_response=True, context=context,
+    )
+
+
+async def test_a_person_cannot_cancel_the_other_persons_reminder(hass, calendars):
+    answer = await cancel(hass, "alex", "sam")
+
+    assert answer["status"] == "error"
+    assert "only cancel their own" in answer["message"]
+    assert titles(await look_up(hass, "sam", keywords="car")) == ["Charge the car for the trip"]
+
+
+async def test_a_person_can_cancel_their_own_reminder(hass, calendars):
+    answer = await cancel(hass, "alex", "alex")
+
+    assert answer == {"status": "ok", "removed": 1, "title": "Charge the car"}
+
+
+async def test_a_person_can_cancel_a_household_reminder(hass, calendars):
+    answer = await cancel(hass, "sam", "household", title="bins")
+
+    assert answer["status"] == "ok"
+
+
+async def test_a_turn_through_a_script_that_does_not_say_for_whom_is_refused(hass, calendars):
+    answer = await cancel(hass, "alex", None)
+
+    assert answer["status"] == "error"
+    assert "needs updating" in answer["message"]
+    assert titles(await look_up(hass, "sam", keywords="car")) == ["Charge the car for the trip"]
+
+
+async def test_outside_a_turn_only_a_household_reminder_can_be_named(hass, calendars):
+    refused = await cancel(hass, None, "sam")
+    allowed = await cancel(hass, None, "household", title="bins")
+
+    assert refused["status"] == "error"
+    assert allowed["status"] == "ok"
+
+
+async def test_an_automation_that_names_nobody_cancels_as_before(hass, calendars):
+    answer = await cancel(hass, None, None)
+
+    assert answer["status"] == "ok"

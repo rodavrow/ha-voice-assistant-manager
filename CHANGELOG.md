@@ -114,6 +114,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Changed
 
+- **A person can no longer cancel the other person's reminder.** Cancelling through an
+  assistant now works for the reminders of the person speaking and the household's only;
+  who is speaking comes from the assistant, not the main agent. **Update
+  `script.cancel_reminder` from [the example](examples/cancel_reminder.yaml)**: it now
+  passes `for_whom` to `cancel_reminder_event`, and without it a cancellation asked of an
+  assistant is refused. Setting a reminder for the other person still works.
+
 - **A clip is copied to at most 4 LiveTalking viewers**, down from 8, to match the
   server's session limit.
 - **The voice for chats is chosen from a list.** When the engine names its voices, the Voice
