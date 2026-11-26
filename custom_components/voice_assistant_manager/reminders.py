@@ -19,6 +19,10 @@ DEFAULT_FAILURE_LINE = "I could not set that reminder. Please ask me again."
 DEFAULT_CANCEL_FAILURE_LINE = "I could not cancel that reminder. Please ask me again."
 # Spoken when a reply still says something was done, after a second try, with no tool call.
 DEFAULT_ACTION_FAILURE_LINE = "I could not do that. Please ask me again."
+# Said right after a reply the voice had already started on, when it turned out to be
+# wrong: before the honest line, and before a second answer that says something else.
+SPOKE_TOO_SOON = "Sorry, scratch that, I spoke too soon."
+PUT_RIGHT = "Sorry, let me put that right."
 
 ToolOutcome = Literal["none", "ok", "error"]
 

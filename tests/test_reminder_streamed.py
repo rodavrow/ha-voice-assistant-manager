@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 rodavrow
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""A reminder reply that streams in: a false confirmation must never reach the voice."""
+"""A reply that streams to the voice and turns out wrong: the truth follows it at once."""
 
 from unittest.mock import patch
 
@@ -10,8 +10,10 @@ from homeassistant.helpers.chat_session import async_get_chat_session
 
 from custom_components.voice_assistant_manager.emotion import StreamedReply
 from custom_components.voice_assistant_manager.reminders import (
+    DEFAULT_ACTION_FAILURE_LINE,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
+    SPOKE_TOO_SOON,
 )
 
 from .router_helpers import MAIN_AGENT, _result, add_router, options_with
@@ -69,43 +71,54 @@ async def streamed(hass, sent, text, pieces, before=None, **reminders):  # noqa:
     return pipeline, result
 
 
-async def test_regression_a_streamed_false_confirmation_is_never_spoken(hass, sent):  # noqa: F811
+CLAIM_SPOKEN = "Of course, darling. I've set a reminder for you tomorrow at 9 AM to send Alex the instructions."
+CANCEL_CLAIM = ["Done, darling. I've cancelled your pills reminder, ", "so that one is gone for good."]
+
+
+async def test_regression_a_streamed_false_confirmation_is_followed_by_the_truth(hass, sent):  # noqa: F811
     # Seen in the house: the reply streamed, so the voice said "I've set a reminder" while
-    # only the text was corrected.
+    # only the text was corrected. The voice now takes it back in the same breath.
     pipeline, result = await streamed(hass, sent, ASKED, CLAIM)
 
     assert speech(result) == DEFAULT_FAILURE_LINE
-    assert pipeline.spoken == DEFAULT_FAILURE_LINE
-    assert "set a reminder" not in pipeline.spoken
+    assert pipeline.spoken == f"{CLAIM_SPOKEN} {SPOKE_TOO_SOON} {DEFAULT_FAILURE_LINE}"
 
 
-async def test_a_streamed_true_confirmation_is_spoken_whole(hass, sent):  # noqa: F811
+async def test_a_streamed_true_confirmation_is_spoken_once_and_nothing_follows(hass, sent):  # noqa: F811
     pipeline, result = await streamed(hass, sent, ASKED, CLAIM, before=tool_call("ok"))
 
-    assert pipeline.spoken == "Of course, darling. I've set a reminder for you tomorrow at 9 AM to send Alex the instructions."
-    assert speech(result) == pipeline.spoken
+    assert pipeline.spoken == CLAIM_SPOKEN
+    assert speech(result) == CLAIM_SPOKEN
 
 
-async def test_a_streamed_false_cancellation_is_never_spoken(hass, sent):  # noqa: F811
-    pieces = ["Done, darling. I've cancelled your pills reminder, ", "so that one is gone for good."]
+async def test_a_streamed_false_cancellation_is_followed_by_the_truth(hass, sent):  # noqa: F811
+    pipeline, result = await streamed(hass, sent, "Cancel my pills reminder", CANCEL_CLAIM)
 
-    pipeline, result = await streamed(hass, sent, "Cancel my pills reminder", pieces)
-
-    assert pipeline.spoken == DEFAULT_CANCEL_FAILURE_LINE
     assert speech(result) == DEFAULT_CANCEL_FAILURE_LINE
-
-
-async def test_a_streamed_true_cancellation_is_spoken_whole(hass, sent):  # noqa: F811
-    pieces = ["Done, darling. I've cancelled your pills reminder, ", "so that one is gone for good."]
-
-    pipeline, _result_ = await streamed(
-        hass, sent, "Cancel my pills reminder", pieces, before=cancel_call("ok")
+    assert pipeline.spoken == (
+        f"{''.join(CANCEL_CLAIM)} {SPOKE_TOO_SOON} {DEFAULT_CANCEL_FAILURE_LINE}"
     )
 
-    assert pipeline.spoken == "".join(pieces)
+
+async def test_a_streamed_true_cancellation_is_spoken_once(hass, sent):  # noqa: F811
+    pipeline, _result_ = await streamed(
+        hass, sent, "Cancel my pills reminder", CANCEL_CLAIM, before=cancel_call("ok")
+    )
+
+    assert pipeline.spoken == "".join(CANCEL_CLAIM)
 
 
-async def test_every_reply_reaches_the_voice_only_once_it_is_complete(hass, sent):  # noqa: F811
+async def test_a_false_confirmation_the_voice_had_not_started_on_is_just_replaced(hass, sent):  # noqa: F811
+    # Too short for the voice to start on it while it streamed in: Home Assistant speaks
+    # the final reply, which is the honest line. Nothing needs taking back.
+    pipeline, result = await streamed(hass, sent, ASKED, ["Your reminder ", "is set."])
+
+    assert speech(result) == DEFAULT_FAILURE_LINE
+    assert pipeline.spoken == "Your reminder is set."
+    assert SPOKE_TOO_SOON not in pipeline.spoken
+
+
+async def test_a_reply_streams_to_the_voice_as_it_comes(hass, sent):  # noqa: F811
     entry = await add_router(
         hass, options_with(reminders=REMINDERS, memory={"enabled": False})
     )
@@ -123,22 +136,23 @@ async def test_every_reply_reaches_the_voice_only_once_it_is_complete(hass, sent
     with patch.object(
         conversation, "async_converse", streaming_agent(pieces, seen=seen)
     ):
-        await ask_streamed(hass, entry, "Which lights are on?", pipeline)
+        await ask_streamed(hass, entry, ASKED, pipeline)
 
     assert pipeline.spoken == "".join(pieces)
-    # Checked before it is spoken: nothing reached the voice until all of it was written.
-    assert heard_when == ["heard after 2 written"]
+    # Also in a conversation about a reminder: the first piece is heard before the second
+    # is written.
+    assert heard_when[0] == "heard after 0 written"
 
 
-async def test_with_reminders_off_a_false_confirmation_is_still_never_spoken(hass, sent):  # noqa: F811
+async def test_with_reminders_off_a_streamed_false_confirmation_is_followed_by_the_truth(hass, sent):  # noqa: F811
     entry = await add_router(hass, options_with(memory={"enabled": False}))
     pipeline = Pipeline(sent)
 
     with patch.object(conversation, "async_converse", streaming_agent(CLAIM)):
-        await ask_streamed(hass, entry, ASKED, pipeline)
+        result, _listener, _content = await ask_streamed(hass, entry, ASKED, pipeline)
 
-    assert "set a reminder" not in pipeline.spoken
-    assert pipeline.spoken == "I could not do that. Please ask me again."
+    assert speech(result) == DEFAULT_ACTION_FAILURE_LINE
+    assert pipeline.spoken == f"{CLAIM_SPOKEN} {SPOKE_TOO_SOON} {DEFAULT_ACTION_FAILURE_LINE}"
 
 
 # The listener
@@ -156,74 +170,56 @@ class Listener:
         return "".join(d.get("content") or "" for d in self.deltas)
 
 
-def test_held_text_is_passed_on_at_the_end():
-    listener = Listener()
-    stream = StreamedReply(listener, lambda _f: None, hold=True)
-
-    stream(None, {"role": "assistant"})
-    stream(None, {"content": "[happy] One "})
-    stream(None, {"content": "two."})
-    assert listener.spoken == ""
-
-    stream.finish()
-
-    assert listener.spoken == "One two."
+LONG = "This sentence is comfortably longer than sixty characters, as it must be."
 
 
-def test_held_text_is_replaced_at_the_end():
-    listener = Listener()
-    stream = StreamedReply(listener, lambda _f: None, hold=True)
-    stream(None, {"role": "assistant", "content": "I've set it."})
+def test_the_voice_has_started_once_it_was_given_more_than_sixty_characters():
+    stream = StreamedReply(Listener(), lambda _f: None)
+    stream(None, {"role": "assistant", "content": "x" * 60})
+    assert stream.speaking is False
 
-    stream.finish("I could not.")
+    stream(None, {"content": "y"})
 
-    assert listener.spoken == "I could not."
-
-
-def test_the_face_is_still_told_at_once_while_the_text_is_held():
-    found: list[str] = []
-    stream = StreamedReply(Listener(), found.append, hold=True)
-
-    stream(None, {"role": "assistant", "content": "[happy] One"})
-
-    assert found == ["happy"]
+    assert stream.speaking is True
 
 
-def test_two_messages_of_a_held_reply_are_kept_apart():
-    listener = Listener()
-    stream = StreamedReply(listener, lambda _f: None, hold=True)
+def test_the_voice_has_started_on_some_text_followed_by_a_tool_call():
+    stream = StreamedReply(Listener(), lambda _f: None)
+    stream(None, {"role": "assistant", "content": "One moment."})
 
-    stream(None, {"role": "assistant", "content": "Let me see."})
-    stream(None, {"role": "tool_result", "tool_call_id": "1", "tool_name": "x", "result": {}})
-    stream(None, {"role": "assistant", "content": "Done."})
-    stream.finish()
+    stream(None, {"tool_calls": ["call"]})
 
-    assert listener.spoken == "Let me see. Done."
+    assert stream.speaking is True
 
 
-def test_a_reminder_tool_call_starts_holding_the_text():
-    listener = Listener()
-    stream = StreamedReply(listener, lambda _f: None, hold_tools=("create_reminder",))
+def test_a_tool_call_before_any_text_does_not_start_the_voice():
+    stream = StreamedReply(Listener(), lambda _f: None)
 
-    class Call:
-        tool_name = "script__create_reminder"
+    stream(None, {"role": "assistant", "tool_calls": ["call"]})
 
-    stream(None, {"role": "assistant", "tool_calls": [Call()]})
-    stream(None, {"role": "tool_result", "tool_call_id": "1", "tool_name": "x", "result": {}})
-    stream(None, {"role": "assistant", "content": "Your reminder is set."})
-    assert listener.spoken == ""
-
-    stream.finish()
-
-    assert listener.spoken == "Your reminder is set."
+    assert stream.speaking is False
 
 
-def test_a_replacement_is_spoken_even_when_nothing_was_held():
+def test_nothing_is_passed_on_while_muted_and_what_came_before_is_closed():
     listener = Listener()
     stream = StreamedReply(listener, lambda _f: None)
-    stream(None, {"role": "assistant", "content": "Short."})
+    stream(None, {"role": "assistant", "content": "[happy] First "})
+    stream(None, {"content": "[lau"})
 
-    stream.finish("I could not.")
+    stream.mute()
+    stream(None, {"role": "assistant", "content": "Second answer."})
+    stream(None, {"tool_calls": ["call"]})
+    stream.unmute()
 
-    # What already went out cannot be taken back; the correction is not added to it.
-    assert listener.spoken == "Short."
+    assert listener.spoken == "First [lau"
+    assert stream.speaking is False
+
+
+def test_words_can_be_added_after_what_the_voice_was_given():
+    listener = Listener()
+    stream = StreamedReply(listener, lambda _f: None)
+    stream(None, {"role": "assistant", "content": LONG})
+
+    stream.say("Sorry, scratch that.")
+
+    assert listener.spoken == f"{LONG} Sorry, scratch that."

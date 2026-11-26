@@ -95,11 +95,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 - **One more try when the main agent says it did something it did not.** When a reply says
   something was done ("I've set a reminder", "I've turned on the lights") and no tool was
   called in that turn, the main agent is asked once more, with a note that it called no
-  tool. Its second answer is the one spoken and kept in the history. For a reminder or a
-  cancellation that is still not made, the honest line follows as before ("I could not set
-  that reminder"). For anything else, a second answer that still says it was done with no
-  tool call is replaced by "I could not do that. Please ask me again.": a refusal is better
-  than a confirmation of something that did not happen.
+  tool, while its first reply is being spoken. If the second try does it, nothing more is
+  said: what was spoken is now true. If it still does not, or fails, the honest line
+  follows: "I could not set that reminder", or for anything else "I could not do that.
+  Please ask me again." A second answer that says something else (it asks back, or says
+  why it cannot) is spoken after the first, with "Sorry, let me put that right."
 
 ### Changed
 
@@ -135,11 +135,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
-- **A reminder that was not set is no longer spoken as set.** When the main agent said "I've
-  set a reminder" without setting one, the text was corrected, but a reply long enough to be
+- **A reply that was wrong is taken back out loud.** When the main agent said "I've set a
+  reminder" without setting one, the text was corrected, but a reply long enough to be
   streamed had already been spoken: the voice said the reminder was set while the screen
-  said it was not. Every reply now reaches the voice only once it is complete and has been
-  checked, so the voice says what the text says. A long reply starts a little later for it.
+  said it was not. The voice now follows such a reply at once with the truth: "Sorry,
+  scratch that, I spoke too soon. I could not set that reminder. Please ask me again." A
+  reply the voice had not started on is simply spoken as corrected. Replies still stream
+  to the voice as they are written.
 - **Chat lines on a cast device no longer lose their last syllables.** A voice whose engine
   makes WAV reached LiveTalking as an MP3 that Home Assistant converted on the fly. Such
   a file has no length in it, and LiveTalking's decoder guessed it short and dropped the
