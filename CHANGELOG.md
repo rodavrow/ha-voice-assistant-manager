@@ -44,6 +44,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   The new `prepare_announcement` action does the same for any other announcement, such as
   calendar events. Other speakers are never touched. Switch it off with **Show which
   assistant is speaking** on the Voice Manager page.
+- **Chat shows keep moving.** While one assistant's line is spoken, the next line is already
+  written and its audio made, so the silence between two lines is the pause you set and no
+  longer also the time to write a line and make its voice. When someone joins in, the
+  prepared line is thrown away and written again so it answers them. A satellite without a
+  chat voice still makes its own audio when the line is spoken.
 - **Replies streamed to the avatar.** For a satellite in avatar mode whose firmware has the
   switch **Avatar fed by Home Assistant**, a reply goes to its LiveTalking session
   (`/stream_audio`) while the engine is still making it, so the avatar starts speaking

@@ -430,6 +430,87 @@ async def test_the_assistants_take_turns_until_the_line_limit(hass, show):
     assert state["speaker"] == SATELLITE
 
 
+async def test_the_next_line_is_written_while_the_current_one_plays(hass, show):
+    playing, release = gate(show, on_call=1)
+    await start(show)
+    await playing.wait()
+    await asyncio.sleep(0)
+
+    # Jeeves's line is still playing, and Ada's is already written.
+    assert [call["agent_id"] for call in show.agents.calls] == [JEEVES_WRITER, ADA_WRITER]
+    assert JEEVES_LINE in show.agents.calls[1]["text"]
+
+    await show.manager.async_stop()
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_a_prepared_line_is_spoken_without_being_written_again(hass, show):
+    await run_chat(hass, show)
+
+    assert len(show.agents.calls) == 4
+    assert show.speakers.messages == [JEEVES_LINE, ADA_LINE, JEEVES_LINE, ADA_LINE]
+
+
+async def test_no_line_is_prepared_after_the_last_one(hass, show):
+    await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    assert [call["agent_id"] for call in show.agents.calls] == [JEEVES_WRITER, ADA_WRITER]
+
+
+async def test_a_prepared_line_is_thrown_away_when_someone_joins_in(hass, show):
+    async def hook(number: int) -> None:
+        if number == 1:
+            show.manager.add_person_line("Alex", "Wait, what about cheese?")
+
+    show.speakers.hook = hook
+
+    await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    ada_calls = show.agents.calls_to(ADA_WRITER)
+    assert len(ada_calls) == 2
+    assert "cheese" not in ada_calls[0]["text"]
+    assert "cheese" in ada_calls[1]["text"]
+    assert len(show.speakers.announced) == 2
+
+
+async def test_a_prepared_line_that_failed_is_written_again_in_its_turn(hass, show):
+    answer = show.agents.converse
+    failed: list[str] = []
+
+    async def converse(*args, **kwargs):
+        if kwargs.get("agent_id") == ADA_WRITER and not failed:
+            failed.append("once")
+            raise RuntimeError("the agent hiccupped")
+        return await answer(*args, **kwargs)
+
+    with patch.object(conversation, "async_converse", converse):
+        await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
+
+    assert show.speakers.messages == [JEEVES_LINE, ADA_LINE]
+    assert show.manager.state()["ended"] == "chat_done"
+
+
+async def test_the_chat_voice_of_the_next_line_is_made_while_the_current_one_plays(
+    hass, show, chat_audio
+):
+    hass.config_entries.async_update_entry(
+        show.ada, options=router_options(ADA_WRITER, tts_engine="tts.ada", voice="bright")
+    )
+    playing, release = gate(show, on_call=1)
+    with patch("homeassistant.components.tts.generate_media_source_id", fake_tts):
+        await start(show)
+        await playing.wait()
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert [asked for asked in chat_audio.asked if "tts.ada" in asked and ADA_LINE in asked]
+
+        await show.manager.async_stop()
+        release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+
 async def test_each_line_is_written_with_its_own_character_and_the_other_name(hass, show):
     await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
 
@@ -516,13 +597,15 @@ async def test_stop_lets_the_line_that_is_playing_finish_and_then_ends(hass, sho
     await start(show)
     await playing.wait()
 
+    written = len(show.agents.calls)
     await show.manager.async_stop()
     release.set()
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert len(show.speakers.announced) == 2
     assert show.speakers.finished == 2
-    assert len(show.agents.calls) == 2
+    # Nothing is written after the stop; the next line may have been prepared before it.
+    assert len(show.agents.calls) == written
     assert show.manager.state()["ended"] == "chat_stopped"
 
 
@@ -586,7 +669,8 @@ async def test_a_person_line_is_answered_by_the_next_assistant(hass, show):
 
     await run_chat(hass, show, limits=ChatLimits(max_lines=2, pause=0))
 
-    ada = show.agents.calls[1]
+    # The line Ada prepared before Alex spoke is thrown away: the one spoken answers him.
+    ada = show.agents.calls[-1]
     assert ada["agent_id"] == ADA_WRITER
     assert ada["text"].rstrip().endswith("Your line:")
     assert "Alex: Ada, what do you think of cheese?\n" in ada["text"]
@@ -1261,11 +1345,14 @@ async def test_a_removed_router_ends_the_chat_before_the_next_line(hass, show):
     await start(show)
     await playing.wait()
 
+    written = len(show.agents.calls)
     assert await hass.config_entries.async_remove(show.ada.entry_id)
     release.set()
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert [call["agent_id"] for call in show.agents.calls] == [JEEVES_WRITER]
+    # Nothing is written after the removal, and a line prepared before it is never spoken.
+    assert len(show.agents.calls) == written
+    assert len(show.speakers.announced) == 1
     assert show.manager.state()["running"] is False
     assert show.manager.state()["ended"] in {"chat_stopped", "chat_no_router"}
 
@@ -1275,12 +1362,15 @@ async def test_a_writer_that_can_now_control_the_home_ends_the_chat(hass, show):
     await start(show)
     await playing.wait()
 
+    written = len(show.agents.calls)
     control = int(conversation.ConversationEntityFeature.CONTROL)
     hass.states.async_set(ADA_WRITER, "idle", {"supported_features": control})
     release.set()
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert show.agents.calls_to(ADA_WRITER) == []
+    # It is never asked once it can control the home, and a line it prepared while it
+    # could not is never spoken.
+    assert len(show.agents.calls) == written
     assert len(show.speakers.announced) == 1
     assert show.manager.state()["ended"] == "chat_no_writer"
 
@@ -1290,11 +1380,13 @@ async def test_a_writer_removed_from_the_settings_ends_the_chat(hass, show):
     await start(show)
     await playing.wait()
 
+    written = len(show.agents.calls)
     hass.config_entries.async_update_entry(show.ada, options=router_options(""))
     release.set()
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert show.agents.calls_to(ADA_WRITER) == []
+    assert len(show.agents.calls) == written
+    assert len(show.speakers.announced) == 1
     assert show.manager.state()["ended"] == "chat_no_writer"
 
 

@@ -14,6 +14,7 @@ import contextlib
 import logging
 import math
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -540,6 +541,15 @@ class _Chat:
         self.lines.append(ChatLine(who, text, dt_util.utcnow().isoformat()))
 
 
+@dataclass(frozen=True)
+class _Prepared:
+    """A line written ahead, and how many lines the chat had when it was written."""
+
+    heard: int
+    line: str = ""
+    emotion: emotion.Emotion = emotion.NEUTRAL
+
+
 class ChatShowManager:
     """Runs at most one chat at a time."""
 
@@ -874,6 +884,17 @@ class ChatShowManager:
             chat.unsubscribe = []
 
     async def _async_talk(self, chat: _Chat) -> None:
+        prepared: list[asyncio.Task[_Prepared]] = []
+        try:
+            await self._async_lines(chat, prepared)
+        finally:
+            for task in prepared:
+                task.cancel()
+
+    async def _async_lines(self, chat: _Chat, prepared: list[asyncio.Task[_Prepared]]) -> None:
+        """Write and speak the lines in turn. While a line is spoken the next one is
+        prepared (`prepared` holds that task), so the silence between two lines is the
+        pause and not also the time to write a line and make its audio."""
         limits = chat.limits
         deadline = chat.started + timedelta(minutes=limits.minutes)
         spoken = 0
@@ -895,7 +916,21 @@ class ChatShowManager:
                 return
             own, other = chat.names[turn], chat.names[1 - turn]
             heard = len(chat.lines)
-            line, chat.line_emotion = await self._async_write(chat, entry, own, other, writer)
+            began = time.monotonic()
+            ready = await prepared.pop() if prepared else None
+            use_prepared = ready is not None and bool(ready.line) and ready.heard == heard
+            if ready is not None and use_prepared:
+                line, chat.line_emotion = ready.line, ready.emotion
+            else:
+                # Nothing prepared, or someone joined in since: it must answer them.
+                line, chat.line_emotion = await self._async_write(
+                    chat, entry, own, other, writer
+                )
+            _LOGGER.debug(
+                "Chat line %d (%s): %s, waited %.1f s for it",
+                spoken + 1, own, "prepared" if use_prepared else "written now",
+                time.monotonic() - began,
+            )
             if chat.ended:
                 return
             if not line:
@@ -917,13 +952,63 @@ class ChatShowManager:
                 and limits.listen
                 and can_listen(self.hass, chat.speaker)
             )
+            if spoken < limits.max_lines and dt_util.utcnow() < deadline:
+                prepared.append(
+                    self.hass.async_create_background_task(
+                        self._async_prepare(chat, spoken % 2), f"{DOMAIN} chat next line"
+                    )
+                )
+            began = time.monotonic()
             failure = await self._async_speak(chat, entry, line, listen)
+            _LOGGER.debug(
+                "Chat line %d (%s): %d words spoken in %.1f s",
+                spoken, own, len(line.split()), time.monotonic() - began,
+            )
             if failure:
                 self._end(chat, failure)
                 return
             self._count_woken(chat)
             if not chat.ended and spoken < limits.max_lines:
                 await asyncio.sleep(limits.pause)
+
+    async def _async_prepare(self, chat: _Chat, turn: int) -> _Prepared:
+        """Write the line after the one being spoken, and make its audio. Never raises.
+
+        It is only used when nobody joined in meanwhile; otherwise it is thrown away and
+        the line is written again, so it answers them.
+        """
+        heard = len(chat.lines)
+        try:
+            entry = _loaded_router(self.hass, chat.routers[turn])
+            writer = writer_agent(self.hass, entry, quiet=True) if entry is not None else None
+            if entry is None or writer is None:
+                return _Prepared(heard)
+            line, found = await self._async_write(
+                chat, entry, chat.names[turn], chat.names[1 - turn], writer
+            )
+            if line:
+                await self._async_warm_voice(chat, entry, line)
+            return _Prepared(heard, line, found)
+        except Exception:  # noqa: BLE001 - the line is then written when its turn comes
+            _LOGGER.debug("The next chat line could not be prepared", exc_info=True)
+            return _Prepared(heard)
+
+    async def _async_warm_voice(self, chat: _Chat, entry: ConfigEntry, line: str) -> None:
+        """Make the line's audio now; Home Assistant keeps it for when it is spoken.
+
+        A satellite without a chat voice makes the audio itself, so nothing is made here.
+        """
+        from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
+
+        engine, voice = _chat_voice(entry)
+        if engine:
+            await _async_chat_media_id(self.hass, line, engine, voice)
+        elif not chat.speaker.startswith("assist_satellite."):
+            media_id = _tts_media_id(self.hass, line, None, "")
+            if media_id is not None:
+                with contextlib.suppress(Exception):
+                    async with asyncio.timeout(CHAT_VOICE_TIMEOUT):
+                        await tts.async_get_media_source_audio(self.hass, media_id)
 
     async def _async_ready(self, chat: _Chat) -> bool:
         """Wait until a satellite speaker is idle. False when the chat ended meanwhile.

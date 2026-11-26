@@ -385,6 +385,13 @@ async def _async_wait_spoken(
         if began is not None and (not speaking or now - began > limit):
             # Speaking started at most one poll before it was seen, so this is never short.
             left = began + length - now if length else 0.0
+            _LOGGER.debug(
+                "Chat stage: %s's line: clip %s, speaking seen %.1f s after it was sent,"
+                " %s %.1f s later, waiting %.1f s more",
+                actor.name, f"{length:.1f} s" if length else "of unknown length",
+                began - sent, "stopped" if not speaking else "still speaking",
+                now - began, max(left, 0.0) + TAIL,
+            )
             await asyncio.sleep(max(left, 0.0) + TAIL)
             return
         await asyncio.sleep(POLL)
