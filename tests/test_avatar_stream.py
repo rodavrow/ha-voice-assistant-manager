@@ -537,15 +537,100 @@ async def test_an_aborted_reply_sends_no_end(hass, live, target):
     assert live.socket.closed
 
 
-async def test_an_engine_that_stalls_ends_the_reply_cleanly(hass, live, target):
+async def test_an_engine_that_never_starts_ends_the_reply_cleanly(hass, live, target):
     feed = ReplyFeed(hass, target, "mp3", {})
     await feed.async_open()
-    feed.write(b"one")
 
     with patch.object(avatar_stream, "STALL_TIMEOUT", 0.01):
         await run(hass, feed)
 
-    assert live.socket.sent == [b"pcm:one", {"type": "end"}]
+    assert live.socket.sent == [{"type": "end"}]
+
+
+HOLD = {"type": "hold"}
+
+
+async def until_sent(live, wanted, count: int = 1) -> None:
+    async def wait() -> None:
+        while live.socket.sent.count(wanted) < count:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=5)
+
+
+async def test_regression_a_pause_mid_reply_holds_the_reply_open_and_goes_on(hass, live, target):
+    # Seen in the house: a web search left 6.5 s without audio between two stretches of
+    # one reply. The reply ended on the avatar and the answer played without lips.
+    feed = ReplyFeed(hass, target, "mp3", {})
+    await feed.async_open()
+    feed.write(b"one")
+
+    with (
+        patch.object(avatar_stream, "HOLD_AFTER", 0.01),
+        patch.object(avatar_stream, "HOLD_EVERY", 0.01),
+    ):
+        running = asyncio.create_task(feed.async_run())
+        await until_sent(live, HOLD, 3)
+        feed.write(b"two")
+        feed.finish()
+        await asyncio.wait_for(running, timeout=5)
+
+    sent = live.socket.sent
+    assert [item for item in sent if item != HOLD] == [b"pcm:one", b"pcm:two", {"type": "end"}]
+    assert sent.index(b"pcm:one") < sent.index(HOLD) < sent.index(b"pcm:two")
+    assert not live.socket.closed or sent[-1] == {"type": "end"}
+
+
+async def test_a_pause_that_never_ends_closes_the_reply_at_the_limit(hass, live, target):
+    feed = ReplyFeed(hass, target, "mp3", {})
+    await feed.async_open()
+    feed.write(b"one")
+
+    with (
+        patch.object(avatar_stream, "HOLD_AFTER", 0.01),
+        patch.object(avatar_stream, "HOLD_EVERY", 0.01),
+        patch.object(avatar_stream, "HOLD_LIMIT", 0.05),
+    ):
+        await run(hass, feed)
+
+    assert live.socket.sent[0] == b"pcm:one"
+    assert live.socket.sent[-1] == {"type": "end"}
+    assert HOLD in live.socket.sent
+    assert live.socket.closed
+
+
+async def test_audio_that_keeps_coming_is_never_held(hass, live, target):
+    feed = ReplyFeed(hass, target, "mp3", {})
+    await feed.async_open()
+    feed.write(b"one")
+    feed.write(b"two")
+    feed.finish()
+
+    with patch.object(avatar_stream, "HOLD_AFTER", 0.01):
+        await run(hass, feed)
+
+    assert HOLD not in live.socket.sent
+
+
+async def test_an_interrupt_during_a_pause_stops_the_holding(hass, live, target):
+    feed = ReplyFeed(hass, target, "mp3", {})
+    await feed.async_open()
+    feed.write(b"one")
+
+    with (
+        patch.object(avatar_stream, "HOLD_AFTER", 0.01),
+        patch.object(avatar_stream, "HOLD_EVERY", 0.01),
+    ):
+        running = asyncio.create_task(feed.async_run())
+        await until_sent(live, HOLD)
+        live.socket.says({"type": "cancelled"})
+        await asyncio.wait_for(running, timeout=5)
+        held = live.socket.sent.count(HOLD)
+        await asyncio.sleep(0.05)
+
+    assert live.socket.sent.count(HOLD) == held
+    assert {"type": "end"} not in live.socket.sent
+    assert live.socket.closed
 
 
 async def test_a_session_that_changed_gets_no_more_audio(hass, live, target):

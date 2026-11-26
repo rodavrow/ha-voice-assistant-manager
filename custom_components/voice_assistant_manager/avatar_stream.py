@@ -48,8 +48,16 @@ CONF_STREAM: Final = avatar_devices.CONF_STREAM
 TURN_GRACE: Final = 2.0
 # LiveTalking gets this long to say "ready"; the speech is never held up longer.
 OPEN_TIMEOUT: Final = 0.3
-# No audio from the engine for this long ends the reply on the avatar.
+# No first audio from the engine for this long ends the reply on the avatar.
 STALL_TIMEOUT: Final = 5.0
+# Once it has spoken, a reply may pause: the main agent calls a tool (a web search) and
+# the engine gets no text meanwhile. After HOLD_AFTER without audio LiveTalking is told
+# to hold the reply open, again every HOLD_EVERY, and the satellite, which asks
+# LiveTalking, then does not take the silence for a dropout. A pause of HOLD_LIMIT ends
+# the reply on the avatar; LiveTalking has the same limit.
+HOLD_AFTER: Final = 0.5
+HOLD_EVERY: Final = 2.0
+HOLD_LIMIT: Final = 90.0
 PCM_RATE: Final = 16000
 _READ_BYTES: Final = 3200  # 100 ms of 16 kHz mono 16-bit audio
 _NO_SESSION: Final = ("", "unknown", "unavailable")
@@ -339,18 +347,54 @@ class ReplyFeed:
             await self._async_close()
 
     async def _async_decode(self, decoder: Decoder) -> None:
-        """Hand the engine's audio to the decoder until it ends, stalls or the session goes."""
+        """Hand the engine's audio to the decoder until it ends, stalls or the session goes.
+
+        A pause after the first audio holds the reply open (see HOLD_AFTER).
+        """
+        last_audio: float | None = None  # None until the engine gave any
+        holding = False
         while True:
+            if last_audio is None:
+                wait = STALL_TIMEOUT
+            else:
+                wait = HOLD_EVERY if holding else HOLD_AFTER
             try:
-                async with asyncio.timeout(STALL_TIMEOUT):
+                async with asyncio.timeout(wait):
                     audio = await self._audio.get()
             except TimeoutError:
-                _LOGGER.debug("Avatar stream: no audio for %s s, ending the reply", STALL_TIMEOUT)
-                break
+                if self._stopped or self._session_changed():
+                    break
+                paused = wait if last_audio is None else _now() - last_audio
+                if last_audio is None or paused >= HOLD_LIMIT:
+                    _LOGGER.debug(
+                        "Avatar stream: no audio for %.1f s, ending the reply", paused
+                    )
+                    break
+                if not holding:
+                    _LOGGER.debug(
+                        "Avatar stream: reply %s paused, holding it open", self.reply_id
+                    )
+                holding = True
+                await self._async_hold()
+                continue
             if audio is None or self._stopped or self._session_changed():
                 break
+            if holding:
+                _LOGGER.debug(
+                    "Avatar stream: reply %s goes on after a pause of %.1f s",
+                    self.reply_id, _now() - (last_audio or _now()),
+                )
+            holding, last_audio = False, _now()
             await decoder.async_write(audio)
         await decoder.async_close_input()
+
+    async def _async_hold(self) -> None:
+        """Tell LiveTalking the reply is paused, not over. A failure ends nothing here:
+        the listener notices a closed socket."""
+        if self._socket is None:
+            return
+        with contextlib.suppress(aiohttp.ClientError, ConnectionError, RuntimeError):
+            await self._socket.send_json({"type": "hold"})
 
     async def _async_send(self, decoder: Decoder) -> None:
         assert self._socket is not None
