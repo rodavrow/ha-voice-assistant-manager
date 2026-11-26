@@ -87,6 +87,8 @@ from .reminders import (
     RETRY_NOTES,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
+    PUT_RIGHT,
+    SPOKE_TOO_SOON,
     assistant_name,
     is_cancel_turn,
     is_reminder_exchange,
@@ -113,8 +115,11 @@ _LOGGER = logging.getLogger(__name__)
 # The line the reminder check put in place of this turn's reply, if it did (_honest_reply):
 # a reply that streams in is then spoken as that line.
 _HONEST_LINE: ContextVar[str | None] = ContextVar(f"{__name__}.honest_line", default=None)
-# The stream of this turn's reply to the voice, if it has one, so a second answer can
-# replace the first in it (_async_retry).
+# A second answer that says something else than the first reply did (_async_answer): when
+# the voice was already speaking the first, it is said after it.
+_SECOND_ANSWER: ContextVar[str | None] = ContextVar(f"{__name__}.second_answer", default=None)
+# The stream of this turn's reply to the voice, if it has one, so a second answer is not
+# spoken on top of the first (_async_retry).
 _STREAM: ContextVar["emotion.StreamedReply | None"] = ContextVar(
     f"{__name__}.stream", default=None
 )
@@ -990,12 +995,10 @@ class PersonaRouter(conversation.ConversationEntity):
                 emotion.accepted_emotions(self._entry),
                 emotion.voice_tags_on(self._entry),
                 emotion.face_table(self._entry),
-                # Every reply is checked before it is spoken (_unbacked_claim,
-                # _guard_reminder): a voice cannot take back "I've set a reminder".
-                hold=True,
             )
             log.delta_listener = stream
         corrected = _HONEST_LINE.set(None)
+        put_right = _SECOND_ANSWER.set(None)
         streaming = _STREAM.set(stream)
         # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
         turn = avatar_stream.turn_started(
@@ -1005,12 +1008,20 @@ class PersonaRouter(conversation.ConversationEntity):
             result = await self._async_answer(user_input)
         finally:
             avatar_stream.turn_ended(turn)
-            honest = _HONEST_LINE.get()
+            honest, second = _HONEST_LINE.get(), _SECOND_ANSWER.get()
             _HONEST_LINE.reset(corrected)
+            _SECOND_ANSWER.reset(put_right)
             _STREAM.reset(streaming)
             if stream is not None:
-                # A reply the reminder check replaced is spoken as replaced.
-                stream.finish(honest)
+                stream.finish()
+                # A reply streams to the voice as it is written, so a wrong one may
+                # already be spoken when the checks see it. It cannot be taken back, so
+                # the truth follows it at once. (A reply the voice has not started on is
+                # simply spoken as corrected.)
+                if stream.speaking and honest:
+                    stream.say(f"{SPOKE_TOO_SOON} {honest}")
+                elif stream.speaking and second:
+                    stream.say(f"{PUT_RIGHT} {second}")
                 if log.delta_listener is stream:
                     log.delta_listener = stream.listener
         return self._without_tag(result, stream)
@@ -1039,12 +1050,29 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not check the reply for a claim without a tool call")
             return None
 
+    def _confirms(self, kind, result, log, log_start) -> bool:
+        """Whether the second answer did what the first reply only said was done."""
+        turn = log.content[log_start:]
+        if kind == "reminder":
+            return reminder_tool_outcome(turn) == "ok"
+        if kind == "cancel":
+            return reminder_tool_outcome(turn, CANCEL_TOOL) == "ok"
+        return used_a_tool(turn) and looks_like_action_claim(self._shown(result))
+
+    def _shown(self, result) -> str:
+        """The reply as it is shown: without its face tag and audio tags."""
+        said = str((result.response.speech.get("plain") or {}).get("speech") or "")
+        return emotion.strip_audio_tags(
+            emotion.split_tag(said, emotion.accepted_emotions(self._entry))[1]
+        ).strip()
+
     async def _async_retry(self, kind, result, log, log_start, ask):
         """Ask the main agent once more after a reply that claimed what no tool did.
 
         Returns its second answer, with the first reply and the note taken out of the
-        history and out of what the voice is given. When the second try fails, the first
-        result stands (and the reminder check still corrects it).
+        history. The voice is not given the second answer as it streams: it may already
+        be speaking the first. When the second try fails, the first result stands (and
+        the checks after it still correct it).
         """
         note = RETRY_NOTES[kind]
         _LOGGER.warning(
@@ -1053,7 +1081,8 @@ class PersonaRouter(conversation.ConversationEntity):
             kind,
         )
         stream = _STREAM.get()
-        mark = stream.checkpoint() if stream is not None else 0
+        if stream is not None:
+            stream.mute()
         false_at = next(
             (
                 index
@@ -1068,13 +1097,12 @@ class PersonaRouter(conversation.ConversationEntity):
         except Exception:  # noqa: BLE001 - the first reply stands, see above
             _LOGGER.exception("The main agent failed when asked once more")
             again = None
-        if again is None or again.response.response_type is intent.IntentResponseType.ERROR:
+        finally:
             if stream is not None:
-                stream.keep_until(mark)
+                stream.unmute()
+        if again is None or again.response.response_type is intent.IntentResponseType.ERROR:
             del log.content[note_at:]
             return result
-        if stream is not None:
-            stream.keep_from(mark)
         # The history reads as if the second answer had been the first.
         if len(log.content) > note_at and log.content[note_at].role == "user":
             del log.content[note_at]
@@ -1239,9 +1267,14 @@ class PersonaRouter(conversation.ConversationEntity):
         kind = self._unbacked_claim(user_input, result, log, log_start, reminders)
         if kind is not None:
             # It said it did something and called no tool: one more try, with a note.
+            first = result
             result = await self._async_retry(
                 kind, result, log, log_start, lambda note: ask(note, asked_in)
             )
+            if result is not first and not self._confirms(kind, result, log, log_start):
+                # The second answer does not make the first one true (it asks back, or
+                # says why it cannot): a voice already on the first is told so.
+                _SECOND_ANSWER.set(self._shown(result))
             # Still said and not done, or the second try failed: a refusal is better than
             # a confirmation of something that did not happen. (For a reminder the check
             # below says so in its own words.)

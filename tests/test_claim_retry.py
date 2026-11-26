@@ -20,7 +20,9 @@ from custom_components.voice_assistant_manager.reminders import (
     DEFAULT_ACTION_FAILURE_LINE,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
+    PUT_RIGHT,
     RETRY_NOTES,
+    SPOKE_TOO_SOON,
     looks_like_action_claim,
     used_a_tool,
 )
@@ -331,44 +333,82 @@ def streaming_script(*answers: tuple[list[str], list]):
     return converse
 
 
-async def test_the_voice_only_hears_the_second_answer(hass, sent):  # noqa: F811
-    entry = await add_router(
-        hass, options_with(reminders=REMINDERS, memory={"enabled": False})
-    )
-    pipeline = Pipeline(sent)
-    agent = streaming_script(
-        (["Of course. I've set a reminder for you tomorrow ", "at nine to send the notes."], []),
-        (["There, your reminder for tomorrow at nine ", "to send the notes is set."], tool_call("ok")),
-    )
+FIRST_LONG = ["Of course. I've set a reminder for you tomorrow ", "at nine to send the notes."]
+SECOND_LONG = ["There, your reminder for tomorrow at nine ", "to send the notes is set."]
 
+
+async def spoken_after(hass, sent, text, *answers, reminders=REMINDERS):  # noqa: F811
+    entry = await add_router(hass, options_with(reminders=reminders, memory={"enabled": False}))
+    pipeline = Pipeline(sent)
+    agent = streaming_script(*answers)
     with patch.object(conversation, "async_converse", agent):
-        result, _listener, _content = await ask_streamed(
-            hass, entry, "Remind me tomorrow at 9 to send the notes", pipeline
-        )
-
-    assert pipeline.spoken == "There, your reminder for tomorrow at nine to send the notes is set."
-    assert speech(result) == pipeline.spoken
-    assert len(agent.texts) == 2
+        result, _listener, _content = await ask_streamed(hass, entry, text, pipeline)
+    return pipeline.spoken, speech(result), agent.texts
 
 
-async def test_the_voice_hears_the_refusal_when_the_second_try_fails(hass, sent):  # noqa: F811
-    entry = await add_router(hass, options_with(memory={"enabled": False}))
-    pipeline = Pipeline(sent)
+async def test_a_second_answer_that_makes_the_first_true_is_not_spoken_on_top_of_it(hass, sent):  # noqa: F811
+    spoken, shown, texts_ = await spoken_after(
+        hass, sent, "Remind me tomorrow at 9 to send the notes",
+        (FIRST_LONG, []), (SECOND_LONG, tool_call("ok")),
+    )
+
+    # The voice was already saying the reminder is set, and now it is.
+    assert spoken == "".join(FIRST_LONG)
+    assert shown == "".join(SECOND_LONG)
+    assert len(texts_) == 2
+
+
+async def test_a_second_answer_that_says_something_else_follows_the_first(hass, sent):  # noqa: F811
+    second = ["I couldn't set that one: nine tomorrow morning ", "is already taken by another reminder."]
+
+    spoken, shown, _texts = await spoken_after(
+        hass, sent, "Remind me tomorrow at 9 to send the notes",
+        (FIRST_LONG, []), (second, tool_call("error")),
+    )
+
+    assert shown == "".join(second)
+    assert spoken == f"{''.join(FIRST_LONG)} {PUT_RIGHT} {''.join(second)}"
+
+
+async def test_a_second_try_that_still_calls_no_tool_is_followed_by_the_truth(hass, sent):  # noqa: F811
+    spoken, shown, texts_ = await spoken_after(
+        hass, sent, "Remind me tomorrow at 9 to send the notes", (FIRST_LONG, []),
+    )
+
+    assert shown == DEFAULT_FAILURE_LINE
+    assert spoken == f"{''.join(FIRST_LONG)} {SPOKE_TOO_SOON} {DEFAULT_FAILURE_LINE}"
+    assert len(texts_) == 2
+
+
+async def test_an_action_the_voice_already_claimed_is_followed_by_the_truth(hass, sent):  # noqa: F811
     first = ["I've turned on the kitchen lights, ", "and they are at full brightness for you."]
-    calls: list[str] = []
-    streamed = streaming_script((first, []))
 
-    async def converse(hass_, text, conversation_id, context, **kwargs):
-        if kwargs.get("agent_id") == MAIN_AGENT:
-            calls.append(text)
-            if len(calls) == 2:
-                raise RuntimeError("provider down")
-        return await streamed(hass_, text, conversation_id, context, **kwargs)
+    spoken, shown, _texts = await spoken_after(
+        hass, sent, "Turn on the kitchen lights", (first, []), reminders={},
+    )
 
-    with patch.object(conversation, "async_converse", converse):
-        result, _listener, _content = await ask_streamed(
-            hass, entry, "Turn on the kitchen lights", pipeline
-        )
+    assert shown == DEFAULT_ACTION_FAILURE_LINE
+    assert spoken == f"{''.join(first)} {SPOKE_TOO_SOON} {DEFAULT_ACTION_FAILURE_LINE}"
 
-    assert pipeline.spoken == DEFAULT_ACTION_FAILURE_LINE
-    assert speech(result) == DEFAULT_ACTION_FAILURE_LINE
+
+async def test_an_action_done_on_the_second_try_is_not_spoken_twice(hass, sent):  # noqa: F811
+    first = ["I've turned on the kitchen lights, ", "and they are at full brightness for you."]
+    second = ["I've turned the kitchen lights on for you, ", "at full brightness as well."]
+
+    spoken, shown, _texts = await spoken_after(
+        hass, sent, "Turn on the kitchen lights",
+        (first, []), (second, lights_call()), reminders={},
+    )
+
+    assert spoken == "".join(first)
+    assert shown == "".join(second)
+
+
+async def test_a_short_false_claim_the_voice_had_not_started_on_is_just_replaced(hass, sent):  # noqa: F811
+    spoken, shown, _texts = await spoken_after(
+        hass, sent, "Turn on the kitchen lights",
+        (["I've turned ", "them on."], []), reminders={},
+    )
+
+    assert shown == DEFAULT_ACTION_FAILURE_LINE
+    assert spoken == "I've turned them on."

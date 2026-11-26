@@ -381,6 +381,12 @@ class TagFilter:
 DeltaListener = Callable[[Any, dict[str, Any]], None]  # Any: Home Assistant's ChatLog
 
 
+# A voice pipeline starts speaking a reply while it streams in once it has been given
+# more than this many characters, or some text and then a tool call (Home Assistant's
+# assist_pipeline, STREAM_RESPONSE_CHARS). Before that, it speaks the final reply.
+SPEAKS_AFTER_CHARS: Final = 60
+
+
 class StreamedReply:
     """A chat log delta listener that passes each delta on without the reply's tag.
 
@@ -388,6 +394,10 @@ class StreamedReply:
     Each assistant message has its tag taken off; the first message with text decides
     the reply's emotion, which `on_emotion` gets once, as soon as it is known. Call
     finish() when the reply has ended, to pass on text still held back.
+
+    `speaking` says whether the voice has started on the reply, which then cannot be
+    taken back; say() adds words to it. While muted, nothing is passed on: a second
+    answer to the same request is not spoken on top of the first.
     """
 
     def __init__(
@@ -397,16 +407,8 @@ class StreamedReply:
         accepted: frozenset[str] = DEFAULT_EMOTIONS,
         voice_tags: bool = False,
         table: Mapping[str, str] | None = None,
-        hold: bool = False,
-        hold_tools: tuple[str, ...] = (),
     ) -> None:
         self.listener = listener
-        # While holding, the reply's text is kept back until finish(), which may replace
-        # it: a reply that may yet be corrected must not reach the voice as it streams.
-        # A call to one of `hold_tools` starts the holding.
-        self._hold = hold
-        self._hold_tools = hold_tools
-        self._kept = ""
         self._accepted = accepted
         self._table = table
         # How the face was chosen, for the log (split_face).
@@ -419,9 +421,14 @@ class StreamedReply:
         self._filter: TagFilter | None = None
         self._chat_log: Any = None
         self.emotion: Emotion | None = None
+        self._muted = False
+        self._sent = 0
+        self.speaking = False
 
     def __call__(self, chat_log: Any, delta: dict[str, Any]) -> None:
         self._chat_log = chat_log
+        if self._muted:
+            return
         if (role := delta.get("role")) is not None:
             self._flush()
             speaks = role == "assistant"
@@ -429,57 +436,43 @@ class StreamedReply:
                 TagFilter(self._accepted, self._voice_tags, self._table) if speaks else None
             )
             self._audio = AudioTagFilter() if speaks and not self._voice_tags else None
-        if self._hold_tools and any(
-            str(getattr(call, "tool_name", "")).endswith(self._hold_tools)
-            for call in delta.get("tool_calls") or []
-        ):
-            self._hold = True
         content = delta.get("content")
         if self._filter is not None and isinstance(content, str) and content:
             passed = self._filter.feed(content)
             if self._audio is not None:
                 passed = self._audio.feed(passed)
             self._note(self._filter.emotion, self._filter.why)
-            if self._hold:
-                self._keep(passed)
-                passed = ""
             if not passed and delta.keys() == {"content"}:
                 return
             delta = {**delta, "content": passed}
-            if self._hold:
-                del delta["content"]
-        self.listener(chat_log, delta)
+        self._pass(delta)
 
-    def finish(self, replacement: str | None = None) -> None:
-        """The reply has ended: pass on what is still held back.
-
-        With a `replacement`, text that was held is dropped and the replacement is passed
-        on in its place. Text that already went out cannot be taken back.
-        """
+    def finish(self) -> None:
+        """The reply has ended: pass on what is still held back."""
         self._flush()
-        kept, self._kept = self._kept, ""
-        if self._hold and (text := kept.rstrip() if replacement is None else replacement):
-            self.listener(self._chat_log, {"content": text})
 
-    def checkpoint(self) -> int:
-        """Close the message so far and mark the place in the held text (keep_from,
-        keep_until): what follows is another answer to the same request."""
+    def mute(self) -> None:
+        """Close the message so far and pass nothing more on, until unmute()."""
         self._flush()
         self._filter = self._audio = None
-        return len(self._kept)
+        self._muted = True
 
-    def keep_from(self, mark: int) -> None:
-        """Drop the held text before the mark: the answer after it replaces it."""
-        self._kept = self._kept[mark:]
+    def unmute(self) -> None:
+        self._muted = False
 
-    def keep_until(self, mark: int) -> None:
-        """Drop the held text after the mark: the answer before it stands."""
-        self._kept = self._kept[:mark]
+    def say(self, text: str) -> None:
+        """Add words to a reply the voice is already speaking, after what it was given."""
+        self._flush()
+        self._filter = self._audio = None
+        self._pass({"content": f" {text}"})
 
-    def _keep(self, text: str) -> None:
-        if not text:
-            return
-        self._kept += text
+    def _pass(self, delta: dict[str, Any]) -> None:
+        content = delta.get("content")
+        if isinstance(content, str):
+            self._sent += len(content)
+        if self._sent > SPEAKS_AFTER_CHARS or (self._sent and delta.get("tool_calls")):
+            self.speaking = True
+        self.listener(self._chat_log, delta)
 
     def _flush(self) -> None:
         if self._filter is None:
@@ -488,13 +481,8 @@ class StreamedReply:
         if self._audio is not None:
             passed = self._audio.feed(passed) + self._audio.flush()
         self._note(self._filter.emotion, self._filter.why)
-        if self._hold:
-            self._keep(passed)
-            # The next message of the reply must not run into this one.
-            if self._kept and not self._kept[-1].isspace():
-                self._kept += " "
-        elif passed:
-            self.listener(self._chat_log, {"content": passed})
+        if passed:
+            self._pass({"content": passed})
 
     def _note(self, emotion: Emotion | None, why: str) -> None:
         if emotion is None or self.emotion is not None:
