@@ -112,6 +112,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **Chat lines on a cast device no longer lose their last syllables.** A voice whose engine
+  makes WAV reached LiveTalking as an MP3 that Home Assistant converted on the fly. Such
+  a file has no length in it, and LiveTalking's decoder guessed it short and dropped the
+  end of the line, by up to a second on some lines. Lines for the stage are now made as
+  WAV, whose length is exact.
 - **A streamed WAV no longer loses its end on the avatar.** An engine that streams a WAV
   writes its header before it knows the length. LiveTalking read only as many samples as
   that header said, so a header that said too few cut the end of the line. The header is
