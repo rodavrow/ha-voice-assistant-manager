@@ -29,6 +29,7 @@ import enum
 import logging
 import random
 from collections.abc import Mapping
+from contextvars import ContextVar
 from datetime import timedelta
 from typing import Any
 
@@ -82,6 +83,7 @@ from .memory import (
 from .panel import speaker_overrides
 from .reminders import (
     CANCEL_TOOL,
+    REMINDER_TOOL,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     assistant_name,
@@ -103,6 +105,9 @@ from .speaker import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+# The line the reminder check put in place of this turn's reply, if it did (_honest_reply):
+# a reply that streams in is then spoken as that line.
+_HONEST_LINE: ContextVar[str | None] = ContextVar(f"{__name__}.honest_line", default=None)
 SCRIPT_TIMEOUT = 8
 LAST_RESORT_REPLY = "Sorry, I can't help you."
 # Spoken when the main agent fails (its provider is down, say), unless set under Advanced.
@@ -535,6 +540,7 @@ class PersonaRouter(conversation.ConversationEntity):
     @staticmethod
     def _honest_reply(user_input, result, log, log_start, line):
         """The result with `line` as its reply, in the history too."""
+        _HONEST_LINE.set(line)
         for index in range(len(log.content) - 1, log_start - 1, -1):
             entry = log.content[index]
             if entry.role == "assistant" and entry.content:
@@ -974,8 +980,11 @@ class PersonaRouter(conversation.ConversationEntity):
                 emotion.accepted_emotions(self._entry),
                 emotion.voice_tags_on(self._entry),
                 emotion.face_table(self._entry),
+                hold=self._may_be_corrected(user_input, log),
+                hold_tools=(REMINDER_TOOL, CANCEL_TOOL) if self._reminder_settings() else (),
             )
             log.delta_listener = stream
+        corrected = _HONEST_LINE.set(None)
         # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
         turn = avatar_stream.turn_started(
             self.hass, self._entry.entry_id, user_input.satellite_id
@@ -984,11 +993,31 @@ class PersonaRouter(conversation.ConversationEntity):
             result = await self._async_answer(user_input)
         finally:
             avatar_stream.turn_ended(turn)
+            honest = _HONEST_LINE.get()
+            _HONEST_LINE.reset(corrected)
             if stream is not None:
-                stream.finish()
+                # A reply the reminder check replaced is spoken as replaced.
+                stream.finish(honest)
                 if log.delta_listener is stream:
                     log.delta_listener = stream.listener
         return self._without_tag(result, stream)
+
+    def _may_be_corrected(self, user_input, log) -> bool:
+        """Whether the reminder check may replace this turn's reply (see _guard_reminder).
+
+        Such a reply is not passed to the voice while it streams in, only once the check
+        has seen it: a voice that already said "I've set a reminder" cannot take it back.
+        """
+        try:
+            if not self._reminder_settings():
+                return False
+            earlier = _earlier_user_texts(log, len(log.content), EARLIER_TURNS)
+            return is_cancel_turn(user_input.text) or is_reminder_exchange(
+                [user_input.text, *earlier]
+            )
+        except Exception:  # noqa: BLE001 - the reply always goes ahead
+            _LOGGER.exception("Could not tell whether the reply is about a reminder")
+            return False
 
     def _tell_emotion(self, found: emotion.Emotion, why: str = "") -> None:
         emotion.send_emotion(self.hass, self._entry, found, why)

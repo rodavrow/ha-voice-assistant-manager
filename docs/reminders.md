@@ -253,4 +253,6 @@ A language model can say "your reminder is set" without having called the tool. 
 
 The same goes for cancelling: a reply that says a reminder is cancelled or removed when `cancel_reminder` did not return `ok` is replaced by "I could not cancel that reminder. Please ask me again." A reply after a cancellation is never taken for a reminder that was set, even when it says when the reminder was set for.
 
+A reply is also spoken as corrected. A longer reply normally streams to the voice while it is being written; in a conversation about a reminder it is held back until it has been checked, so the voice never says "your reminder is set" when the text says it is not.
+
 This is a safety net, not a guarantee. It only reacts to a reply that clearly claims a reminder, so a vaguer false confirmation ("Okay, five o'clock it is.") gets through. A reply that asks something back, reports a failure, or is about something else ("I've set a timer") is left alone, and so is "I'll remind Sam" after a message for Sam with no time.
