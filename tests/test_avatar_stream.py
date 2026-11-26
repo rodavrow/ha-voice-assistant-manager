@@ -4,6 +4,9 @@
 
 import asyncio
 import json
+import shutil
+import struct
+import subprocess
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import patch
@@ -386,7 +389,63 @@ def test_raw_audio_without_a_sample_rate_cannot_be_decoded():
 def test_an_unknown_format_is_left_for_ffmpeg_to_recognise():
     arguments = decoder_arguments("opus", {})
 
-    assert arguments[arguments.index("-i") - 1] == "nobuffer"
+    assert "-f" not in arguments[: arguments.index("-i")]
+    assert "-probesize" not in arguments
+
+
+def test_regression_stream_opening_ffmpeg_never_gets_the_flag_that_drops_it():
+    # "-fflags nobuffer" made ffmpeg discard the audio it read while working out the
+    # stream: the first 1.26 s of every streamed reply.
+    for extension in ("mp3", "wav", "pcm", "opus"):
+        assert "nobuffer" not in decoder_arguments(extension, {"preferred_sample_rate": 16000})
+
+
+def test_a_named_format_starts_decoding_without_waiting_for_more_audio():
+    arguments = decoder_arguments("mp3", {})
+
+    assert arguments[arguments.index("-probesize") + 1] == "32"
+    assert arguments[arguments.index("-analyzeduration") + 1] == "0"
+
+
+def _tone(seconds: float, hertz: int) -> str:
+    return f"sine=frequency={hertz}:duration={seconds}:sample_rate=44100"
+
+
+def _hertz(samples: tuple[int, ...]) -> float:
+    crossings = sum(1 for a, b in zip(samples, samples[1:], strict=False) if (a < 0) != (b < 0))
+    return crossings / 2 / (len(samples) / avatar_stream.PCM_RATE)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs the ffmpeg program")
+async def test_regression_stream_opening_real_ffmpeg_keeps_the_first_second(tmp_path):
+    """A clip fed in small pieces, as an engine streams it, comes out whole from its start."""
+    clip = tmp_path / "clip.mp3"
+    subprocess.run(  # noqa: ASYNC221, S603 - a fixture made once, with fixed arguments
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", _tone(1, 880),
+         "-f", "lavfi", "-i", _tone(2, 440), "-filter_complex", "[0][1]concat=n=2:v=0:a=1",
+         "-b:a", "128k", str(clip)],
+        check=True,
+    )
+    mp3 = clip.read_bytes()
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg", *decoder_arguments("mp3", {}),
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+    )
+
+    async def feed() -> None:
+        for start in range(0, len(mp3), 417):  # one MP3 frame at a time
+            process.stdin.write(mp3[start : start + 417])
+            await process.stdin.drain()
+        process.stdin.close()
+
+    _, pcm = await asyncio.gather(feed(), process.stdout.read(-1))
+    await process.wait()
+
+    samples = struct.unpack(f"<{len(pcm) // 2}h", pcm[: len(pcm) // 2 * 2])
+    assert len(samples) / avatar_stream.PCM_RATE == pytest.approx(3.0, abs=0.1)
+    assert _hertz(samples[:1600]) == pytest.approx(880, abs=40)
+    assert _hertz(samples[8000:9600]) == pytest.approx(880, abs=40)
+    assert _hertz(samples[-8000:-6400]) == pytest.approx(440, abs=40)
 
 
 # The feed

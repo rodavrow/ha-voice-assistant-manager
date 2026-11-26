@@ -196,10 +196,15 @@ def decoder_arguments(extension: str, options: Mapping[str, Any]) -> list[str] |
         channels = int(options.get("preferred_sample_channels") or 1)
         source = ["-f", f"s{width * 8}le", "-ar", str(int(rate)), "-ac", str(channels)]
     elif extension in _FFMPEG_FORMATS:
-        # Named, so ffmpeg does not wait for enough audio to guess the format.
         source = ["-f", _FFMPEG_FORMATS[extension]]
+    if source:
+        # The format is known, so ffmpeg need not read ahead to work it out: without
+        # these it holds back the first 1.4 s of an MP3 before it gives any audio.
+        source = ["-probesize", "32", "-analyzeduration", "0", *source]
+    # Never "-fflags nobuffer": it makes ffmpeg throw away what it read while working the
+    # stream out, which was the first 1.26 s of every reply.
     return [
-        "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", *source, "-i", "pipe:0",
+        "-hide_banner", "-loglevel", "error", *source, "-i", "pipe:0",
         "-f", "s16le", "-ac", "1", "-ar", str(PCM_RATE), "-flush_packets", "1", "pipe:1",
     ]
 
@@ -247,6 +252,9 @@ class ReplyFeed:
         self._audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._size = 0
         self._stopped = False
+        # For the log: what was forwarded, to compare with what LiveTalking says it got.
+        self._opened = _now()
+        self._sent_bytes = 0
 
     async def async_open(self) -> bool:
         """Open the reply on LiveTalking. False when it did not say "ready" in time."""
@@ -273,6 +281,11 @@ class ReplyFeed:
     def write(self, audio: bytes) -> None:
         if self._stopped:
             return
+        if not self._size:
+            _LOGGER.debug(
+                "Avatar stream: reply %s first %d bytes from the engine %.2f s after it opened",
+                self.reply_id, len(audio), _now() - self._opened,
+            )
         self._size += len(audio)
         if self._size > MAX_CLIP_BYTES:
             self.finish()
@@ -311,6 +324,12 @@ class ReplyFeed:
             _LOGGER.warning("Avatar stream: stopped by an unexpected error", exc_info=True)
         finally:
             self._stopped = True
+            _LOGGER.debug(
+                "Avatar stream: reply %s closed %.1f s after it opened; %d bytes from the"
+                " engine, %.2f s of audio forwarded",
+                self.reply_id, _now() - self._opened, self._size,
+                self._sent_bytes / (PCM_RATE * 2),
+            )
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -338,7 +357,13 @@ class ReplyFeed:
         async for pcm in decoder.output():
             if self._stopped or self._session_changed():
                 return
+            if not self._sent_bytes:
+                _LOGGER.debug(
+                    "Avatar stream: reply %s first audio forwarded %.2f s after it opened",
+                    self.reply_id, _now() - self._opened,
+                )
             await self._socket.send_bytes(pcm)
+            self._sent_bytes += len(pcm)
         if not self._stopped:
             await self._socket.send_json({"type": "end"})
 

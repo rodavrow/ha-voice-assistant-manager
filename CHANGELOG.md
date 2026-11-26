@@ -107,6 +107,10 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A reply streamed to the avatar no longer loses its first words.** The audio sent to
+  LiveTalking was missing its first 1.26 seconds ("Why did the scarecrow" of a joke), while
+  the avatar stood idle: an ffmpeg option meant to cut delay made it throw that audio away.
+  The whole reply is now sent, and the avatar gets its first audio about 1.3 seconds sooner.
 - **A cancelled reminder is no longer reported as a reminder that could not be set.** After
   `cancel_reminder` removed a reminder, a reply such as "I've removed your reminder that was
   set for 8" was taken for a false "reminder set" and replaced by "I could not set that
