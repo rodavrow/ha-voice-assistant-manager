@@ -38,7 +38,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from . import announcement_look, avatar_chat, avatar_hold, stage
+from . import announcement_look, avatar_chat, avatar_hold, emotion, stage
 from .announce import writer_agent
 from .avatar import prepare_clip
 from .const import DOMAIN
@@ -533,6 +533,8 @@ class _Chat:
     avatar_selects: list[str] = field(default_factory=list)
     # The chat shown on a cast device, with the avatars talking (stage.py), if it is.
     on_stage: stage.Show | None = None
+    # The emotion of the line being or last spoken, from its tag (emotion.py).
+    line_emotion: emotion.Emotion = emotion.NEUTRAL
 
     def add(self, who: str, text: str) -> None:
         self.lines.append(ChatLine(who, text, dt_util.utcnow().isoformat()))
@@ -893,7 +895,7 @@ class ChatShowManager:
                 return
             own, other = chat.names[turn], chat.names[1 - turn]
             heard = len(chat.lines)
-            line = await self._async_write(chat, entry, own, other, writer)
+            line, chat.line_emotion = await self._async_write(chat, entry, own, other, writer)
             if chat.ended:
                 return
             if not line:
@@ -976,8 +978,9 @@ class ChatShowManager:
 
     async def _async_write(
         self, chat: _Chat, entry: ConfigEntry, own_name: str, other_name: str, writer: str
-    ) -> str:
-        """The assistant's next line, capped at the word limit, or "" when it failed."""
+    ) -> tuple[str, emotion.Emotion]:
+        """The assistant's next line, capped at the word limit, or "" when it failed, and
+        the emotion its tag gave it. The tag is never part of the line."""
         words = chat.limits.words
         rules = chat_instructions(own_name, other_name, words)
         prompt = "\n\n".join(part for part in (character_of(entry), rules) if part)
@@ -994,19 +997,19 @@ class ChatShowManager:
                 )
         except TimeoutError:
             _LOGGER.warning("%s took longer than %s s to write a chat line", writer, LINE_TIMEOUT)
-            return ""
+            return "", emotion.NEUTRAL
         except Exception:  # noqa: BLE001 - any agent failure ends the chat with a reason
             _LOGGER.warning("%s could not write a chat line", writer, exc_info=True)
-            return ""
+            return "", emotion.NEUTRAL
         if result.response.response_type == intent.IntentResponseType.ERROR:
             _LOGGER.warning("%s answered a chat line with an error", writer)
-            return ""
+            return "", emotion.NEUTRAL
         speech = str((result.response.speech.get("plain") or {}).get("speech") or "")
-        line = clean_text(speech)
+        found, line = emotion.split_tag(clean_text(speech))
         prefix = f"{own_name}:"
         if line.casefold().startswith(prefix.casefold()):
             line = line[len(prefix) :]
-        return fit_line(line, words)
+        return fit_line(line, words), found
 
     async def _async_speak(
         self, chat: _Chat, entry: ConfigEntry, line: str, listen: bool = False
@@ -1055,6 +1058,7 @@ class ChatShowManager:
             _LOGGER.warning("The chat voice gave audio the avatar cannot play")
             return False
         chat.speaking = True
+        emotion.send_emotion(self.hass, entry, chat.line_emotion)
         try:
             return await stage.async_say(
                 self.hass, chat.on_stage, entry.entry_id, line, *clip,
@@ -1137,6 +1141,7 @@ class ChatShowManager:
             returned = False
             try:
                 chat.speaking = True
+                emotion.send_emotion(self.hass, entry, chat.line_emotion)
                 async with asyncio.timeout(timeout):
                     await self.hass.services.async_call(
                         "assist_satellite", service, data, blocking=True
@@ -1249,6 +1254,7 @@ class ChatShowManager:
 
         unsubscribe = async_track_state_change_event(self.hass, [chat.speaker], changed)
         chat.speaking = True
+        emotion.send_emotion(self.hass, entry, chat.line_emotion)
         try:
             async with asyncio.timeout(timeout):
                 await self.hass.services.async_call(
