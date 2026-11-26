@@ -83,6 +83,7 @@ from .memory import (
 from .panel import speaker_overrides
 from .reminders import (
     CANCEL_TOOL,
+    DEFAULT_ACTION_FAILURE_LINE,
     RETRY_NOTES,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
@@ -1241,6 +1242,18 @@ class PersonaRouter(conversation.ConversationEntity):
             result = await self._async_retry(
                 kind, result, log, log_start, lambda note: ask(note, asked_in)
             )
+            # Still said and not done, or the second try failed: a refusal is better than
+            # a confirmation of something that did not happen. (For a reminder the check
+            # below says so in its own words.)
+            if kind == "action" and (
+                self._unbacked_claim(user_input, result, log, log_start, False) == "action"
+            ):
+                _LOGGER.warning(
+                    "The main agent again said something was done without calling a tool"
+                )
+                result = self._honest_reply(
+                    user_input, result, log, log_start, DEFAULT_ACTION_FAILURE_LINE
+                )
         if reminders:
             result, about_reminder = self._guard_reminder(user_input, result, log, log_start)
             if about_reminder:

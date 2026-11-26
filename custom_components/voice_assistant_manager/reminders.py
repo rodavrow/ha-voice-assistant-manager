@@ -17,6 +17,8 @@ CANCEL_TOOL = "cancel_reminder"
 HOUSEHOLD = "household"
 DEFAULT_FAILURE_LINE = "I could not set that reminder. Please ask me again."
 DEFAULT_CANCEL_FAILURE_LINE = "I could not cancel that reminder. Please ask me again."
+# Spoken when a reply still says something was done, after a second try, with no tool call.
+DEFAULT_ACTION_FAILURE_LINE = "I could not do that. Please ask me again."
 
 ToolOutcome = Literal["none", "ok", "error"]
 

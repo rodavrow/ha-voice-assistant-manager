@@ -130,14 +130,15 @@ async def test_every_reply_reaches_the_voice_only_once_it_is_complete(hass, sent
     assert heard_when == ["heard after 2 written"]
 
 
-async def test_with_reminders_off_the_reply_is_still_spoken(hass, sent):  # noqa: F811
+async def test_with_reminders_off_a_false_confirmation_is_still_never_spoken(hass, sent):  # noqa: F811
     entry = await add_router(hass, options_with(memory={"enabled": False}))
     pipeline = Pipeline(sent)
 
     with patch.object(conversation, "async_converse", streaming_agent(CLAIM)):
         await ask_streamed(hass, entry, ASKED, pipeline)
 
-    assert "set a reminder" in pipeline.spoken
+    assert "set a reminder" not in pipeline.spoken
+    assert pipeline.spoken == "I could not do that. Please ask me again."
 
 
 # The listener
