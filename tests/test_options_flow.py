@@ -68,6 +68,7 @@ EXPECTED_SETTINGS = {
         "avatar_connection": "on_wake",
         "avatar_stream": True,
         "match_within": 6,
+        "voice_tags": False,
     },
 }
 

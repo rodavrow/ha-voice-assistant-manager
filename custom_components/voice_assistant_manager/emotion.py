@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Callable
 from collections.abc import Mapping
 from typing import Any, Final, cast
@@ -76,18 +77,146 @@ def accepted_emotions(entry: Any) -> frozenset[str]:  # Any: a ConfigEntry, or a
 
 
 def split_tag(
-    text: str, accepted: frozenset[str] = DEFAULT_EMOTIONS
+    text: str, accepted: frozenset[str] = DEFAULT_EMOTIONS, keep_unknown: bool = False
 ) -> tuple[Emotion, str]:
     """(emotion, the reply without its tag). No tag, or one not `accepted`, is neutral.
 
     Any word of letters in brackets at the very start is a tag and is taken off, with
     the spaces around it, whether it is accepted or not; the rest is left as it is.
+    With `keep_unknown`, a tag that is not accepted stays: it is an audio tag for the
+    voice (see voice_tags_on), not the avatar's emotion.
     """
     match = _TAG.match(text)
     if match is None or match.end(1) >= MAX_TAG_CHARS:
         return NEUTRAL, text
     word = match.group(1).lower()
-    return (word if word in accepted else NEUTRAL), text[match.end() :]
+    if word not in accepted:
+        return NEUTRAL, text if keep_unknown else text[match.end() :]
+    return word, text[match.end() :]
+
+
+# Audio tags: directions for a voice that understands them, such as "[laughs]",
+# "[whispering, fearful]" or "[out of breath after running up the stairs]". Brackets around
+# text that starts with a letter and has no digit, so "[1]" and "[2b]" are never one.
+MAX_AUDIO_TAG_CHARS: Final = 80
+_AUDIO_TAG = re.compile(rf"\[[^\W\d_][^\[\]\d\n]{{0,{MAX_AUDIO_TAG_CHARS - 3}}}\]")
+# The setting under Advanced: whether this assistant's voice is given audio tags.
+CONF_VOICE_TAGS: Final = "voice_tags"
+_SPOKEN: Final = "voice_tags_spoken"
+# How long a reply's tagged text is kept for the voice that speaks it.
+_SPOKEN_FOR: Final = 30.0
+
+
+def voice_tags_on(entry: Any) -> bool:  # Any: a ConfigEntry, or a stand-in
+    """Whether the assistant's voice understands audio tags and is given them."""
+    advanced = (getattr(entry, "options", None) or {}).get("advanced")
+    return isinstance(advanced, Mapping) and advanced.get(CONF_VOICE_TAGS) is True
+
+
+def strip_audio_tags(text: str) -> str:
+    """The text without its audio tags, as it is shown: no gap is left where one was."""
+    if "[" not in text:
+        return text
+    cleaned = _AUDIO_TAG.sub("", text)
+    if cleaned == text:
+        return text
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([,.!?;:…])", r"\1", cleaned)
+    cleaned = re.sub(r"(?m)^[ \t]+|[ \t]+$", "", cleaned)
+    return cleaned
+
+
+class AudioTagFilter:
+    """Takes the audio tags out of one streamed message: feed it each piece, then flush.
+
+    Text is held back only from a "[" until it is clear whether a tag follows: its closing
+    bracket, a character a tag cannot have, or MAX_AUDIO_TAG_CHARS characters. Spaces at
+    the end of a piece wait for the next one, so no gap is left where a tag was. The
+    pieces passed on add up to strip_audio_tags of the whole (but for spaces at its end).
+    """
+
+    def __init__(self) -> None:
+        self._held = ""
+        # Spaces not passed on yet, the last character that was, and whether a tag was
+        # taken out since.
+        self._space = ""
+        self._last = ""
+        self._gap = False
+
+    def feed(self, piece: str) -> str:
+        out: list[str] = []
+        for char in piece:
+            if not self._held:
+                if char == "[":
+                    self._held = char
+                else:
+                    out.append(self._emit(char))
+                continue
+            self._held += char
+            if char == "]":
+                tag, self._held = self._held, ""
+                if _AUDIO_TAG.fullmatch(tag):
+                    self._gap = True
+                else:
+                    out.append(self._emit(tag))
+            elif char == "[":
+                out.append(self._emit(self._held[:-1]))
+                self._held = "["
+            elif char.isdigit() or char == "\n" or len(self._held) >= MAX_AUDIO_TAG_CHARS:
+                held, self._held = self._held, ""
+                out.append(self._emit(held))
+        return "".join(out)
+
+    def flush(self) -> str:
+        held, self._held = self._held, ""
+        rest = self._emit(held)
+        space, self._space = self._space, ""
+        return rest if self._gap else rest + space
+
+    def _emit(self, text: str) -> str:
+        if not text:
+            return ""
+        lead, self._space = self._space, ""
+        if self._gap:
+            # Where a tag was: one space at most, and none before punctuation or at the
+            # start of a line.
+            spaced = bool(lead) or text[0] in " \t"
+            text = text.lstrip(" \t")
+            if not text:
+                self._space = " " if spaced else ""
+                return ""
+            self._gap = False
+            keep = spaced and text[0] not in ",.!?;:…\n" and self._last not in ("", "\n")
+            lead = " " if keep else ""
+        body = text.rstrip(" \t")
+        self._space = text[len(body) :]
+        if not body:
+            self._space = lead + self._space
+            return ""
+        self._last = body[-1]
+        return lead + body
+
+
+def remember_spoken(hass: HomeAssistant, entry_id: str, shown: str, spoken: str) -> None:
+    """Keep a reply's text with its audio tags for the voice that is about to speak it.
+
+    A reply that is not streamed reaches the voice as the text that is shown, without
+    tags; the assistant's avatar voice asks for the tagged text back (take_spoken).
+    """
+    if shown != spoken:
+        hass.data.setdefault(DOMAIN, {}).setdefault(_SPOKEN, {})[entry_id] = (
+            shown, spoken, time.monotonic(),
+        )
+
+
+def take_spoken(hass: HomeAssistant, entry_id: str, shown: str) -> str:
+    """The text to speak for `shown`: with its audio tags when it is the reply just given
+    by this assistant, otherwise `shown` itself."""
+    kept = hass.data.get(DOMAIN, {}).get(_SPOKEN, {}).get(entry_id)
+    if kept is None or kept[0].strip() != shown.strip():
+        return shown
+    del hass.data[DOMAIN][_SPOKEN][entry_id]
+    return kept[1] if time.monotonic() - kept[2] <= _SPOKEN_FOR else shown
 
 
 class TagFilter:
@@ -99,8 +228,11 @@ class TagFilter:
     spaces right after a tag. The pieces passed on add up to split_tag of the whole.
     """
 
-    def __init__(self, accepted: frozenset[str] = DEFAULT_EMOTIONS) -> None:
+    def __init__(
+        self, accepted: frozenset[str] = DEFAULT_EMOTIONS, keep_unknown: bool = False
+    ) -> None:
         self._accepted = accepted
+        self._keep_unknown = keep_unknown
         self._held = ""
         self._after_tag = False
         self.emotion: Emotion | None = None
@@ -120,7 +252,7 @@ class TagFilter:
         return self._decide() if self.emotion is None and self._held else ""
 
     def _decide(self) -> str:
-        self.emotion, rest = split_tag(self._held, self._accepted)
+        self.emotion, rest = split_tag(self._held, self._accepted, self._keep_unknown)
         self._after_tag = rest != self._held
         self._held = ""
         return self._passed(rest)
@@ -150,9 +282,14 @@ class StreamedReply:
         listener: DeltaListener,
         on_emotion: Callable[[Emotion], None],
         accepted: frozenset[str] = DEFAULT_EMOTIONS,
+        voice_tags: bool = False,
     ) -> None:
         self.listener = listener
         self._accepted = accepted
+        # With voice tags the deltas keep their audio tags: they are what the voice is
+        # given. Without, every audio tag is taken out, so no voice reads one aloud.
+        self._voice_tags = voice_tags
+        self._audio: AudioTagFilter | None = None
         self._on_emotion = on_emotion
         self._filter: TagFilter | None = None
         self._chat_log: Any = None
@@ -162,10 +299,14 @@ class StreamedReply:
         self._chat_log = chat_log
         if (role := delta.get("role")) is not None:
             self._flush()
-            self._filter = TagFilter(self._accepted) if role == "assistant" else None
+            speaks = role == "assistant"
+            self._filter = TagFilter(self._accepted, self._voice_tags) if speaks else None
+            self._audio = AudioTagFilter() if speaks and not self._voice_tags else None
         content = delta.get("content")
         if self._filter is not None and isinstance(content, str) and content:
             passed = self._filter.feed(content)
+            if self._audio is not None:
+                passed = self._audio.feed(passed)
             self._note(self._filter.emotion)
             if not passed and delta.keys() == {"content"}:
                 return
@@ -179,6 +320,8 @@ class StreamedReply:
         if self._filter is None:
             return
         passed = self._filter.flush()
+        if self._audio is not None:
+            passed = self._audio.feed(passed) + self._audio.flush()
         self._note(self._filter.emotion)
         if passed:
             self.listener(self._chat_log, {"content": passed})

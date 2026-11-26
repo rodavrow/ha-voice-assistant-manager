@@ -335,6 +335,8 @@ async def _write_line(
         clean_text(str((result.response.speech.get("plain") or {}).get("speech") or "")),
         emotion.accepted_emotions(entry),
     )
+    # The caller speaks the line through a voice of its own choosing: no audio tags.
+    line = clean_text(emotion.strip_audio_tags(line))
     return (line, found) if len(line) <= MAX_LINE_LENGTH else ("", emotion.NEUTRAL)
 
 
