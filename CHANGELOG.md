@@ -97,7 +97,9 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   called in that turn, the main agent is asked once more, with a note that it called no
   tool. Its second answer is the one spoken and kept in the history. For a reminder or a
   cancellation that is still not made, the honest line follows as before ("I could not set
-  that reminder"); for anything else the second answer is spoken as it is.
+  that reminder"). For anything else, a second answer that still says it was done with no
+  tool call is replaced by "I could not do that. Please ask me again.": a refusal is better
+  than a confirmation of something that did not happen.
 
 ### Changed
 

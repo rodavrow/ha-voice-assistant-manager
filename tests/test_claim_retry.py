@@ -17,6 +17,7 @@ from homeassistant.helpers import llm
 from homeassistant.helpers.chat_session import async_get_chat_session
 
 from custom_components.voice_assistant_manager.reminders import (
+    DEFAULT_ACTION_FAILURE_LINE,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     RETRY_NOTES,
@@ -220,16 +221,28 @@ async def test_an_action_claimed_without_a_tool_is_asked_for_once_more(hass):
     assert "I've turned on the kitchen lights." not in texts(log)
 
 
-async def test_an_action_claimed_twice_without_a_tool_is_spoken_as_the_second_reply(hass):
+async def test_an_action_claimed_twice_without_a_tool_is_a_refusal(hass):
     agent = Scripted(
         ("I've turned on the kitchen lights.", []),
         ("I've turned them on, as you asked.", []),
     )
 
-    said, _log = await asked(hass, agent, "Turn on the kitchen lights")
+    said, log = await asked(hass, agent, "Turn on the kitchen lights")
 
-    assert said == "I've turned them on, as you asked."
-    assert len(agent.texts) == 2
+    assert said == DEFAULT_ACTION_FAILURE_LINE
+    assert len(agent.texts) == 2  # asked once more, and only once
+    assert texts(log)[-1] == DEFAULT_ACTION_FAILURE_LINE
+
+
+async def test_a_second_answer_that_claims_nothing_is_spoken(hass):
+    agent = Scripted(
+        ("I've turned on the kitchen lights.", []),
+        ("Which lights do you mean, the kitchen or the hall?", []),
+    )
+
+    said, _log = await asked(hass, agent, "Turn on the lights")
+
+    assert said == "Which lights do you mean, the kitchen or the hall?"
 
 
 async def test_an_action_with_a_tool_call_is_not_asked_for_again(hass):
@@ -258,13 +271,14 @@ async def test_an_answer_a_question_and_a_memory_are_not_asked_for_again(hass, t
     assert len(agent.texts) == 1
 
 
-async def test_a_failed_second_try_leaves_the_first_reply_and_no_note(hass):
+async def test_a_failed_second_try_is_a_refusal_and_leaves_no_note(hass):
     agent = Scripted(("I've turned on the kitchen lights.", []), RuntimeError("provider down"))
 
     said, log = await asked(hass, agent, "Turn on the kitchen lights")
 
-    assert said == "I've turned on the kitchen lights."
+    assert said == DEFAULT_ACTION_FAILURE_LINE
     assert RETRY_NOTES["action"] not in texts(log)
+    assert "I've turned on the kitchen lights." not in texts(log)
 
 
 async def test_it_works_with_reminders_off(hass):
@@ -337,7 +351,7 @@ async def test_the_voice_only_hears_the_second_answer(hass, sent):  # noqa: F811
     assert len(agent.texts) == 2
 
 
-async def test_the_voice_hears_the_first_answer_when_the_second_try_fails(hass, sent):  # noqa: F811
+async def test_the_voice_hears_the_refusal_when_the_second_try_fails(hass, sent):  # noqa: F811
     entry = await add_router(hass, options_with(memory={"enabled": False}))
     pipeline = Pipeline(sent)
     first = ["I've turned on the kitchen lights, ", "and they are at full brightness for you."]
@@ -352,6 +366,9 @@ async def test_the_voice_hears_the_first_answer_when_the_second_try_fails(hass, 
         return await streamed(hass_, text, conversation_id, context, **kwargs)
 
     with patch.object(conversation, "async_converse", converse):
-        await ask_streamed(hass, entry, "Turn on the kitchen lights", pipeline)
+        result, _listener, _content = await ask_streamed(
+            hass, entry, "Turn on the kitchen lights", pipeline
+        )
 
-    assert pipeline.spoken == "".join(first)
+    assert pipeline.spoken == DEFAULT_ACTION_FAILURE_LINE
+    assert speech(result) == DEFAULT_ACTION_FAILURE_LINE

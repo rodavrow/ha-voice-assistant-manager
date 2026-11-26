@@ -21,6 +21,7 @@ from custom_components.voice_assistant_manager.memory import (
     should_extract,
 )
 from custom_components.voice_assistant_manager.reminders import (
+    DEFAULT_ACTION_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     has_alert_time,
     is_reminder_request,
@@ -623,7 +624,9 @@ async def test_regression_reminder_mention_three_turns_back_is_too_far(hass: Hom
         ],
     )
 
-    assert said == "Done, your reminder is set for five."
+    # Too far back for the reminder check, so not its line. The reply still says something
+    # was done with no tool call, which the general check refuses after one more try.
+    assert said == DEFAULT_ACTION_FAILURE_LINE
 
 
 async def test_a_relayed_error_is_kept(hass: HomeAssistant):
@@ -646,9 +649,17 @@ async def test_a_question_back_is_kept(hass: HomeAssistant):
 
 
 async def test_a_reply_to_something_else_is_kept(hass: HomeAssistant):
+    said, _ = await reply_after(
+        hass, "How warm is it in here?", "Twenty-one degrees, and rising.", []
+    )
+
+    assert said == "Twenty-one degrees, and rising."
+
+
+async def test_a_reply_that_says_it_is_done_without_a_tool_call_is_refused(hass: HomeAssistant):
     said, _ = await reply_after(hass, "Turn the heating up a bit please", "Consider it done.", [])
 
-    assert said == "Consider it done."
+    assert said == DEFAULT_ACTION_FAILURE_LINE
 
 
 async def test_replies_are_left_alone_when_reminders_are_off(hass: HomeAssistant):
