@@ -73,6 +73,11 @@ CONVERSATION_LIFETIME = timedelta(minutes=5)
 _VERDICTS = ("owner", "wife", "partner", "stranger")
 
 
+def is_verdict(helper_state: str | None) -> bool:
+    """Whether a helper's value says who spoke: a person or an unknown voice."""
+    return helper_state in _VERDICTS
+
+
 @dataclass(frozen=True)
 class Remembered:
     """Who spoke in a voice conversation: a person, never an unknown voice."""
@@ -110,7 +115,7 @@ def follow_up_role(
     if now - remembered.at > FOLLOW_UP_WINDOW:
         return None
     new_match = (
-        helper_state in _VERDICTS
+        is_verdict(helper_state)
         and helper_changed is not None
         and (remembered.decided_by is None or helper_changed > remembered.decided_by)
     )

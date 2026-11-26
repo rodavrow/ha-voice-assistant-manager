@@ -4,6 +4,7 @@
 
 from homeassistant.core import HomeAssistant
 
+from custom_components.voice_assistant_manager.conversation import UNSURE_LINE
 from custom_components.voice_assistant_manager.memory import async_get_memory, entry_key
 
 from .router_helpers import MEMORY_AGENT, FakeAgents, add_router, ask, options_with
@@ -84,5 +85,6 @@ async def test_regression_review_5_unexpected_helper_value_gets_no_memory(hass: 
         )
         await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert result.response.speech["plain"]["speech"] == "The answer is no."
+    # Refused as "nobody was told apart", not as an unknown voice; no agent is reached.
+    assert result.response.speech["plain"]["speech"] == UNSURE_LINE
     assert agents.calls == []

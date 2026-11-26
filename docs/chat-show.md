@@ -125,6 +125,8 @@ The satellite says nothing back. The next assistant answers what was said, and b
 
 The assistants say each other's names, so the satellite may wake on its own line when a name is its wake word. The assistant ignores what the satellite hears then (it answers with nothing) and the chat goes on with the next line. To join in or say stop, wait until a line has ended and wake the satellite between lines.
 
+Other satellites in earshot may wake on those names too, for example when the chat plays on a television. While a chat plays on any speaker, and for about a quarter of a minute after, a satellite gives no answer to a voice it does not recognise, so it does not talk over the chat. A recognised person who wakes it is answered as always.
+
 A line that is playing is never cut off. If the satellite is busy because someone woke it, the chat waits for it, and ends if it stays busy.
 
 What people say while joining in is only used in the chat. It never reaches the main agent, memory or the shared history. This also holds for about a quarter of a minute after the chat ended, while the satellite may still be listening: a late reply gets no answer and joins nothing, and a late stop word gets "Okay.".

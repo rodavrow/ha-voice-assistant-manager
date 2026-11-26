@@ -108,6 +108,7 @@ from .speaker import (
     Remembered,
     Role,
     follow_up_role,
+    is_verdict,
     resolve_speaker,
 )
 
@@ -128,6 +129,9 @@ LAST_RESORT_REPLY = "Sorry, I can't help you."
 # Spoken when the main agent fails (its provider is down, say), unless set under Advanced.
 DEFAULT_AGENT_DOWN_LINE = "Sorry, I can't think right now. Please try again in a moment."
 CHAT_STOPPED_LINE = "Okay."
+# Spoken when the satellite never said whose voice it heard (its voice match did not
+# arrive). The request is refused all the same, but not as if the voice were unknown.
+UNSURE_LINE = "Sorry, I can't tell who is speaking right now. Please try again in a moment."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
 # How long after a satellite starts listening its voice match can still arrive, unless set
 # under Advanced. LANovo publishes it 4.6-5.5 s after the wake word, whatever is said.
@@ -202,6 +206,8 @@ class PersonaRouter(conversation.ConversationEntity):
         self._unsafe_logged: dict[str, str] = {}
         # conversation_id -> the person of its last voice turn (speaker.follow_up_role).
         self._spoken_by: dict[str, Remembered] = {}
+        # Satellites whose last voice turn got no voice match, to warn once per outage.
+        self._no_match: set[str] = set()
 
     @property
     def supported_languages(self):
@@ -376,6 +382,7 @@ class PersonaRouter(conversation.ConversationEntity):
         else:
             role, matched = resolve_speaker(state.state, None, user_map, no_helper_role)
             decided_by = state.last_changed
+            self._note_match(device_id, is_verdict(state.state))
         if conversation_id and device_id:
             if role in ("owner", "wife"):
                 self._spoken_by[conversation_id] = Remembered(role, device_id, decided_by, now)
@@ -383,6 +390,20 @@ class PersonaRouter(conversation.ConversationEntity):
                 # An unknown voice ends it: a later turn needs a voice match of its own.
                 self._spoken_by.pop(conversation_id, None)
         return role, matched
+
+    def _note_match(self, device_id, arrived: bool) -> None:
+        """Keep which satellites gave no voice match on their last turn; warn once each."""
+        if not device_id:
+            return
+        if arrived:
+            self._no_match.discard(device_id)
+        elif device_id not in self._no_match:
+            self._no_match.add(device_id)
+            _LOGGER.warning(
+                "No voice match arrived from the satellite on device %s, so its requests "
+                "are refused. Check that its speaker recognition sensors are available",
+                device_id,
+            )
 
     def _woke_since(self, device_id, remembered: Remembered | None) -> bool | None:
         """True when the satellite reported a wake word since the remembered turn, else None.
@@ -651,6 +672,18 @@ class PersonaRouter(conversation.ConversationEntity):
                 "reply_agent": "",
             }
 
+        by_voice = not (user_input.context and user_input.context.user_id)
+        if by_voice and not matched and user_input.device_id in self._no_match:
+            # Nobody was told apart, so nobody is called unknown: refuse and say why.
+            return {
+                "who": "unsure",
+                "persona_for_this_message": "",
+                "rule": rule,
+                "label": "",
+                "fixed_replies": [UNSURE_LINE],
+                "reply_agent": "",
+            }
+
         strangers = settings.get("strangers") or {}
         persona = str(strangers.get("persona") or "").strip()
         lines = _lines(strangers.get("fixed_replies"))
@@ -894,6 +927,24 @@ class PersonaRouter(conversation.ConversationEntity):
             return self._chat_turn(user_input, "joined as a recognised person", "")
         manager.add_person_line(GUEST, user_input.text)
         return self._chat_turn(user_input, "joined as a guest", "")
+
+    def _heard_a_chat(self, user_input, resp) -> bool:
+        """Whether a satellite most likely woke on a chat show playing on another speaker.
+
+        The assistants say each other's names, which are wake words, and a television is
+        heard through the house. A voice the satellite does not recognise gets no answer
+        while a chat plays, so no refusal talks over it; a recognised person is answered
+        as always. Only voice turns: a typed request is never the chat's sound.
+        """
+        if not user_input.device_id or (user_input.context and user_input.context.user_id):
+            return False
+        if resp and resp.get("who") in ("owner", "wife"):
+            return False
+        try:
+            return get_manager(self.hass).is_running()
+        except Exception:  # noqa: BLE001 - without the check the usual refusal is given
+            _LOGGER.exception("Could not tell whether a chat show is playing")
+            return False
 
     def _chat_turn(self, user_input, kind: str, reply: str):
         # What was said is personal and stays out of the log; how it was taken does not.
@@ -1170,6 +1221,8 @@ class PersonaRouter(conversation.ConversationEntity):
             chat_reply = self._chat_show_fallback(user_input)
         if chat_reply is not None:
             return chat_reply
+        if self._heard_a_chat(user_input, resp):
+            return self._chat_turn(user_input, "unrecognised voice elsewhere, no answer", "")
         if not resp:
             # Nobody could be identified: fail closed, the main agent stays out of reach.
             return self._speak(user_input, LAST_RESORT_REPLY)
