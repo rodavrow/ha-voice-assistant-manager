@@ -139,6 +139,25 @@ Both actions refuse a person who may not control the calendar, as the calendar p
 
 A switch such as `input_boolean.reminders_persona_phrasing` is a good way to turn that first step on and off.
 
+## Asking which reminders there are
+
+"What reminders are there on Wednesday?", "do we have a reminder for charging the car?" or "list my reminders" calls a third script, `script.list_reminders`, exposed to Assist like the other two. It uses this integration's `voice_assistant_manager.list_reminder_events` action, which changes nothing. The main agent can pass:
+
+| Field | Meaning |
+| --- | --- |
+| `keywords` | Words that must be in the reminder's title or notes. "charging" also finds "Charge the car". Left out: every reminder. |
+| `on_day` | `today`, `tomorrow`, a weekday name or `MM-DD`. Left out: everything coming up, two years ahead. |
+| `until_day` | With `on_day`, the last day of a stretch of days. |
+
+Each reminder comes back once, with its settings as they are in the calendar: title, who it is for, when it is next due, how it repeats ("every weekday", "every 2 weeks on Friday"), when that ends, the calendar rule itself, how long it lasts, whether it is spoken, and the assistant that took it. A question in looser words ("anything about the car?") works because the main agent can ask for all of them and pick what is relevant.
+
+**A person sees their own reminders and the household's, never the other person's.** The main agent does not say whose reminders to show, and cannot: the assistant notes who is speaking on each turn, and the action goes by that. When it is not known who is speaking (the action is called outside a turn, say from an automation), only the household's reminders are shown. So the script lists every person's calendars under that person's name, and the action leaves out what the person speaking may not see.
+
+> [!TIP]
+> [`examples/list_reminders.yaml`](../examples/list_reminders.yaml) is a complete script. Use the same names in it as in `create_reminder`.
+
+The main agent is told to answer such questions only from what the script returns. When it answers without looking, it is asked once more; if it still has not looked, the person hears "I could not look up the reminders. Please ask me again." (see [No false confirmations](#no-false-confirmations)).
+
 ## How one setup does it
 
 This is how the Home Assistant side is built in the setup this integration was developed against. None of it is part of the integration, and yours can differ. It is here as a worked example.
@@ -252,6 +271,8 @@ A language model can say "your reminder is set" without having called the tool. 
 - After each reply the assistant looks at the tools that were actually called in that turn. If the reply says a reminder is set ("your reminder is set", "I'll remind you at five") and `create_reminder` did not return `ok`, the reply is replaced by "I could not set that reminder. Please ask me again." You can change that line in the settings.
 
 The same goes for cancelling: a reply that says a reminder is cancelled or removed when `cancel_reminder` did not return `ok` is replaced by "I could not cancel that reminder. Please ask me again." A reply after a cancellation is never taken for a reminder that was set, even when it says when the reminder was set for.
+
+And for looking up: a reply that says which reminders there are, or that there are none, when `list_reminders` did not return `ok` is replaced by "I could not look up the reminders. Please ask me again." A reply after a look-up is never taken for a false confirmation, although it says when a reminder is set for.
 
 **One more try first.** When the reply says a reminder is set or cancelled and the tool was not called at all, the main agent is asked once more, with a note that it did not call the tool. If it then does, the history reads as if that had been its first answer. Only when the reminder is still not set does the honest line follow. The same second try is made for any other reply that says something was done ("I've turned on the lights") with no tool call; if the second answer still says so without a tool call, or the second try fails, the assistant says "I could not do that. Please ask me again.": a refusal is better than a confirmation of something that did not happen.
 

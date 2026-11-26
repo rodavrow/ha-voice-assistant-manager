@@ -181,3 +181,26 @@ cancel_reminder_event:
       example: pills
       selector:
         text:
+
+list_reminder_events:
+  fields:
+    reminders:
+      required: true
+      example: '[{"for_whom": "alex", "calendar": "calendar.alex_reminders", "spoken": false}]'
+      selector:
+        object:
+    keywords:
+      required: false
+      example: car
+      selector:
+        text:
+    on_day:
+      required: false
+      example: wednesday
+      selector:
+        text:
+    until_day:
+      required: false
+      example: sunday
+      selector:
+        text:

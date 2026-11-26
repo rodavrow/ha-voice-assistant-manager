@@ -7,6 +7,17 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
+- **Assistants can look reminders up.** "What reminders are there on Wednesday?" or "do
+  we have a reminder for charging the car?" now gets an answer from the reminder
+  calendars: each matching reminder with when it is next due, how it repeats, when that
+  ends, whether it is spoken and which assistant took it. A person is shown their own
+  reminders and the household's, never the other person's; the assistant decides that
+  from who is speaking, not the main agent. Needs the new example script
+  [`list_reminders`](examples/list_reminders.yaml), exposed to Assist, which uses the new
+  `voice_assistant_manager.list_reminder_events` action. An answer about reminders that
+  the main agent gives without looking them up is asked for once more, and replaced by
+  "I could not look up the reminders. Please ask me again." if it still did not look.
+  See [Reminders](docs/reminders.md#asking-which-reminders-there-are).
 - **Avatars.** The **Avatar** card under **Assistant** on the Voice Manager page (or **Add
   avatar** on an assistant's entry) creates a text-to-speech entity that
   speaks through the engine you choose and sends a copy of each finished clip to a

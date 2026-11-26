@@ -87,21 +87,26 @@ from .reminders import (
     RETRY_NOTES,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
+    DEFAULT_LIST_FAILURE_LINE,
+    LIST_TOOL,
     PUT_RIGHT,
     SPOKE_TOO_SOON,
     assistant_name,
     is_cancel_turn,
+    is_list_turn,
     is_reminder_exchange,
     is_reminder_turn,
     looks_like_action_claim,
     looks_like_cancellation,
     looks_like_confirmation,
+    looks_like_listing,
     needs_honest_cancel_failure,
     needs_honest_failure,
     reminder_guidance,
     reminder_tool_outcome,
     used_a_tool,
 )
+from .reminder_actions import note_asker
 from .avatar import esphome_entity
 from .speaker import (
     CONVERSATION_LIFETIME,
@@ -524,6 +529,15 @@ class PersonaRouter(conversation.ConversationEntity):
             cancel=bool(self._reminder_settings().get("cancel", True)),
         )
 
+    def _note_asker(self, user_input, resp) -> None:
+        """Tell the reminder look-up who is speaking in this turn: a known person or nobody.
+
+        The look-up shows a person their own reminders, and takes who that is from here,
+        never from the main agent (reminder_actions.note_asker).
+        """
+        known = bool(resp) and resp.get("who") in ("owner", "wife")
+        note_asker(self.hass, user_input.context, resp.get("label") if known else None)
+
     def _guard_reminder(self, user_input, result, log, log_start):
         """Check a finished turn for reminder trouble.
 
@@ -540,12 +554,36 @@ class PersonaRouter(conversation.ConversationEntity):
             turn = log.content[log_start:] if visible else []
             outcome = reminder_tool_outcome(turn)
             cancelled = reminder_tool_outcome(turn, CANCEL_TOOL)
+            listed = reminder_tool_outcome(turn, LIST_TOOL)
+            looking_up = (
+                outcome == "none"
+                and cancelled == "none"
+                and (listed != "none" or is_list_turn(user_input.text))
+            )
             about_reminder = (
-                outcome != "none" or cancelled != "none" or is_reminder_turn(user_input.text)
+                outcome != "none"
+                or cancelled != "none"
+                or looking_up
+                or is_reminder_turn(user_input.text)
             )
             if not visible:
                 return result, about_reminder
             reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
+            if looking_up:
+                # A look-up: its answer says when a reminder is set for, which is no
+                # claim that one was set. It must come from the tool, though.
+                if listed == "ok" or not looks_like_listing(reply):
+                    return result, about_reminder
+                if listed == "none" and used_a_tool(turn):
+                    # It looked somewhere else (a calendar tool, say): not made up.
+                    return result, about_reminder
+                _LOGGER.warning(
+                    "The main agent said which reminders there are without looking them "
+                    "up, correcting it"
+                )
+                return self._honest_reply(
+                    user_input, result, log, log_start, DEFAULT_LIST_FAILURE_LINE
+                ), True
             if cancelled != "none" or is_cancel_turn(user_input.text):
                 # A cancellation: its reply mentions the reminder and when it was set for,
                 # which is no claim that one was set.
@@ -1093,6 +1131,8 @@ class PersonaRouter(conversation.ConversationEntity):
             if reminders:
                 if is_cancel_turn(user_input.text) and looks_like_cancellation(reply):
                     return "cancel"
+                if is_list_turn(user_input.text) and looks_like_listing(reply):
+                    return "list"
                 recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
                 if is_reminder_exchange(recent) and looks_like_confirmation(reply):
                     return "reminder"
@@ -1108,6 +1148,8 @@ class PersonaRouter(conversation.ConversationEntity):
             return reminder_tool_outcome(turn) == "ok"
         if kind == "cancel":
             return reminder_tool_outcome(turn, CANCEL_TOOL) == "ok"
+        if kind == "list":
+            return reminder_tool_outcome(turn, LIST_TOOL) == "ok"
         return used_a_tool(turn) and looks_like_action_claim(self._shown(result))
 
     def _shown(self, result) -> str:
@@ -1213,6 +1255,7 @@ class PersonaRouter(conversation.ConversationEntity):
         except Exception:  # noqa: BLE001 - a failed lookup is refused below
             resp = None
             _LOGGER.exception("Could not work out who is speaking, refusing")
+        self._note_asker(user_input, resp)
 
         try:
             chat_reply = await self._chat_show_reply(user_input, resp)
