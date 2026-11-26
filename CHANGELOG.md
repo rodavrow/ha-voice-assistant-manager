@@ -135,6 +135,12 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Fixed
 
+- **A satellite's avatar no longer says a reply twice after Home Assistant restarts.** While
+  a satellite's sensors were unavailable (after a restart, or when it dropped off the
+  network), its LiveTalking session was no longer known, so its avatar got each reply from
+  the satellite itself and a copy from Home Assistant, and said it two or three times. The
+  last session a satellite reported now counts until it reports again, and when a
+  session was never read no copy is sent at all, with one warning in the log.
 - **A reply that was wrong is taken back out loud.** When the main agent said "I've set a
   reminder" without setting one, the text was corrected, but a reply long enough to be
   streamed had already been spoken: the voice said the reminder was set while the screen

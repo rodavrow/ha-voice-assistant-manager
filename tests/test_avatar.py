@@ -504,3 +504,92 @@ def test_a_wav_header_is_corrected_past_other_chunks():
 
 def test_a_wav_without_a_data_chunk_is_sent_unchanged():
     assert avatar.prepare_clip("wav", WAV, {}) == ("wav", WAV)
+
+
+# A satellite's session while its sensor cannot be read
+
+
+SESSION_SENSOR = "sensor.kitchen_assistant_1_avatar_session"
+
+
+def add_session_sensor(hass, state: str | None, *, disabled: bool = False) -> None:
+    entry = er.async_get(hass).async_get_or_create(
+        "sensor", "esphome", "aa:bb:cc:dd:ee:ff/4/text_sensor/Avatar session",
+        suggested_object_id="kitchen_assistant_1_avatar_session",
+        disabled_by=er.RegistryEntryDisabler.USER if disabled else None,
+    )
+    assert entry.entity_id == SESSION_SENSOR
+    if state is not None:
+        hass.states.async_set(SESSION_SENSOR, state)
+
+
+def test_regression_double_clip_a_session_is_still_skipped_while_its_sensor_is_unavailable(hass):
+    # Seen in the house: after a restart of Home Assistant the satellite's sensors were
+    # unavailable while it kept its LiveTalking session, so its avatar got each reply from
+    # the satellite and a copy from here, and said it two or three times.
+    add_session_sensor(hass, "abc-1")
+    assert avatar.device_sessions(hass) == frozenset({"abc-1"})
+
+    hass.states.async_set(SESSION_SENSOR, "unavailable")
+
+    assert avatar.device_sessions(hass) == frozenset({"abc-1"})
+    assert avatar.unknown_device_sessions(hass) == []
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown", None])
+def test_a_session_sensor_that_was_never_read_is_an_unknown_session(hass, state):
+    add_session_sensor(hass, state)
+
+    assert avatar.device_sessions(hass) == frozenset()
+    assert avatar.unknown_device_sessions(hass) == [SESSION_SENSOR]
+
+
+def test_a_satellite_that_says_it_has_no_session_has_none(hass):
+    add_session_sensor(hass, "abc-1")
+    avatar.device_sessions(hass)
+    hass.states.async_set(SESSION_SENSOR, "")
+    assert avatar.device_sessions(hass) == frozenset()
+
+    hass.states.async_set(SESSION_SENSOR, "unavailable")
+
+    assert avatar.device_sessions(hass) == frozenset()
+    assert avatar.unknown_device_sessions(hass) == []
+
+
+def test_a_disabled_session_sensor_is_no_unknown_session(hass):
+    add_session_sensor(hass, None, disabled=True)
+
+    assert avatar.unknown_device_sessions(hass) == []
+
+
+async def test_regression_double_clip_no_copy_is_sent_while_a_session_is_unknown(
+    hass, aioclient_mock, caplog
+):
+    add_session_sensor(hass, "unavailable")
+    aioclient_mock.get(SESSIONS, json=sessions_reply("live-on-the-satellite"))
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+
+    await sender.async_send(BASE, "mp3", MP3, {})
+    await sender.async_send(BASE, "mp3", MP3, {})
+
+    assert aioclient_mock.call_count == 0
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert SESSION_SENSOR in warnings[0].getMessage()
+
+
+async def test_copies_go_out_again_once_the_session_is_known(hass, aioclient_mock):
+    add_session_sensor(hass, "unavailable")
+    aioclient_mock.get(SESSIONS, json=sessions_reply("abc-1", "viewer"))
+    aioclient_mock.post(INTERRUPT, json={"code": 0})
+    aioclient_mock.post(HUMANAUDIO, json={"code": 0})
+    sender = avatar.AvatarSender(hass, "tts.ada_avatar")
+    await sender.async_send(BASE, "mp3", MP3, {})
+
+    hass.states.async_set(SESSION_SENSOR, "abc-1")
+    await sender.async_send(BASE, "mp3", MP3, {})
+
+    uploads = [c for c in aioclient_mock.mock_calls if str(c[1]) == HUMANAUDIO]
+    assert [form_fields(c[2])["sessionid"][1] for c in uploads] == ["viewer"]

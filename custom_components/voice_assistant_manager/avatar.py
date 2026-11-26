@@ -71,19 +71,57 @@ def stage_sessions(hass: HomeAssistant) -> frozenset[str]:
     return stage.sessions() if stage is not None else frozenset()
 
 
+# Where the last session each satellite reported is kept, in hass.data[DOMAIN].
+_LAST_SESSIONS = "avatar_last_sessions"
+_NOT_READABLE = ("unknown", "unavailable")
+
+
+def _session_sensors(hass: HomeAssistant) -> list[str]:
+    """The entity ids of the satellites' "Avatar session" sensors that are in use."""
+    return [
+        entity.entity_id
+        for entity in er.async_get(hass).entities.values()
+        if entity.domain == "sensor"
+        and entity.disabled_by is None
+        and (named_as := esphome_entity(entity.unique_id)) is not None
+        and named_as[1] == SESSION_NAME
+    ]
+
+
+def _read_sessions(hass: HomeAssistant) -> tuple[frozenset[str], list[str]]:
+    """(the satellites' sessions, the sensors whose session cannot be known).
+
+    A sensor that cannot be read (its satellite is away, or Home Assistant has just
+    started) says nothing about the session: the satellite may well still hold it. So the
+    last session it reported counts until it reports again. One that was never read is
+    unknown.
+    """
+    last: dict[str, str] = hass.data.setdefault(DOMAIN, {}).setdefault(_LAST_SESSIONS, {})
+    sessions: set[str] = set()
+    unknown: list[str] = []
+    for entity_id in _session_sensors(hass):
+        state = hass.states.get(entity_id)
+        if state is not None and state.state not in _NOT_READABLE:
+            last[entity_id] = state.state
+        if entity_id not in last:
+            unknown.append(entity_id)
+        elif last[entity_id]:
+            sessions.add(last[entity_id])
+    return frozenset(sessions), unknown
+
+
 def device_sessions(hass: HomeAssistant) -> frozenset[str]:
     """The LiveTalking sessions satellites hold themselves, which a copy must skip."""
-    sessions = set()
-    for entity in er.async_get(hass).entities.values():
-        if entity.domain != "sensor":
-            continue
-        named_as = esphome_entity(entity.unique_id)
-        if named_as is None or named_as[1] != SESSION_NAME:
-            continue
-        state = hass.states.get(entity.entity_id)
-        if state is not None and state.state not in ("", "unknown", "unavailable"):
-            sessions.add(state.state)
-    return frozenset(sessions)
+    return _read_sessions(hass)[0]
+
+
+def unknown_device_sessions(hass: HomeAssistant) -> list[str]:
+    """The session sensors of satellites whose session cannot be known right now.
+
+    While there is one, a copy could land on a satellite's own session, which would say
+    the reply a second time.
+    """
+    return _read_sessions(hass)[1]
 
 
 class LiveTalkingError(Exception):
@@ -346,6 +384,7 @@ class AvatarSender:
         self._name = name
         self._failing = False
         self._warned_format = False
+        self._warned_unknown = False
         # Each clip interrupts the avatar, so an earlier clip must never land after a later one.
         self._turn = asyncio.Lock()
 
@@ -365,6 +404,19 @@ class AvatarSender:
         if clip is None:
             self._log_skipped(extension, len(audio))
             return
+        if unknown := unknown_device_sessions(self._hass):
+            # Fail closed: saying a reply twice on a satellite is worse than a viewer
+            # elsewhere missing a copy of it.
+            _LOGGER.log(
+                logging.DEBUG if self._warned_unknown else logging.WARNING,
+                "Avatar %s: no copy sent, the LiveTalking session of %s is not known (the"
+                " satellite is away, or Home Assistant has just started); the speech"
+                " itself is not affected",
+                self._name, ", ".join(unknown),
+            )
+            self._warned_unknown = True
+            return
+        self._warned_unknown = False
         client = LiveTalkingClient(async_get_clientsession(self._hass), base_url)
         async with self._turn:
             try:
