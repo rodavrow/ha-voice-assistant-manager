@@ -105,3 +105,79 @@ start_chat:
         boolean:
 
 stop_chat:
+
+create_reminder_event:
+  fields:
+    calendar:
+      required: true
+      example: calendar.alex_reminders_announce
+      selector:
+        entity:
+          domain: calendar
+    summary:
+      required: true
+      example: Take the pills
+      selector:
+        text:
+    description:
+      required: false
+      example: "assistant: jeeves"
+      selector:
+        text:
+    start:
+      required: true
+      example: "2026-11-30T08:00:00+01:00"
+      selector:
+        datetime:
+    duration_minutes:
+      required: false
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 1440
+    repeat:
+      required: true
+      example: weekdays
+      selector:
+        select:
+          options: [daily, weekdays, weekends, weekly, monthly, yearly]
+    every:
+      required: false
+      example: 2
+      selector:
+        number:
+          min: 1
+          max: 99
+    on_days:
+      required: false
+      example: monday, thursday
+      selector:
+        text:
+    times:
+      required: false
+      example: 10
+      selector:
+        number:
+          min: 1
+          max: 999
+    until:
+      required: false
+      example: "12-31"
+      selector:
+        text:
+
+cancel_reminder_event:
+  fields:
+    calendar:
+      required: true
+      example: calendar.alex_reminders_announce
+      selector:
+        entity:
+          domain: calendar
+          multiple: true
+    title:
+      required: true
+      example: pills
+      selector:
+        text:

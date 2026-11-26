@@ -248,3 +248,137 @@ async def test_calendar_announce_falls_back_to_the_title(
     await _announce(hass, "")
 
     assert announce[0].data["message"] == "Avalex: GFT"
+
+
+# Repeating reminders and cancelling, through VAM's actions
+
+
+def _vam_action(
+    hass: HomeAssistant, service: str, answer: dict[str, Any]
+) -> list[ServiceCall]:
+    calls: list[ServiceCall] = []
+
+    async def handler(call: ServiceCall) -> dict[str, Any]:
+        calls.append(call)
+        return answer
+
+    hass.services.async_register(
+        "voice_assistant_manager", service, handler, supports_response=SupportsResponse.ONLY
+    )
+    return calls
+
+
+REPEAT_SET = {"status": "ok", "first": "Monday 2026-11-23 08:00", "rrule": "FREQ=WEEKLY"}
+
+
+async def test_a_repeating_reminder_goes_to_the_repeat_action_and_not_create_event(
+    hass: HomeAssistant, reminder: list[ServiceCall]
+) -> None:
+    repeats = _vam_action(hass, "create_reminder_event", REPEAT_SET)
+
+    response = await _remind(
+        hass, at_time="08:00", repeat="weekly", repeat_on="monday, thursday",
+        repeat_every=2, repeat_times=10,
+    )
+
+    assert reminder == []
+    (call,) = repeats
+    assert call.data["calendar"] == "calendar.alex_reminders_announce"
+    assert call.data["summary"] == "Call the plumber"
+    assert call.data["description"] == "assistant: jeeves"
+    assert datetime.fromisoformat(str(call.data["start"])) == _local(2026, 11, 19, 8, 0)
+    assert (call.data["repeat"], call.data["on_days"]) == ("weekly", "monday, thursday")
+    assert (int(call.data["every"]), int(call.data["times"])) == (2, 10)
+    assert response["status"] == "ok"
+    assert response["due"] == "Monday 2026-11-23 08:00"
+    assert response["repeat"] == "weekly"
+
+
+async def test_a_repeating_reminder_leaves_out_what_was_not_said(
+    hass: HomeAssistant, reminder: list[ServiceCall]
+) -> None:
+    repeats = _vam_action(hass, "create_reminder_event", REPEAT_SET)
+
+    await _remind(hass, at_time="08:00", repeat="daily")
+
+    data = repeats[0].data
+    assert all(str(data.get(key, "")) == "" for key in ("every", "on_days", "times", "until"))
+
+
+async def test_a_repeat_the_action_refuses_is_passed_on_as_an_error(
+    hass: HomeAssistant, reminder: list[ServiceCall]
+) -> None:
+    _vam_action(
+        hass, "create_reminder_event",
+        {"status": "error", "message": "Reminder not set. repeat must be one of daily."},
+    )
+
+    response = await _remind(hass, at_time="08:00", repeat="hourly")
+
+    assert response["status"] == "error"
+    assert "repeat must be one of" in response["message"]
+
+
+async def test_a_repeating_reminder_in_minutes_is_an_error(
+    hass: HomeAssistant, reminder: list[ServiceCall]
+) -> None:
+    repeats = _vam_action(hass, "create_reminder_event", REPEAT_SET)
+
+    response = await _remind(hass, in_minutes=30, repeat="daily")
+
+    assert response["status"] == "error"
+    assert "at_time" in response["message"]
+    assert repeats == []
+
+
+@pytest.fixture
+async def cancelling(hass: HomeAssistant) -> None:
+    await _setup_script(hass, "cancel_reminder")
+
+
+async def _cancel(hass: HomeAssistant, **fields: Any) -> dict[str, Any]:
+    data = {"title": "pills", "for_whom": "alex", **fields}
+    response = await hass.services.async_call(
+        "script", "cancel_reminder", data, blocking=True, return_response=True
+    )
+    assert isinstance(response, dict)
+    return response
+
+
+async def test_cancel_reminder_looks_in_both_calendars_of_the_person(
+    hass: HomeAssistant, cancelling: None
+) -> None:
+    calls = _vam_action(
+        hass, "cancel_reminder_event", {"status": "ok", "removed": 1, "title": "Take the pills"}
+    )
+
+    response = await _cancel(hass, for_whom="Alex")
+
+    (call,) = calls
+    assert call.data["calendar"] == ["calendar.alex_reminders_announce", "calendar.alex_reminders"]
+    assert call.data["title"] == "pills"
+    assert response == {"status": "ok", "removed": 1, "title": "Take the pills"}
+
+
+async def test_cancel_reminder_passes_on_an_error(hass: HomeAssistant, cancelling: None) -> None:
+    _vam_action(
+        hass, "cancel_reminder_event",
+        {"status": "error", "message": 'No reminder called "pills" is coming up.'},
+    )
+
+    response = await _cancel(hass)
+
+    assert response["status"] == "error"
+    assert "pills" in response["message"]
+
+
+async def test_cancel_reminder_for_an_unknown_person_is_an_error(
+    hass: HomeAssistant, cancelling: None
+) -> None:
+    calls = _vam_action(hass, "cancel_reminder_event", {"status": "ok"})
+
+    response = await _cancel(hass, for_whom="nobody")
+
+    assert response["status"] == "error"
+    assert "for_whom must be one of" in response["message"]
+    assert calls == []

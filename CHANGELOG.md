@@ -54,6 +54,15 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   line's audio instead (an `emotion` field on `/humanaudio`). **Emotion tags** under
   Advanced sets which tags an assistant passes on (default: the five above). See
   [Avatar](docs/avatar.md#emotions).
+- **Repeating reminders, and cancelling reminders by voice.** "Remind me every weekday at
+  7", "every other Friday", "on the 1st of every month", "every day for 10 days": the new
+  `voice_assistant_manager.create_reminder_event` action adds a repeating event to a Local
+  Calendar, which Home Assistant's `calendar.create_event` cannot do.
+  `voice_assistant_manager.cancel_reminder_event` removes a reminder by its title, a
+  repeating one as a whole. The example `create_reminder` script has new `repeat` fields,
+  and the new example `cancel_reminder` script is the tool for "stop reminding me". The
+  assistant tells the main agent how to use both. Update your `create_reminder` script and
+  add `cancel_reminder` to get them. See [Reminders](docs/reminders.md#repeating-reminders).
 
 ### Changed
 

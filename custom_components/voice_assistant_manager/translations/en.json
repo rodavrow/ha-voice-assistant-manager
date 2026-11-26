@@ -762,6 +762,30 @@
           "description": "The assistant that will speak, by its assistant name. When empty or unknown, the device shows its default character."
         }
       }
+    },
+    "create_reminder_event": {
+      "name": "Create repeating reminder",
+      "description": "Adds a repeating event to a Local Calendar, which calendar.create_event cannot do. Used by the create_reminder example script. Answers with status ok and the first reminder, or status error and why. Refuses a user who may not control the calendar.",
+      "fields": {
+        "calendar": {"name": "Calendar", "description": "A calendar that can add events, such as a Local Calendar."},
+        "summary": {"name": "Title", "description": "What to be reminded of."},
+        "description": {"name": "Description", "description": "Stored with the event, for example which assistant speaks it."},
+        "start": {"name": "Start", "description": "The first reminder. With weekdays, weekends or on_days, it moves to the first of those days, at the same time."},
+        "duration_minutes": {"name": "Duration", "description": "How long each event lasts, in minutes."},
+        "repeat": {"name": "Repeat", "description": "daily, weekdays, weekends, weekly, monthly or yearly."},
+        "every": {"name": "Every", "description": "2 for every other day, week, month or year."},
+        "on_days": {"name": "On days", "description": "With weekly: the weekdays, for example monday, thursday."},
+        "times": {"name": "Times", "description": "How many reminders in all. Leave out for no end."},
+        "until": {"name": "Until", "description": "The last day, MM-DD or YYYY-MM-DD. Leave out for no end. Not with times."}
+      }
+    },
+    "cancel_reminder_event": {
+      "name": "Cancel reminder",
+      "description": "Removes an upcoming reminder by its title, a repeating one as a whole. Used by the cancel_reminder example script. When several reminders match, nothing is removed and the answer lists them. Refuses a user who may not control the calendars.",
+      "fields": {
+        "calendar": {"name": "Calendars", "description": "The calendars to look in."},
+        "title": {"name": "Title", "description": "The reminder's title, or a word from it."}
+      }
     }
   },
   "config_subentries": {

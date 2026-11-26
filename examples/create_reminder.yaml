@@ -12,6 +12,10 @@
 # calendar.household_reminders_announce. Something of your own announces them
 # when they are due. See docs/reminders.md.
 #
+# With repeat, the reminder repeats: Home Assistant's calendar.create_event cannot do
+# that, so the script asks Voice Assistant Manager's create_reminder_event action, which
+# needs a Local Calendar.
+#
 # The assistant depends on for_whom, assistant and the status this script returns.
 # The time is never asked as a full date: a language model does not know today's
 # date. The script works the date out from in_minutes, or from at_time and on_day.
@@ -24,8 +28,9 @@ description: >-
   Sets a reminder that alerts a person at a given time. This is not the memory
   feature: use it only when the person wants to be alerted at a moment. Never
   guess or work out a date yourself. Pass in_minutes for "in 20 minutes", or
-  at_time for a time on the clock, with on_day when it is not today. Only confirm
-  the reminder when this script returns status ok.
+  at_time for a time on the clock, with on_day when it is not today. For a
+  reminder that repeats, also pass repeat, with at_time. Only confirm the
+  reminder when this script returns status ok.
 mode: queued
 fields:
   title:
@@ -64,6 +69,32 @@ fields:
       next time the clock shows at_time.
     selector:
       text:
+  repeat:
+    description: >-
+      For a reminder that repeats: daily, weekdays, weekends, weekly, monthly or
+      yearly. Needs at_time; on_day is when it starts. Leave out for one reminder.
+    selector:
+      text:
+  repeat_on:
+    description: With repeat weekly, the weekdays, for example "monday, thursday".
+    selector:
+      text:
+  repeat_every:
+    description: With repeat, 2 for every other day, week, month or year. Default 1.
+    selector:
+      number:
+        min: 1
+        max: 99
+  repeat_times:
+    description: With repeat, how many times in all. Leave out for no end.
+    selector:
+      number:
+        min: 1
+        max: 999
+  repeat_until:
+    description: With repeat, the last day, MM-DD. Leave out for no end.
+    selector:
+      text:
 sequence:
   - variables:
       people: [alex, sam, household]
@@ -78,6 +109,8 @@ sequence:
         {%- set ns = namespace(due=none, error='') -%}
         {%- if who not in people -%}
           {%- set ns.error = 'for_whom must be one of ' ~ people | join(', ') ~ '.' -%}
+        {%- elif repeat | default('') | string | trim and minutes -%}
+          {%- set ns.error = 'A repeating reminder needs at_time, not in_minutes.' -%}
         {%- elif minutes and clock -%}
           {%- set ns.error = 'Pass in_minutes, or at_time with on_day, not both.' -%}
         {%- elif minutes -%}
@@ -139,6 +172,33 @@ sequence:
   - variables:
       spoken: "{{ announce | default(true) | bool }}"
       calendar: "calendar.{{ plan.who }}_reminders{{ '_announce' if spoken else '' }}"
+  - if:
+      - condition: template
+        value_template: "{{ repeat | default('') | string | trim != '' }}"
+    then:
+      - action: voice_assistant_manager.create_reminder_event
+        data:
+          calendar: "{{ calendar }}"
+          summary: "{{ title }}"
+          description: "assistant: {{ assistant }}"
+          start: "{{ plan.due }}"
+          repeat: "{{ repeat }}"
+          every: "{{ repeat_every | default('') }}"
+          on_days: "{{ repeat_on | default('') }}"
+          times: "{{ repeat_times | default('') }}"
+          until: "{{ repeat_until | default('') }}"
+        response_variable: repeating
+      - variables:
+          result: >-
+            {%- if repeating.status == 'ok' -%}
+              {{ {'status': 'ok', 'title': title, 'for_whom': plan.who,
+                  'due': repeating.first, 'repeat': repeat, 'spoken': spoken} }}
+            {%- else -%}
+              {{ {'status': 'error',
+                  'message': repeating.message ~ ' It is now ' ~ plan.now ~ '.'} }}
+            {%- endif -%}
+      - stop: Repeating reminder
+        response_variable: result
   - action: calendar.create_event
     target:
       entity_id: "{{ calendar }}"

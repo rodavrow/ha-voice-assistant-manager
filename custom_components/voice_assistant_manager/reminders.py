@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 # Home Assistant names a script tool "script__<name>". Older versions used the bare name.
 REMINDER_TOOL = "create_reminder"
+CANCEL_TOOL = "cancel_reminder"
 HOUSEHOLD = "household"
 DEFAULT_FAILURE_LINE = "I could not set that reminder. Please ask me again."
 
@@ -21,6 +22,12 @@ ToolOutcome = Literal["none", "ok", "error"]
 _REMIND_SOMEONE = re.compile(r"\bremind (\w+)\b", re.IGNORECASE)
 _SET_REMINDER = re.compile(
     r"\b(?:set|add|create|make|schedule) (?:a|an|another|the|me a|us a) reminder\b",
+    re.IGNORECASE,
+)
+# "Stop reminding me …", "cancel the bins reminder", "delete the reminder to …".
+_CANCEL_REMINDER = re.compile(
+    r"\b(?:stop|quit) reminding\b"
+    r"|\b(?:cancel|delete|remove|clear|drop|turn off)\b[^.?!]{0,40}?\breminders?\b",
     re.IGNORECASE,
 )
 _REMEMBER_TO = re.compile(r"\bremember to (\w+)", re.IGNORECASE)
@@ -110,7 +117,9 @@ def is_reminder_turn(text: str) -> bool:
     text = text or ""
     if _REMEMBER_THAT.search(text) and not has_alert_time(text):
         return False
-    if _SET_REMINDER.search(text) or is_unclear_remember_to(text):
+    if _SET_REMINDER.search(text) or _CANCEL_REMINDER.search(text):
+        return True
+    if is_unclear_remember_to(text):
         return True
     reminded = _REMIND_SOMEONE.search(text)
     if reminded is not None:
@@ -264,8 +273,22 @@ def reminder_guidance(speaker_name: str, other_name: str, assistant: str = "") -
             if other
             else ""
         ),
+        f"- A repeating reminder (\"every day at 8\", \"every weekday\", \"every other "
+        f"Friday\", \"on the 1st of every month\") is set with the same {REMINDER_TOOL} "
+        "call plus repeat: daily, weekdays, weekends, weekly, monthly or yearly. Give "
+        "at_time for the time of day, and on_day for when it starts if not the next time "
+        "the clock shows at_time. With weekly, repeat_on lists the weekdays, for example "
+        "\"monday, thursday\". repeat_every 2 means every other day, week, month or "
+        "year. To end it, repeat_times is how many times, or repeat_until the last day "
+        "(MM-DD); leave both out for no end. Never work out the dates yourself.",
+        f"- \"Stop reminding me …\" or \"cancel the … reminder\" cancels one: call the "
+        f"{CANCEL_TOOL} tool (script.{CANCEL_TOOL}) with the reminder's title and for_whom. "
+        "If it says several reminders match, ask which one and call it again with that "
+        "title.",
         f"- Say a reminder is set only after {REMINDER_TOOL} returned status ok in this turn. "
         "If it returned an error, tell the person what its message says. Never say a "
         "reminder is set without calling the tool.",
+        f"- Say a reminder is cancelled only after {CANCEL_TOOL} returned status ok in this "
+        "turn. If it returned an error, tell the person what its message says.",
     ]
     return "\n".join(lines)
