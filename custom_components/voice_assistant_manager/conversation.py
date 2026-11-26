@@ -46,6 +46,7 @@ from homeassistant.helpers import intent
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
+from . import emotion
 from .announce import safe_toolless_agent
 from .chat_show import GUEST, get_manager, is_stop_phrase
 from .const import REPLY_AGENT_TIMEOUT
@@ -542,7 +543,9 @@ class PersonaRouter(conversation.ConversationEntity):
                 name=str(resp.get("label") or ""),
                 other_name=self._person_name(OTHER_PERSON[resp["who"]]),
                 user_text=user_input.text,
-                reply_text=str((result.response.speech.get("plain") or {}).get("speech") or ""),
+                reply_text=emotion.split_tag(
+                    str((result.response.speech.get("plain") or {}).get("speech") or "")
+                )[1],
                 language=user_input.language,
                 context=user_input.context,
             )
@@ -929,7 +932,49 @@ class PersonaRouter(conversation.ConversationEntity):
         """
         handed = await async_hand_off(self.hass, self.entity_id, user_input)
         if handed is not None:
+            # The assistant it went to took its reply's emotion tag off itself.
             return handed
+        log = current_chat_log.get()
+        stream = None
+        if log is not None and log.delta_listener is not None:
+            # What a voice pipeline speaks and shows while the reply streams in.
+            stream = emotion.StreamedReply(log.delta_listener, self._tell_emotion)
+            log.delta_listener = stream
+        try:
+            result = await self._async_answer(user_input)
+        finally:
+            if stream is not None:
+                stream.finish()
+                if log.delta_listener is stream:
+                    log.delta_listener = stream.listener
+        return self._without_tag(result, stream)
+
+    def _tell_emotion(self, found: emotion.Emotion) -> None:
+        emotion.send_emotion(self.hass, self._entry, found)
+
+    def _without_tag(
+        self, result: conversation.ConversationResult, stream: emotion.StreamedReply | None
+    ) -> conversation.ConversationResult:
+        """The result with the emotion tag off its speech; the avatar is told the emotion.
+
+        A streamed reply told it as soon as it was known. Nothing is told for a reply with
+        nothing to say: a chat show's silent turn must not change the face of its next line.
+        The history keeps the tag, so the agent sees how it answered before.
+        """
+        try:
+            plain = result.response.speech.get("plain") or {}
+            said = str(plain.get("speech") or "")
+            found, spoken = emotion.split_tag(said)
+            if spoken != said:
+                result.response.async_set_speech(spoken, extra_data=plain.get("extra_data"))
+            told = stream is not None and stream.emotion is not None
+            if not told and spoken.strip():
+                self._tell_emotion(found)
+        except Exception:  # noqa: BLE001 - the reply always goes ahead
+            _LOGGER.exception("Could not read the reply's emotion tag")
+        return result
+
+    async def _async_answer(self, user_input):
         resp = None
         try:
             settings = self._entry.options

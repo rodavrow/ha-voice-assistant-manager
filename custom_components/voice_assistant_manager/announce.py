@@ -28,7 +28,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 from homeassistant.helpers.service import async_register_admin_service
 
-from . import announcement_look
+from . import announcement_look, emotion
 from .const import DOMAIN, REPLY_AGENT_TIMEOUT
 from .memory import clean_text, router_agent_ids
 from .reminders import HOUSEHOLD, assistant_aliases, for_whom
@@ -269,8 +269,9 @@ def writer_agent(hass: HomeAssistant, entry: ConfigEntry, *, quiet: bool = False
 
 async def _compose(
     hass: HomeAssistant, satellite: str, text: str, recipient: str, assistant: str
-) -> tuple[str, ConfigEntry | None]:
-    """The line and the assistant that wrote it; ("", None) when nobody could."""
+) -> tuple[str, emotion.Emotion, ConfigEntry | None]:
+    """The line, its emotion and the assistant that wrote it; ("", ..., None) when nobody
+    could."""
     language = None
     if for_whom(assistant):
         # The assistant that took the reminder speaks it, so its persona words it. No
@@ -283,8 +284,8 @@ async def _compose(
         if language == "*":  # A router takes any language, which is not one to ask for.
             language = None
     if entry is None:
-        return "", None
-    line = await _write_line(
+        return "", emotion.NEUTRAL, None
+    line, found = await _write_line(
         hass,
         entry,
         recipient,
@@ -292,7 +293,7 @@ async def _compose(
         lambda names: ANNOUNCE_INSTRUCTIONS.format(names=names),
         language,
     )
-    return line, entry
+    return line, found, entry
 
 
 async def _write_line(
@@ -302,8 +303,9 @@ async def _write_line(
     message: Callable[[str], str],
     rules: Callable[[str], str],
     language: str | None = None,
-) -> str:
-    """Have a router's agent without tools write one spoken line, or "" if it cannot.
+) -> tuple[str, emotion.Emotion]:
+    """Have a router's agent without tools write one spoken line, or "" if it cannot, and
+    the emotion its tag gave it. The tag is never part of the line.
 
     `message` and `rules` get how the recipient is addressed, and return what the agent
     is told to announce and the instructions it is given after the persona texts.
@@ -312,7 +314,7 @@ async def _write_line(
     agent = writer_agent(hass, entry)
     if target is None or agent is None:
         _LOGGER.debug("No announcement written: unknown recipient or no agent without tools")
-        return ""
+        return "", emotion.NEUTRAL
     names, persona = target
 
     extra = str((entry.options.get("reminders") or {}).get("persona") or "").strip()
@@ -328,9 +330,11 @@ async def _write_line(
         extra_system_prompt=instructions,
     )
     if result.response.response_type == intent.IntentResponseType.ERROR:
-        return ""
-    line = clean_text(str((result.response.speech.get("plain") or {}).get("speech") or ""))
-    return line if len(line) <= MAX_LINE_LENGTH else ""
+        return "", emotion.NEUTRAL
+    found, line = emotion.split_tag(
+        clean_text(str((result.response.speech.get("plain") or {}).get("speech") or ""))
+    )
+    return (line, found) if len(line) <= MAX_LINE_LENGTH else ("", emotion.NEUTRAL)
 
 
 async def async_compose_announcement(
@@ -340,10 +344,10 @@ async def async_compose_announcement(
 
     Never raises, and gives up after COMPOSE_TIMEOUT seconds.
     """
-    line, entry = "", None
+    line, found, entry = "", emotion.NEUTRAL, None
     try:
         async with asyncio.timeout(COMPOSE_TIMEOUT):
-            line, entry = await _compose(hass, satellite, text, recipient, assistant)
+            line, found, entry = await _compose(hass, satellite, text, recipient, assistant)
     except TimeoutError:
         _LOGGER.debug("Announcement took longer than %s s, returning no text", COMPOSE_TIMEOUT)
     except Exception:  # noqa: BLE001 - the caller must always get an answer to fall back on
@@ -352,6 +356,10 @@ async def async_compose_announcement(
         # Outside the time limit, which is for writing the line. The caller announces it
         # straight after, as this assistant. Never raises.
         await announcement_look.async_show_assistant(hass, satellite, entry)
+        if entry is not None:
+            # The caller announces the line straight after; LiveTalking keeps the emotion
+            # for the next speech it gets.
+            emotion.send_emotion(hass, entry, found)
     return line
 
 
@@ -428,7 +436,11 @@ async def async_compose_calendar_line(
 
     try:
         async with asyncio.timeout(COMPOSE_TIMEOUT):
-            return await _write_line(hass, entry, recipient, message, rules)
+            line, found = await _write_line(hass, entry, recipient, message, rules)
+        if line:
+            # Announced straight after, by an automation listening for the event.
+            emotion.send_emotion(hass, entry, found)
+        return line
     except TimeoutError:
         _LOGGER.debug("Calendar line took longer than %s s, returning no text", COMPOSE_TIMEOUT)
     except Exception:  # noqa: BLE001 - the caller must always get an answer to fall back on
