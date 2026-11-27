@@ -76,6 +76,7 @@ from .favorites_play import (
     player_name,
     resolve_player,
 )
+from .helpers import speech_text
 from .listening import listening_since
 from .memory import (
     MEMORY_FULL_RULE,
@@ -272,7 +273,7 @@ def _silent_error(result: conversation.ConversationResult) -> bool:
     response = result.response
     if response.response_type is not intent.IntentResponseType.ERROR:
         return False
-    return not str((response.speech.get("plain") or {}).get("speech") or "").strip()
+    return not speech_text(response).strip()
 
 class PersonaRouter(conversation.ConversationEntity):
     _attr_supports_streaming = True
@@ -361,7 +362,7 @@ class PersonaRouter(conversation.ConversationEntity):
             if response.response_type == intent.IntentResponseType.ERROR:
                 _LOGGER.warning("Reply agent returned an error, using a fixed line")
                 return None
-            speech = (response.speech.get("plain") or {}).get("speech") or ""
+            speech = speech_text(response)
             return str(speech).strip() or None
         except Exception:  # noqa: BLE001 - a failed reply agent must never block the reply
             _LOGGER.exception("Reply agent failed, using a fixed line")
@@ -798,7 +799,7 @@ class PersonaRouter(conversation.ConversationEntity):
             )
             if log is None or log_start is None or not visible:
                 return result, about_reminder
-            reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
+            reply = speech_text(result.response)
             if looking_up:
                 # A look-up: its answer says when a reminder is set for, which is no
                 # claim that one was set. It must come from the tool, though.
@@ -888,7 +889,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 user_text=user_input.text,
                 reply_text=emotion.strip_audio_tags(
                     emotion.split_tag(
-                        str((result.response.speech.get("plain") or {}).get("speech") or "")
+                        speech_text(result.response)
                     )[1]
                 ),
                 language=user_input.language,
@@ -989,7 +990,7 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.debug("No built-in command matched the request")
             return None
         _LOGGER.debug("A built-in command handled the request")
-        speech = (response.speech.get("plain") or {}).get("speech") or ""
+        speech = speech_text(response)
         log.async_add_assistant_content_without_tools(
             conversation.AssistantContent(
                 agent_id=conversation.HOME_ASSISTANT_AGENT, content=speech
@@ -1426,7 +1427,7 @@ class PersonaRouter(conversation.ConversationEntity):
             turn = log.content[log_start:]
             if a_tool_worked(turn) or has_memory_keyword(user_input.text):
                 return None
-            reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
+            reply = speech_text(result.response)
             if used_a_tool(turn):
                 # Every call failed: a reply that says it was done is no truer than one
                 # after no call at all. A reminder tool that failed has its own check,
@@ -1463,7 +1464,7 @@ class PersonaRouter(conversation.ConversationEntity):
 
     def _shown(self, result: Result) -> str:
         """The reply as it is shown: without its face tag and audio tags."""
-        said = str((result.response.speech.get("plain") or {}).get("speech") or "")
+        said = speech_text(result.response)
         return emotion.strip_audio_tags(
             emotion.split_tag(said, emotion.accepted_emotions(self._entry))[1]
         ).strip()

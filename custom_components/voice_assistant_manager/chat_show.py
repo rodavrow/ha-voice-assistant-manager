@@ -43,6 +43,7 @@ from . import announcement_look, avatar_chat, avatar_hold, data_keys, emotion, s
 from .announce import writer_agent
 from .avatar import prepare_clip
 from .const import DOMAIN
+from .helpers import speech_text
 from .memory import clean_text
 from .reminders import assistant_name
 from .setup_guide import Satellite, find_satellites
@@ -1132,7 +1133,7 @@ class ChatShowManager:
         if result.response.response_type == intent.IntentResponseType.ERROR:
             _LOGGER.warning("%s answered a chat line with an error", writer)
             return "", emotion.NEUTRAL, "", ""
-        speech = str((result.response.speech.get("plain") or {}).get("speech") or "")
+        speech = speech_text(result.response)
         voice_tags = emotion.voice_tags_on(entry)
         found, voiced, why = emotion.split_face(
             clean_text(speech),

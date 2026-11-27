@@ -30,6 +30,7 @@ from . import data_keys
 from .const import DEFAULT_MAX_ITEMS as DEFAULT_MAX_ITEMS
 from .const import DOMAIN, PERSON_SECTION
 from .const import Person as Person
+from .helpers import speech_text
 from .reminders import is_reminder_turn
 
 _LOGGER = logging.getLogger(__name__)
@@ -784,7 +785,7 @@ async def _async_extract(
     if response.response_type == intent.IntentResponseType.ERROR:
         _LOGGER.debug("Memory agent returned an error, nothing saved")
         return
-    parsed = parse_extraction(str((response.speech.get("plain") or {}).get("speech") or ""))
+    parsed = parse_extraction(speech_text(response))
     if parsed is None:
         _LOGGER.debug("Memory agent did not return valid JSON, nothing saved")
         return
