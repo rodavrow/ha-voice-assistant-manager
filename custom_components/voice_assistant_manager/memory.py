@@ -26,7 +26,9 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import DEFAULT_MAX_ITEMS as DEFAULT_MAX_ITEMS
+from .const import DOMAIN, PERSON_SECTION
+from .const import Person as Person
 from .reminders import is_reminder_turn
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,7 +43,6 @@ MAX_LINE_SCHEMA_LENGTH = MAX_TEXT_LENGTH + 50
 # The most facts one list may hold; also the most the prompt settings allow.
 MAX_MAX_ITEMS = 200
 
-Person = Literal["owner", "wife"]
 # What the pages call each person who has no name.
 PERSON_LABELS: dict[Person, str] = {"owner": "Person 1", "wife": "Person 2"}
 Source = Literal["told", "judged"]
@@ -96,8 +97,7 @@ def global_key(person: Person) -> str:
     return f"global:{person}"
 
 
-# The settings section that holds each person's name and Home Assistant user.
-_PERSON_SECTION: dict[Person, str] = {"owner": "owner", "wife": "partner"}
+_PERSON_SECTION = PERSON_SECTION
 
 
 @dataclass(frozen=True)
@@ -451,7 +451,6 @@ REMEMBER_RULE_REMINDERS = (
     "script.create_reminder tool. Say a reminder is set only after that tool returned "
     "status ok, and if it returned an error, tell the person what its message says."
 )
-DEFAULT_MAX_ITEMS = 50
 MIN_MAX_ITEMS = 10
 BLOCK_MAX_CHARS = 2000
 

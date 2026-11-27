@@ -48,11 +48,16 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
-from . import avatar_stream, emotion
+from . import avatar_stream, const, emotion
 from .announce import safe_toolless_agent
 from .avatar import esphome_entity
 from .chat_show import GUEST, get_manager, is_stop_phrase
-from .const import REPLY_AGENT_TIMEOUT
+from .const import (
+    DEFAULT_MIN_SCORE,
+    PERSON_SECTION,
+    REPLY_AGENT_TIMEOUT,
+    WAKE_WORD_SENSOR,
+)
 from .favorites import (
     Favorite,
     async_get_favorites,
@@ -163,12 +168,8 @@ UNSURE_LINE = "Sorry, I can't tell who is speaking right now. Please try again i
 # an assistant. Longer ones are refused before anything reads them.
 MAX_REQUEST_CHARS = 2000
 TOO_LONG_LINE = "Sorry, that is too long for me. Please say it in fewer words."
-SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
-# How long after a satellite starts listening its voice match can still arrive, unless set
-# under Advanced. LANovo publishes it 4.6-5.5 s after the wake word, whatever is said.
-DEFAULT_MATCH_WITHIN = 6.0
-# The text sensor a satellite reports on each new turn's wake word (LANovo, EchoLocal).
-WAKE_WORD_SENSOR = "Last wake word"
+SETTINGS_KEY = PERSON_SECTION
+DEFAULT_MATCH_WITHIN = float(const.DEFAULT_MATCH_WITHIN)
 OTHER_PERSON: dict[Person, Person] = {"owner": "wife", "wife": "owner"}
 # How the settings screen calls each person, for one who has no name.
 PERSON_NUMBER = {"owner": "Person 1", "wife": "Person 2"}
@@ -931,7 +932,7 @@ class PersonaRouter(conversation.ConversationEntity):
         if matched and near.get("enabled"):
             score = self._last_score(user_input.device_id)
             try:
-                lowest = float(near.get("min_score", 0.5))
+                lowest = float(near.get("min_score", DEFAULT_MIN_SCORE))
             except (TypeError, ValueError):
                 lowest = 0.5
             if score is not None and score >= lowest:

@@ -32,11 +32,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .avatar import esphome_entity
-from .const import DOMAIN
+from .const import DOMAIN, WAKE_WORD_SENSOR
 
 _LOGGER = logging.getLogger(__name__)
 
-WAKE_WORD_SENSOR = "Last wake word"
 # A wake word this long before a request still started it: speech, then the voice match.
 FRESH = timedelta(seconds=60)
 # As long as Home Assistant keeps a conversation going without use (chat_session.py).

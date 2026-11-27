@@ -28,7 +28,7 @@ from .calendars import (
     DEFAULT_CATCH_UP_HOURS,
     parse_time,
 )
-from .const import DOMAIN
+from .const import DEFAULT_MATCH_WITHIN, DEFAULT_MAX_ITEMS, DEFAULT_MIN_SCORE, DOMAIN
 from .memory import (
     LineTooLongError,
     MemoryItem,
@@ -50,7 +50,7 @@ type Choices = Iterable[tuple[str, str]]
 MEMORY_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "auto_save": True,
-    "max_items": 50,
+    "max_items": DEFAULT_MAX_ITEMS,
     "use_global": True,
     "shared": True,
 }
@@ -224,13 +224,13 @@ def current_settings(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
         },
         "near_miss": {
             "enabled": False,
-            "min_score": 0.5,
+            "min_score": DEFAULT_MIN_SCORE,
             "persona": DEFAULT_NEAR_PERSONA,
             "fixed_replies": DEFAULT_NEAR_LINES,
         },
         "advanced": {
             "rule": str(texts.get("rule") or ""),
-            "match_within": 6,
+            "match_within": DEFAULT_MATCH_WITHIN,
             "follow_up_window": 60,
             # Proposed for a new assistant: nobody is assumed for a device that cannot
             # tell people apart. Settings saved without this choice still mean Person 1.
@@ -278,7 +278,7 @@ def settings_schema(current: Settings, users: Choices) -> vol.Schema:
                         _fixed("enabled", memory, False): selector.BooleanSelector(),
                         _opt("agent", memory): _agent(),
                         _fixed("auto_save", memory, True): selector.BooleanSelector(),
-                        _fixed("max_items", memory, 50): _number(10, 200, 1),
+                        _fixed("max_items", memory, DEFAULT_MAX_ITEMS): _number(10, 200, 1),
                         _fixed("use_global", memory, True): selector.BooleanSelector(),
                         _fixed("shared", memory, True): selector.BooleanSelector(),
                     }
@@ -373,7 +373,7 @@ def settings_schema(current: Settings, users: Choices) -> vol.Schema:
                 vol.Schema(
                     {
                         _fixed("enabled", near, False): selector.BooleanSelector(),
-                        _fixed("min_score", near, 0.5): _number(0, 1, 0.01),
+                        _fixed("min_score", near, DEFAULT_MIN_SCORE): _number(0, 1, 0.01),
                         _opt("persona", near): _text(True),
                         _opt("fixed_replies", near): _text(True),
                     }
@@ -388,7 +388,9 @@ def settings_schema(current: Settings, users: Choices) -> vol.Schema:
                         _opt("emotion_tags", advanced): _text(),
                         _fixed("voice_tags", advanced, False): selector.BooleanSelector(),
                         _opt("face_for_tags", advanced): _text(True),
-                        _fixed("match_within", advanced, 6): _number(0, 15, 0.5, "s"),
+                        _fixed("match_within", advanced, DEFAULT_MATCH_WITHIN): _number(
+                            0, 15, 0.5, "s"
+                        ),
                         _fixed("follow_up_window", advanced, 60): _number(0, 300, 5, "s"),
                         _fixed("no_helper_role", advanced, "owner"): _choice(
                             [

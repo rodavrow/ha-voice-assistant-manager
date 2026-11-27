@@ -52,7 +52,7 @@ from .config_flow import (
     settings_to_save,
     without_retired,
 )
-from .const import DOMAIN
+from .const import DOMAIN, PERSON_SECTION
 from .favorites import (
     HOUSEHOLD,
     LIST_KEYS,
@@ -989,8 +989,7 @@ def async_register_chat_services(hass: HomeAssistant) -> None:
 # Favorites. The shared helpers serve My assistant too, which decides the list itself.
 
 FavoritesAction = Literal["add", "update", "remove"]
-# The settings section holding each person's name.
-_PERSON_SECTIONS: dict[Person, str] = {"owner": "owner", "wife": "partner"}
+_PERSON_SECTIONS = PERSON_SECTION
 
 
 async def favorites_change(
