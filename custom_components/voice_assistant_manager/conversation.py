@@ -48,7 +48,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
-from . import avatar_stream, const, emotion
+from . import avatar_stream, const, emotion, talk
 from .announce import safe_toolless_agent
 from .avatar import esphome_entity
 from .chat_show import GUEST, get_manager, is_stop_phrase
@@ -1382,9 +1382,14 @@ class PersonaRouter(conversation.ConversationEntity):
         corrected = _HONEST_LINE.set(None)
         put_right = _SECOND_ANSWER.set(None)
         streaming = _STREAM.set(stream)
-        # The avatar's voice asks which satellite this reply is for (avatar_stream.py).
+        # The avatar's voice asks which satellite this reply is for (avatar_stream.py), or
+        # which page, for someone talking to the avatar there (talk.py).
+        asker = user_input.context.user_id if user_input.context else None
         turn = avatar_stream.turn_started(
-            self.hass, self._entry.entry_id, user_input.satellite_id
+            self.hass,
+            self._entry.entry_id,
+            user_input.satellite_id
+            or talk.asking(self.hass, self._entry.entry_id, asker, user_input.device_id),
         )
         try:
             result = await self._async_answer(user_input)

@@ -27,6 +27,10 @@ function h(tag, props, ...children) {
   return node;
 }
 
+// The element for talking to an avatar (talk.js), next to this script and of the same version.
+const TALK_URL = new URL(`talk.js${new URL(import.meta.url).search}`, import.meta.url).href;
+const TALK_ELEMENT = "vam-talk";
+
 // The stage card (stage.js) as the page shows it for a chat on "This device": over everything.
 const STAGE_CARD = "vam-chat-stage-card";
 const STAGE_BOX_STYLE = "position:fixed;inset:0;z-index:1000;background:#000;";
@@ -484,6 +488,8 @@ class VoicePersonaRouterPanel extends HTMLElement {
     this._viewer = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
     this._here = `page:${this._viewer}`;
     this._stage = null; // { box, card, lock }
+    this._talk = null; // the open talk with an avatar (talk.js), over the page
+    this._talkBusy = false;
     // Favorites: favorites/get's answer, fetched whenever the section opens. One change at a
     // time, as for memory: each answer replaces a whole list.
     this._fav = { data: null, stale: true, loading: false, error: "" };
@@ -500,6 +506,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) menu.hass = hass;
     if (this._stage) this._stage.card.hass = hass;
+    if (this._talk) this._talk.hass = hass;
     if (first) this._load();
   }
 
@@ -517,6 +524,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
   disconnectedCallback() {
     this._stopChatPoll();
     this._closeStage();
+    if (this._talk) this._talk.close();
   }
 
   // Data.
@@ -1585,6 +1593,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
         "A face on a screen that moves its lips to what this assistant says, through a LiveTalking server. The satellite still speaks as before. After adding one, choose its text-to-speech entity in this assistant's voice pipeline (Settings > Voice assistants) and choose the voice again."
       ),
       this._chatVoiceReminder(),
+      this._talkRow(avatars),
       avatars.length ? avatars.map((row) => this._avatarRow(row)) : !adding && h("div", { class: "empty" }, "No avatar."),
       adding
         ? this._avatarEditor()
@@ -1605,6 +1614,50 @@ class VoicePersonaRouterPanel extends HTMLElement {
             )
           )
     );
+  }
+
+  /** Talk to this assistant's avatar on this page, when it has one that is on (talk.js). */
+  _talkRow(avatars) {
+    if (!avatars.some((row) => row.enabled && row.entity_id)) return null;
+    return h(
+      "div",
+      { class: "cal" },
+      h(
+        "div",
+        { class: "what" },
+        h("div", { class: "title" }, "Talk to the avatar"),
+        h(
+          "div",
+          { class: "sub" },
+          "Opens the avatar on this page and listens through this device's microphone, as a satellite would. You are the Home Assistant user you are logged in as. The microphone needs https or the Home Assistant app."
+        )
+      ),
+      h("button", { class: "btn primary", disabled: this._talkBusy || !!this._talk, onclick: () => this._openTalk() }, "Talk")
+    );
+  }
+
+  async _openTalk() {
+    if (this._talk || this._talkBusy) return;
+    const router = this._router;
+    this._talkBusy = true;
+    this._render();
+    try {
+      if (!customElements.get(TALK_ELEMENT)) await import(TALK_URL);
+      const talk = document.createElement(TALK_ELEMENT);
+      talk.addEventListener("vam-talk-closed", () => {
+        if (this._talk === talk) this._talk = null;
+        this._render();
+      });
+      // On the document, not in this page: drawing the page again would take it off for a
+      // moment, which ends the talk.
+      document.body.append(talk);
+      this._talk = talk;
+      talk.open({ hass: this._hass, entryId: router.entry_id, title: router.title });
+    } catch (err) {
+      this._toast(`Talking could not be started: ${reason(err)}`);
+    }
+    this._talkBusy = false;
+    this._render();
   }
 
   /**

@@ -48,6 +48,8 @@
     "voice_assistant_manager/panel/save_settings",
     "voice_assistant_manager/panel/set_announcement_look",
     "voice_assistant_manager/panel/set_sidebar",
+    "voice_assistant_manager/panel/talk/close",
+    "voice_assistant_manager/panel/talk/open",
     "voice_assistant_manager/panel/voices",
     "voice_assistant_manager/stage/connected",
     "voice_assistant_manager/stage/offer",

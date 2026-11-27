@@ -37,6 +37,9 @@ MINE_SCRIPT_URL = f"/{DOMAIN}/mine.js"
 MINE_SCRIPT_FILE = Path(__file__).parent / "frontend" / "mine.js"
 # The card of the chat stage, cast to Google Cast devices (stage.py).
 STAGE_SCRIPT_FILE = Path(__file__).parent / "frontend" / "stage.js"
+# The element for talking to an avatar, which the page fetches when Talk is pressed (talk.py).
+TALK_SCRIPT_URL = f"/{DOMAIN}/talk.js"
+TALK_SCRIPT_FILE = Path(__file__).parent / "frontend" / "talk.js"
 STORAGE_VERSION = 1
 GuideState = Literal["done", "dismissed", "started"]
 GUIDE_STATES: tuple[GuideState, ...] = ("done", "dismissed", "started")
@@ -297,6 +300,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             StaticPathConfig(SCRIPT_URL, str(SCRIPT_FILE), cache_headers=False),
             StaticPathConfig(MINE_SCRIPT_URL, str(MINE_SCRIPT_FILE), cache_headers=False),
             StaticPathConfig(STAGE_SCRIPT_URL, str(STAGE_SCRIPT_FILE), cache_headers=False),
+            StaticPathConfig(TALK_SCRIPT_URL, str(TALK_SCRIPT_FILE), cache_headers=False),
         ]
     )
     _register(hass, state, update=False)

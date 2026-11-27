@@ -95,6 +95,26 @@ It needs satellite firmware with the switch **Avatar fed by Home Assistant** on 
 
 While an avatar is on, the **Avatar** card reminds you to choose its entity as the text-to-speech engine of **Voice for chats**, with a button to do so. Satellites in avatar mode speak chat lines through the avatar anyway; the setting makes the lines reach the LiveTalking page too. Once the avatar is off, it reminds you to choose the normal engine again.
 
+## Talking to the avatar on the Voice Manager page
+
+An administrator can talk to an assistant's avatar without a satellite. In the assistant's **Avatar** section on the Voice Manager page, **Talk** opens the avatar over the page. Tap the microphone, speak, and the avatar answers with voice and lips from the same stream. It is an ordinary turn with that assistant: the same main agent, tools, memory and reminders as on a satellite.
+
+**It needs:**
+
+- an avatar of the assistant that is on
+- a voice assistant under **Settings > Voice assistants** with speech-to-text, this assistant as its conversation agent and this assistant's avatar voice as its text-to-speech
+- room for one more session on LiveTalking
+- a page that may use the microphone: Home Assistant opened over https, or the Home Assistant app, with the microphone allowed
+- a device that can reach LiveTalking
+
+Otherwise the page says which of these is missing.
+
+**How a turn goes:** the microphone listens after a tap and stops by itself when you stop speaking. The page shows what was heard and the answer as text. While the avatar speaks the microphone is closed; when the assistant asked you something, it opens again by itself once the avatar is quiet.
+
+**Who you are** is the Home Assistant user you are logged in as, not your voice. If that user is Person 1 or Person 2 of the assistant, you are that person; if not, the assistant treats you as its settings say for a request without a voice match.
+
+**What it does not do:** there is no wake word, and the avatar cannot be interrupted by speaking. One person at a time can talk to an assistant's avatar. Closing or leaving the page ends the talk. While a talk is open, anything the same user types to that assistant in Home Assistant's Assist dialog is also answered by the avatar on the page.
+
 ## What LiveTalking receives
 
 For each complete clip, Voice Assistant Manager asks LiveTalking for its viewers (`GET /api/admin/sessions`). It leaves out the sessions of satellites in avatar mode, which send their own speech, and, when the avatar has a **LiveTalking avatar** set, every session showing another avatar, so one assistant never speaks with another's face. For each viewer, it stops what the avatar is saying (`POST /interrupt_talk`) and sends the clip (`POST /humanaudio`). With no viewers, nothing is sent.
