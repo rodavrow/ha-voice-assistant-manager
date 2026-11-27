@@ -240,6 +240,8 @@ class PersonaRouter(conversation.ConversationEntity):
         self._spoken_by: dict[str, Remembered] = {}
         # Satellites whose last voice turn got no voice match, to warn once per outage.
         self._no_match: set[str] = set()
+        # Satellites that recognise speakers but have no helper, to warn once each.
+        self._no_helper: set[str] = set()
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -448,7 +450,7 @@ class PersonaRouter(conversation.ConversationEntity):
             remembered = None
         helper = f"input_text.voice_speaker_{device_id or ''}"
         if self.hass.states.get(helper) is None:
-            return resolve_speaker(None, None, user_map, no_helper_role)
+            return self._without_helper(device_id, helper, user_map, no_helper_role)
         woke = self._wake_reported(device_id)
         woke_since = True if remembered is not None and woke and woke > remembered.at else None
         window = self._follow_up_window()
@@ -490,6 +492,41 @@ class PersonaRouter(conversation.ConversationEntity):
                 # An unknown voice ends it: a later turn needs a voice match of its own.
                 self._spoken_by.pop(conversation_id, None)
         return role, matched
+
+    def _without_helper(
+        self,
+        device_id: str | None,
+        helper: str,
+        user_map: list[tuple[Role, str | None]],
+        no_helper_role: str | None,
+    ) -> tuple[Role, bool]:
+        """The role for a voice request from a device that has no voice_speaker helper.
+
+        "A device without speaker recognition is" decides, but not for a satellite that
+        does recognise speakers: its helper is missing (the satellite was paired again and
+        has a new device id, or the helper was never made), and assuming a person for it
+        would give that person's access to everyone who speaks to it.
+        """
+        if not device_id or not self._recognises_speakers(device_id):
+            return resolve_speaker(None, None, user_map, no_helper_role)
+        if device_id not in self._no_helper:
+            self._no_helper.add(device_id)
+            _LOGGER.warning(
+                "The satellite on device %s recognises speakers but has no helper %s, so "
+                "its requests are refused. Make the helper, or run the setup guide again "
+                "if the satellite was paired again",
+                device_id, helper,
+            )
+        self._no_match.add(device_id)
+        return "stranger", False
+
+    def _recognises_speakers(self, device_id: str) -> bool:
+        """Whether the device has the sensors a tracking automation reads."""
+        registry = er.async_get(self.hass)
+        return any(
+            entity.entity_id.endswith(("_last_speaker", "_last_speaker_score"))
+            for entity in er.async_entries_for_device(registry, device_id)
+        )
 
     def _note_match(self, device_id: str | None, arrived: bool) -> None:
         """Keep which satellites gave no voice match on their last turn; warn once each."""
