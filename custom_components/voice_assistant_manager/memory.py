@@ -303,9 +303,12 @@ class MemoryStore:
         max_items: int | None = None,
         private: bool = False,
     ) -> MemoryItem | None:
-        """Add one fact. Returns None when the list already has it.
+        """Add one fact. Returns None when the list already has it, or has no room.
 
-        A private fact is never shown when the other person speaks.
+        A private fact is never shown when the other person speaks. No list holds more
+        than MAX_MAX_ITEMS, whatever `max_items` says: the oldest judged facts make room,
+        and when only told ones are left, which are never dropped, the new fact is not
+        added and a warning says the list is full.
 
         Raises ValueError when the text is empty or longer than MAX_TEXT_LENGTH.
         """
@@ -318,8 +321,15 @@ class MemoryStore:
                 return None
             item = self._new_item(key, cleaned, source, private)
             items.append(item)
-            if max_items is not None:
-                _apply_cap(items, max_items)
+            _apply_cap(items, min(max_items or MAX_MAX_ITEMS, MAX_MAX_ITEMS))
+            if len(items) > MAX_MAX_ITEMS:
+                items.remove(item)
+                # The fact itself is personal and stays out of the log.
+                _LOGGER.warning(
+                    "The memory list %s is full (%d facts), so a new fact was not saved. "
+                    "Remove some on the Voice Manager page",
+                    key, MAX_MAX_ITEMS,
+                )
             if not any(kept is item for kept in items):
                 return None
             self._schedule_save()
@@ -387,10 +397,14 @@ class MemoryStore:
             self._lists[key] = items
             self._schedule_save()
 
-    async def async_remove_entry(self, entry_id: str) -> None:
-        """Delete every per-assistant list of one router entry. Global lists stay."""
-        prefix = f"entry:{entry_id}:"
-        for key in [key for key in self._lists if key.startswith(prefix)]:
+    async def async_remove_entry(self, entry_id: str, *, last: bool = False) -> None:
+        """Delete every per-assistant list of one router entry.
+
+        The lists shared by every assistant stay, unless this was the `last` assistant:
+        then nothing is left that could use them.
+        """
+        prefixes = (f"entry:{entry_id}:", *(("global:",) if last else ()))
+        for key in [key for key in self._lists if key.startswith(prefixes)]:
             async with self.lock(key):
                 self._lists.pop(key, None)
         self._schedule_save()

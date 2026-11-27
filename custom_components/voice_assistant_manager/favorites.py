@@ -489,6 +489,13 @@ class FavoritesStore:
             self._schedule_save()
 
 
+    async def async_clear(self) -> None:
+        """Remove every favorite of every list: the last assistant was removed."""
+        async with self._lock:
+            self._lists = {key: [] for key in LIST_KEYS}
+            self._schedule_save()
+
+
 async def async_get_favorites(hass: HomeAssistant) -> FavoritesStore:
     """The one shared store, loaded on first use."""
     data = hass.data.setdefault(DOMAIN, {})
