@@ -303,7 +303,7 @@
       "mine_persona_too_long": "Your persona may be 2000 characters at most. Shorten it and try again.",
       "mine_no_script": "Reminders cannot be added yet, because the script script.create_reminder does not exist. Ask an administrator to set it up.",
       "mine_cannot_delete": "This reminder cannot be deleted. It may be gone already, or its calendar does not allow deleting.",
-      "mine_failed": "Home Assistant refused this: {reason}",
+      "mine_failed": "Home Assistant could not do this. The reason is in its log.",
       "mine_title_invalid": "Write what to be reminded of, in 200 characters at most.",
       "mine_time_invalid": "Choose either a number of minutes from now (1 or more) or a time such as 19:30. A day can only go with a time.",
       "mine_no_name": "A reminder for you needs your name, and none is set yet. Ask an administrator to fill in your name under People on the Voice Manager page, or add the reminder for the household.",

@@ -625,9 +625,15 @@ async def test_add_reminder_says_so_when_there_is_no_script(
     [HomeAssistantError("the calendar is full"), ServiceValidationError("bad time")],
     ids=["home_assistant_error", "service_validation_error"],
 )
-async def test_a_failing_script_is_refused_with_its_reason(
-    hass: HomeAssistant, mine: Mine, hass_read_only_user: MockUser, failure: Exception
+async def test_regression_s9_a_failing_script_is_refused_without_its_reason(
+    hass: HomeAssistant,
+    mine: Mine,
+    hass_read_only_user: MockUser,
+    failure: Exception,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """What Home Assistant says can name entities or the other person's calendar: it goes
+    to the log, and the person is told where to look."""
     entry = await alex_router(hass, hass_read_only_user)
     register_script(hass, failure)
 
@@ -640,7 +646,72 @@ async def test_a_failing_script_is_refused_with_its_reason(
         in_minutes=5,
     )
 
-    assert str(failure) in text
+    assert str(failure) not in text
+    assert "log" in text
+    assert str(failure) in caplog.text
+
+
+async def test_regression_s9_only_the_status_and_message_of_the_script_reach_the_page(
+    hass: HomeAssistant, mine: Mine, hass_read_only_user: MockUser
+) -> None:
+    entry = await alex_router(hass, hass_read_only_user)
+
+    async def create_reminder(call: ServiceCall) -> dict[str, Any]:
+        return {
+            "status": "error",
+            "message": "No calendar for sam.",
+            "calendar": SAM,
+            "trace": {"entity": "script.create_reminder"},
+        }
+
+    hass.services.async_register(
+        "script", "create_reminder", create_reminder, supports_response=SupportsResponse.ONLY
+    )
+
+    result = await mine.ok(
+        "add_reminder",
+        entry_id=entry.entry_id,
+        scope="me",
+        title="Call",
+        announce=True,
+        in_minutes=5,
+    )
+
+    assert result == {"status": "error", "message": "No calendar for sam."}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"in_minutes": 525601},
+        {"title": "x" * 2001},
+        {"scope": "x" * 100},
+        {"at_time": "x" * 100, "in_minutes": None},
+        {"entry_id": "x" * 200},
+    ],
+    ids=["minutes", "title", "scope", "at_time", "entry_id"],
+)
+async def test_regression_s9_a_field_far_beyond_what_the_page_sends_is_not_accepted(
+    hass: HomeAssistant, mine: Mine, hass_read_only_user: MockUser, changes: dict[str, Any]
+) -> None:
+    entry = await alex_router(hass, hass_read_only_user)
+    calls = register_script(hass)
+    fields = {
+        "entry_id": entry.entry_id,
+        "scope": "me",
+        "title": "Call",
+        "announce": True,
+        "in_minutes": 5,
+        **changes,
+    }
+
+    answer = await mine.call(
+        "add_reminder", **{key: value for key, value in fields.items() if value is not None}
+    )
+
+    assert answer["success"] is False
+    assert answer["error"]["code"] == "invalid_format"
+    assert calls == []
 
 
 async def test_delete_reminder_removes_the_persons_own_event(
@@ -683,8 +754,11 @@ async def test_delete_reminder_refuses_the_other_persons_event(
     assert calendars[SAM].deleted == []
 
 
-async def test_a_failing_delete_is_refused_with_its_reason(
-    hass: HomeAssistant, mine: Mine, hass_read_only_user: MockUser
+async def test_regression_s9_a_failing_delete_is_refused_without_its_reason(
+    hass: HomeAssistant,
+    mine: Mine,
+    hass_read_only_user: MockUser,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     await setup_calendars(
         hass,
@@ -699,7 +773,9 @@ async def test_a_failing_delete_is_refused_with_its_reason(
 
     text = await mine.refused("delete_reminder", entry_id=entry.entry_id, calendar=ALEX, uid="a1")
 
-    assert "the disk is full" in text
+    assert "the disk is full" not in text
+    assert "log" in text
+    assert "the disk is full" in caplog.text
 
 
 # Who may call.
