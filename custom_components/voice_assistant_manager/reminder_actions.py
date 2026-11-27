@@ -40,10 +40,11 @@ from homeassistant.exceptions import HomeAssistantError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .const import DOMAIN
 from .recurring import RepeatError, plan_repeat
 from .reminder_search import DATA_NOTE, Occurrence, SearchError, day_range, shown, summarise
-from .reminders import HOUSEHOLD
+from .reminders import HOUSEHOLD, plain_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ SERVICE_CREATE = "create_reminder_event"
 SERVICE_CANCEL = "cancel_reminder_event"
 SERVICE_LIST = "list_reminder_events"
 # hass.data[DOMAIN][ASKERS]: context id -> who is asking in that turn.
-ASKERS = "reminder_askers"
+ASKERS = data_keys.REMINDER_ASKERS
 # A turn's tool calls come well within this; after it the note is dropped.
 ASKER_LIFETIME = timedelta(minutes=10)
 MAX_TITLE = 200
@@ -136,10 +137,10 @@ def note_asker(
     if context is None:
         return
     now = dt_util.utcnow()
-    askers: dict[str, _Asker] = hass.data.setdefault(DOMAIN, {}).setdefault(ASKERS, {})
+    askers: dict[str, _Asker] = data_keys.domain_data(hass).setdefault(ASKERS, {})
     for context_id in [key for key, seen in askers.items() if now - seen.at > ASKER_LIFETIME]:
         del askers[context_id]
-    shown = " ".join(str(name or "").split()).casefold()
+    shown = plain_name(name)
     if shown and shown != HOUSEHOLD:
         askers[context.id] = _Asker(shown, now, user_id or None)
     else:
@@ -190,7 +191,7 @@ def _listed(hass: HomeAssistant) -> dict[str, _Owners]:
         reminders = entry.options.get("reminders") or {}
         for role in ("owner", "partner"):
             person = entry.options.get(role) or {}
-            name = " ".join(str(person.get("name") or "").split()).casefold()
+            name = plain_name(person.get("name"))
             for calendar in reminders.get(f"{role}_calendars") or []:
                 users.setdefault(calendar, set())
                 names.setdefault(calendar, set())
@@ -264,11 +265,16 @@ async def _check_user(
             raise Unauthorized(context=call.context, entity_id=entity_id)
 
 
-def _calendar(hass: HomeAssistant, entity_id: str, feature: CalendarEntityFeature) -> Any:
-    """The calendar entity, or a message saying why it cannot be used."""
+def _calendar_entity(hass: HomeAssistant, entity_id: str) -> CalendarEntity | None:
     component = hass.data.get(DATA_COMPONENT)
     entity = component.get_entity(entity_id) if component is not None else None
-    if not isinstance(entity, CalendarEntity):
+    return entity if isinstance(entity, CalendarEntity) else None
+
+
+def _calendar(hass: HomeAssistant, entity_id: str, feature: CalendarEntityFeature) -> Any:
+    """The calendar entity, or a message saying why it cannot be used."""
+    entity = _calendar_entity(hass, entity_id)
+    if entity is None:
         return f"{entity_id} is not a calendar."
     if not (entity.supported_features or 0) & feature:
         action = "add" if feature is CalendarEntityFeature.CREATE_EVENT else "remove"
@@ -329,7 +335,7 @@ def _may_not_cancel(hass: HomeAssistant, call: ServiceCall) -> str | None:
     as before, anything when it names nobody.
     """
     caller = _caller(hass, call)
-    for_whom = " ".join(str(call.data.get("for_whom") or "").split()).casefold()
+    for_whom = plain_name(call.data.get("for_whom"))
     if not for_whom and caller.kind != "automation":
         return (
             "Reminder not cancelled. The cancel_reminder script must pass for_whom to "
@@ -408,7 +414,7 @@ async def _async_list(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse
     listed = _listed(hass)
     mine: list[dict[str, Any]] = []
     for entry in call.data["reminders"]:
-        labelled = " ".join(entry["for_whom"].split()).casefold() in by_label
+        labelled = plain_name(entry["for_whom"]) in by_label
         allowed = [
             (labelled if (may := _may_use(caller, listed.get(calendar))) is None else may)
             for calendar in entry["calendar"]
@@ -433,11 +439,10 @@ async def _async_list(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse
         return _error(f"Reminders not looked up. {err}")
     occurrences: list[Occurrence] = []
     for entry in mine:
-        for_whom = " ".join(entry["for_whom"].split()).casefold()
+        for_whom = plain_name(entry["for_whom"])
         for entity_id in entry["calendar"]:
-            component = hass.data.get(DATA_COMPONENT)
-            entity = component.get_entity(entity_id) if component is not None else None
-            if not isinstance(entity, CalendarEntity):
+            entity = _calendar_entity(hass, entity_id)
+            if entity is None:
                 return _error(f"{entity_id} is not a calendar.")
             try:
                 events = await entity.async_get_events(hass, start, end)

@@ -26,7 +26,11 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from . import data_keys
+from .const import DEFAULT_MAX_ITEMS as DEFAULT_MAX_ITEMS
+from .const import DOMAIN, PERSON_SECTION
+from .const import Person as Person
+from .helpers import speech_text
 from .reminders import is_reminder_turn
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,7 +45,6 @@ MAX_LINE_SCHEMA_LENGTH = MAX_TEXT_LENGTH + 50
 # The most facts one list may hold; also the most the prompt settings allow.
 MAX_MAX_ITEMS = 200
 
-Person = Literal["owner", "wife"]
 # What the pages call each person who has no name.
 PERSON_LABELS: dict[Person, str] = {"owner": "Person 1", "wife": "Person 2"}
 Source = Literal["told", "judged"]
@@ -96,8 +99,7 @@ def global_key(person: Person) -> str:
     return f"global:{person}"
 
 
-# The settings section that holds each person's name and Home Assistant user.
-_PERSON_SECTION: dict[Person, str] = {"owner": "owner", "wife": "partner"}
+_PERSON_SECTION = PERSON_SECTION
 
 
 @dataclass(frozen=True)
@@ -421,13 +423,13 @@ class MemoryStore:
 
 async def async_get_memory(hass: HomeAssistant) -> MemoryStore:
     """The one shared store, loaded on first use."""
-    data = hass.data.setdefault(DOMAIN, {})
-    async with data.setdefault("memory_lock", asyncio.Lock()):
-        if "memory" not in data:
+    data = data_keys.domain_data(hass)
+    async with data.setdefault(data_keys.MEMORY_LOCK, asyncio.Lock()):
+        if data_keys.MEMORY not in data:
             memory = MemoryStore(hass)
             await memory.async_load()
-            data["memory"] = memory
-    loaded: MemoryStore = data["memory"]
+            data[data_keys.MEMORY] = memory
+    loaded: MemoryStore = data[data_keys.MEMORY]
     return loaded
 
 
@@ -451,7 +453,6 @@ REMEMBER_RULE_REMINDERS = (
     "script.create_reminder tool. Say a reminder is set only after that tool returned "
     "status ok, and if it returned an error, tell the person what its message says."
 )
-DEFAULT_MAX_ITEMS = 50
 MIN_MAX_ITEMS = 10
 BLOCK_MAX_CHARS = 2000
 
@@ -509,7 +510,7 @@ def router_agent_ids(hass: HomeAssistant) -> set[str]:
 
 def get_loaded_memory(hass: HomeAssistant) -> MemoryStore | None:
     """The shared store if it is loaded. Never waits, so it is safe in the reply path."""
-    loaded: MemoryStore | None = hass.data.get(DOMAIN, {}).get("memory")
+    loaded: MemoryStore | None = hass.data.get(DOMAIN, {}).get(data_keys.MEMORY)
     return loaded
 
 
@@ -784,7 +785,7 @@ async def _async_extract(
     if response.response_type == intent.IntentResponseType.ERROR:
         _LOGGER.debug("Memory agent returned an error, nothing saved")
         return
-    parsed = parse_extraction(str((response.speech.get("plain") or {}).get("speech") or ""))
+    parsed = parse_extraction(speech_text(response))
     if parsed is None:
         _LOGGER.debug("Memory agent did not return valid JSON, nothing saved")
         return

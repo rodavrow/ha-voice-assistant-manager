@@ -15,11 +15,11 @@ from typing import Final
 
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from . import data_keys
 from .memory import Person
 
 ASKER_LIMIT: Final = 60  # seconds
-_DATA_KEY: Final = "favorites_askers"
+_DATA_KEY: Final = data_keys.FAVORITES_ASKERS
 # The clock the limit is measured with; tests replace it.
 _clock: Callable[[], float] = time.monotonic
 
@@ -34,7 +34,7 @@ class Asker:
 
 
 def _askers(hass: HomeAssistant) -> dict[str, tuple[float, Asker]]:
-    askers: dict[str, tuple[float, Asker]] = hass.data.setdefault(DOMAIN, {}).setdefault(
+    askers: dict[str, tuple[float, Asker]] = data_keys.domain_data(hass).setdefault(
         _DATA_KEY, {}
     )
     return askers

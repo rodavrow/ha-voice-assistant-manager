@@ -32,8 +32,6 @@ from .favorites import (
     own_list,
 )
 from .memory import (
-    MAX_LINE_SCHEMA_LENGTH,
-    MAX_MAX_ITEMS,
     LineTooLongError,
     TooManyItemsError,
     async_get_memory,
@@ -53,13 +51,14 @@ from .mine import (
 )
 from .panel_api import (
     LINE_PREVIEW_LENGTH,
-    _error_text,
-    _refused,
-    _strings,
     favorites_change,
     favorites_search,
 )
 from .reminders import assistant_name
+from .ws_helpers import MEMORY_LINES
+from .ws_helpers import error_text as _error_text
+from .ws_helpers import refused as _refused
+from .ws_helpers import strings as _strings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -261,12 +260,8 @@ async def ws_save_persona(
         vol.Required("type"): f"{PREFIX}/save_memory",
         vol.Required("entry_id"): _ID,
         vol.Required("key"): _NAME,
-        vol.Required("shown"): vol.All(
-            [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
-        ),
-        vol.Required("lines"): vol.All(
-            [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
-        ),
+        vol.Required("shown"): MEMORY_LINES,
+        vol.Required("lines"): MEMORY_LINES,
     }
 )
 @websocket_api.async_response

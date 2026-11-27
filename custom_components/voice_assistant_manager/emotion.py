@@ -23,6 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from . import data_keys
 from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_URL, SUBENTRY_TYPE, normalize_url
 from .const import DOMAIN
 
@@ -51,7 +52,7 @@ MAX_WORD_CHARS: Final = MAX_TAG_CHARS - 2
 _warned: set[str] = set()
 # Telling LiveTalking must never hold up the reply.
 SEND_TIMEOUT: Final = 0.3
-_SENDER_DATA: Final = "emotion_sender"
+_SENDER_DATA: Final = data_keys.EMOTION_SENDER
 
 
 def accepted_emotions(entry: Any) -> frozenset[str]:  # Any: a ConfigEntry, or a stand-in
@@ -101,7 +102,7 @@ MAX_AUDIO_TAG_CHARS: Final = 80
 _AUDIO_TAG = re.compile(rf"\[[^\W\d_][^\[\]\d\n]{{0,{MAX_AUDIO_TAG_CHARS - 3}}}\]")
 # The setting under Advanced: whether this assistant's voice is given audio tags.
 CONF_VOICE_TAGS: Final = "voice_tags"
-_SPOKEN: Final = "voice_tags_spoken"
+_SPOKEN: Final = data_keys.VOICE_TAGS_SPOKEN
 # How long a reply's tagged text is kept for the voice that speaks it.
 _SPOKEN_FOR: Final = 30.0
 
@@ -309,9 +310,14 @@ def remember_spoken(hass: HomeAssistant, entry_id: str, shown: str, spoken: str)
     tags; the assistant's avatar voice asks for the tagged text back (take_spoken).
     """
     if shown != spoken:
-        hass.data.setdefault(DOMAIN, {}).setdefault(_SPOKEN, {})[entry_id] = (
+        data_keys.domain_data(hass).setdefault(_SPOKEN, {})[entry_id] = (
             shown, spoken, time.monotonic(),
         )
+
+
+def forget_spoken(hass: HomeAssistant, entry_id: str) -> None:
+    """Drop what was kept for an assistant that was unloaded."""
+    hass.data.get(DOMAIN, {}).get(_SPOKEN, {}).pop(entry_id, None)
 
 
 def take_spoken(hass: HomeAssistant, entry_id: str, shown: str) -> str:
@@ -568,7 +574,7 @@ class EmotionSender:
 
 
 def _sender(hass: HomeAssistant) -> EmotionSender:
-    data = hass.data.setdefault(DOMAIN, {})
+    data = data_keys.domain_data(hass)
     sender = data.get(_SENDER_DATA)
     if sender is None:
         sender = data[_SENDER_DATA] = EmotionSender(hass)

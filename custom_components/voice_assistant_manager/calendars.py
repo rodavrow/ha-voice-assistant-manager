@@ -86,13 +86,6 @@ def _local(day: date, at: time, zone: tzinfo) -> datetime:
     return datetime.combine(day, at, tzinfo=zone)
 
 
-def start_at(event: Occurrence, zone: tzinfo) -> datetime:
-    """When the event starts. An all-day event starts at local midnight."""
-    if isinstance(event.start, datetime):
-        return event.start
-    return _local(event.start, time(0, 0), zone)
-
-
 def end_at(event: Occurrence, zone: tzinfo) -> datetime:
     """When the event is over. An all-day event ends at local midnight after its last day."""
     if isinstance(event.end, datetime):

@@ -20,6 +20,7 @@ from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
+from . import data_keys
 from .const import DOMAIN
 from .setup_guide import find_satellites
 
@@ -32,7 +33,7 @@ SELECT_TIMEOUT = 3.0
 _SATELLITE_PREFIX = "assist_satellite."
 # In hass.data[DOMAIN]: False when switched off on the page. Kept here, not in the panel
 # store's state, because the panel module imports the chat show, which imports this one.
-_DATA_ENABLED = "announcement_look"
+_DATA_ENABLED = data_keys.ANNOUNCEMENT_LOOK
 
 
 def is_enabled(hass: HomeAssistant) -> bool:
@@ -41,7 +42,7 @@ def is_enabled(hass: HomeAssistant) -> bool:
 
 
 def set_enabled(hass: HomeAssistant, enabled: bool) -> None:
-    hass.data.setdefault(DOMAIN, {})[_DATA_ENABLED] = enabled
+    data_keys.domain_data(hass)[_DATA_ENABLED] = enabled
 
 
 def option_for(slot: int | None, options: Sequence[str]) -> str:

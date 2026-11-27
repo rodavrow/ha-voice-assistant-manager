@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 
-from . import announcement_look
+from . import announcement_look, data_keys
 from .chat_show import ChatLimits
 from .const import DOMAIN
 from .stage import SCRIPT_URL as STAGE_SCRIPT_URL
@@ -120,7 +120,7 @@ def _register_mine(hass: HomeAssistant, module_url: str) -> None:
 
 
 def panel_state(hass: HomeAssistant) -> PanelState:
-    state: PanelState = hass.data[DOMAIN]["panel"]
+    state: PanelState = hass.data[DOMAIN][data_keys.PANEL]
     return state
 
 
@@ -213,7 +213,7 @@ async def async_set_chat_defaults(hass: HomeAssistant, limits: ChatLimits) -> No
 
 def speaker_overrides(hass: HomeAssistant) -> dict[str, str]:
     """The player each satellite plays favorites on, by device id; {} before the page is set up."""
-    state: PanelState | None = hass.data.get(DOMAIN, {}).get("panel")
+    state: PanelState | None = hass.data.get(DOMAIN, {}).get(data_keys.PANEL)
     return dict(state.speaker_overrides) if state is not None else {}
 
 
@@ -291,7 +291,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
         stage_url=f"{STAGE_SCRIPT_URL}?v={integration.version}",
     )
     announcement_look.set_enabled(hass, state.announcement_look)
-    hass.data.setdefault(DOMAIN, {})["panel"] = state
+    data_keys.domain_data(hass)[data_keys.PANEL] = state
     await hass.http.async_register_static_paths(
         [
             StaticPathConfig(SCRIPT_URL, str(SCRIPT_FILE), cache_headers=False),

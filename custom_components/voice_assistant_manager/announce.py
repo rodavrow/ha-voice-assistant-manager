@@ -29,6 +29,7 @@ from homeassistant.helpers.service import async_register_admin_service
 
 from . import announcement_look, emotion
 from .const import DOMAIN, REPLY_AGENT_TIMEOUT
+from .helpers import speech_text
 from .memory import clean_text, router_agent_ids
 from .reminders import HOUSEHOLD, assistant_aliases, for_whom
 
@@ -331,7 +332,7 @@ async def _write_line(
     if result.response.response_type == intent.IntentResponseType.ERROR:
         return "", emotion.NEUTRAL
     found, line, _why = emotion.split_face(
-        clean_text(str((result.response.speech.get("plain") or {}).get("speech") or "")),
+        clean_text(speech_text(result.response)),
         emotion.accepted_emotions(entry),
         emotion.face_table(entry),
     )

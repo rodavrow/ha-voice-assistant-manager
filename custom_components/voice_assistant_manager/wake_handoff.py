@@ -31,12 +31,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .avatar import esphome_entity
-from .const import DOMAIN
+from .const import DOMAIN, WAKE_WORD_SENSOR
 
 _LOGGER = logging.getLogger(__name__)
 
-WAKE_WORD_SENSOR = "Last wake word"
 # A wake word this long before a request still started it: speech, then the voice match.
 FRESH = timedelta(seconds=60)
 # As long as Home Assistant keeps a conversation going without use (chat_session.py).
@@ -44,7 +44,7 @@ LIFETIME = timedelta(minutes=5)
 # The selects of each wake word and its pipeline: <mac>-wake_word, <mac>-wake_word_2, ...
 _WAKE_SELECT = re.compile(r"-wake_word(?:_(\d+))?$")
 _PIPELINE_SELECT = re.compile(r"-pipeline(?:_(\d+))?$")
-_DATA = "wake_handoff"
+_DATA = data_keys.WAKE_HANDOFF
 
 
 @dataclass
@@ -67,7 +67,7 @@ class _State:
 
 
 def _state(hass: HomeAssistant) -> _State:
-    data = hass.data.setdefault(DOMAIN, {})
+    data = data_keys.domain_data(hass)
     if _DATA not in data:
         data[_DATA] = _State()
     state: _State = data[_DATA]
