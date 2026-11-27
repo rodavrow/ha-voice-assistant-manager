@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import aiohttp
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -129,6 +130,18 @@ def unknown_device_sessions(hass: HomeAssistant) -> list[str]:
 
 class LiveTalkingError(Exception):
     """LiveTalking answered, but not in the shape this integration knows."""
+
+
+def enabled_avatar(entry: ConfigEntry) -> Mapping[str, Any] | None:
+    """The settings of the assistant's first avatar that is switched on, or None."""
+    return next(
+        (
+            sub.data
+            for sub in entry.subentries.values()
+            if sub.subentry_type == SUBENTRY_TYPE and sub.data.get(CONF_ENABLED)
+        ),
+        None,
+    )
 
 
 def normalize_url(url: str) -> str | None:

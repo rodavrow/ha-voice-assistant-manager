@@ -38,14 +38,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from . import data_keys
 from .avatar import (
     CONF_AVATAR_ID,
-    CONF_ENABLED,
     CONF_URL,
     MAX_SESSIONS,
     STAGE_DATA,
-    SUBENTRY_TYPE,
     LiveTalkingClient,
     LiveTalkingError,
     device_sessions,
+    enabled_avatar,
     normalize_url,
 )
 from .const import DOMAIN
@@ -217,14 +216,7 @@ def get_stage(hass: HomeAssistant) -> Stage:
 
 def _actor(entry: ConfigEntry, name: str) -> Actor | None:
     """The assistant's avatar as a stage actor, or None if it has none that is on."""
-    avatar = next(
-        (
-            sub.data
-            for sub in entry.subentries.values()
-            if sub.subentry_type == SUBENTRY_TYPE and sub.data.get(CONF_ENABLED)
-        ),
-        None,
-    )
+    avatar = enabled_avatar(entry)
     url = normalize_url(str(avatar.get(CONF_URL) or "")) if avatar else None
     if avatar is None or url is None:
         return None

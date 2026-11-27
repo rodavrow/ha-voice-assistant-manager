@@ -51,7 +51,12 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from . import data_keys
-from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_URL, SUBENTRY_TYPE, esphome_entity
+from .avatar import (
+    CONF_AVATAR_ID,
+    CONF_URL,
+    enabled_avatar,
+    esphome_entity,
+)
 from .const import DOMAIN
 from .setup_guide import find_satellites
 
@@ -123,14 +128,7 @@ def wish_for(entry: ConfigEntry | None) -> SlotWish:
     """The wish for a slot whose wake word uses this assistant (None: no assistant)."""
     if entry is None:
         return SlotWish.off()
-    avatar = next(
-        (
-            sub.data
-            for sub in entry.subentries.values()
-            if sub.subentry_type == SUBENTRY_TYPE and sub.data.get(CONF_ENABLED)
-        ),
-        None,
-    )
+    avatar = enabled_avatar(entry)
     if avatar is None or not avatar.get(CONF_URL):
         return SlotWish.off()
     advanced = entry.options.get("advanced") or {}
