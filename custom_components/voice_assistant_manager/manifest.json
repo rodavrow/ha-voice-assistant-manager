@@ -5,6 +5,7 @@
     "assist_pipeline",
     "assist_satellite",
     "calendar",
+    "ffmpeg",
     "frontend",
     "script",
     "tts"

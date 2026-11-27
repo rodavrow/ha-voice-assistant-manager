@@ -7,7 +7,7 @@ import json
 import shutil
 import struct
 import subprocess
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 from unittest.mock import patch
 
@@ -111,7 +111,8 @@ class FakeLive:
         self.events: list[str] = []
         self.decoders: list[FakeDecoder] = []
 
-    async def ws_connect(self, url: str, *, params: dict[str, str]) -> FakeSocket:
+    async def ws_connect(self, url: str, *, params: dict[str, str], **kwargs: Any) -> FakeSocket:
+        self.connect_options = kwargs
         if self.refuses is not None:
             raise self.refuses
         if self.gate is not None:
@@ -645,33 +646,144 @@ async def test_a_session_that_changed_gets_no_more_audio(hass, live, target):
     assert live.socket.sent == []
 
 
-async def test_audio_that_cannot_be_decoded_sends_nothing_and_never_raises(hass, live, target):
-    feed = ReplyFeed(hass, target, "raw", {})
-    await feed.async_open()
-    feed.write(b"one")
-    feed.finish()
-
+async def test_audio_that_cannot_be_decoded_is_not_opened_on_livetalking(hass, live, target):
     async def no_decoder(hass_, extension, options):
         return None
 
     with patch.object(avatar_stream, "async_start_decoder", no_decoder):
-        await run(hass, feed)
+        opened = await ReplyFeed(hass, target, "raw", {}).async_open()
 
-    assert live.socket.sent == []
+    assert opened is False
+    assert live.opened == []
+
+
+async def test_a_refused_open_stops_the_decoder_it_started(hass, live, target):
+    live.refuses = aiohttp.ClientConnectionError()
+
+    assert await ReplyFeed(hass, target, "mp3", {}).async_open() is False
+
+    assert live.decoders[-1].stopped
+
+
+# A reply that cannot go on must end, not wait (S4 of the 2026-11-27 review)
+
+
+class StuckDecoder(FakeDecoder):
+    """A decoder whose input stops being read after the first audio, as ffmpeg's does
+    when nobody reads its output any more."""
+
+    def __init__(self, when_stuck: Callable[[], None]) -> None:
+        super().__init__()
+        self._when_stuck = when_stuck
+
+    async def async_write(self, audio: bytes) -> None:
+        await super().async_write(audio)
+        self._when_stuck()
+        await asyncio.Event().wait()
+
+
+def use_decoder(decoder: FakeDecoder):
+    async def start(hass_, extension, options):
+        return decoder
+
+    return patch.object(avatar_stream, "async_start_decoder", start)
+
+
+async def test_regression_s4_a_session_that_changes_while_the_decoder_is_stuck_ends_the_reply(
+    hass, live, target
+):
+    decoder = StuckDecoder(lambda: hass.states.async_set(SESSION_ENTITY, "sess-2"))
+    with use_decoder(decoder):
+        feed = ReplyFeed(hass, target, "mp3", {})
+        await feed.async_open()
+        feed.write(b"the whole clip in one piece")
+        feed.finish()
+
+        await asyncio.wait_for(feed.async_run(), timeout=1)
+
+    assert decoder.stopped
     assert live.socket.closed
+    assert live.socket.sent == []
 
 
-async def test_a_decoder_that_fails_to_start_never_raises(hass, live, target):
+async def test_regression_s4_a_decoder_that_fails_ends_the_reply_and_is_logged(
+    hass, live, target, caplog
+):
+    class BrokenDecoder(FakeDecoder):
+        async def async_write(self, audio: bytes) -> None:
+            raise BrokenPipeError("ffmpeg went away")
+
+    decoder = BrokenDecoder()
+    with use_decoder(decoder):
+        feed = ReplyFeed(hass, target, "mp3", {})
+        await feed.async_open()
+        feed.write(b"one")
+
+        await asyncio.wait_for(feed.async_run(), timeout=1)
+
+    assert decoder.stopped
+    assert live.socket.closed
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any(feed.reply_id in r.getMessage() and r.exc_info for r in warnings)
+
+
+async def test_regression_s4_a_livetalking_that_stops_reading_ends_the_reply(hass, live, target):
     feed = ReplyFeed(hass, target, "mp3", {})
     await feed.async_open()
 
-    async def broken(hass_, extension, options):
-        raise FileNotFoundError("ffmpeg")
+    async def never(data: bytes) -> None:
+        await asyncio.Event().wait()
 
-    with patch.object(avatar_stream, "async_start_decoder", broken):
-        await run(hass, feed)
+    live.socket.send_bytes = never  # type: ignore[method-assign]
+    feed.write(b"one")
+    feed.finish()
+
+    with patch.object(avatar_stream, "SEND_TIMEOUT", 0.01):
+        await asyncio.wait_for(feed.async_run(), timeout=1)
+
+    assert live.decoders[-1].stopped
+    assert live.socket.closed
+    assert {"type": "end"} not in live.socket.sent
+
+
+async def test_regression_s4_a_reply_never_runs_longer_than_the_limit(hass, live, target):
+    class EndlessDecoder(FakeDecoder):
+        async def async_close_input(self) -> None:
+            """Never says its output ended."""
+
+    decoder = EndlessDecoder()
+    with use_decoder(decoder), patch.object(avatar_stream, "RUN_LIMIT", 0.05):
+        feed = ReplyFeed(hass, target, "mp3", {})
+        await feed.async_open()
+        feed.write(b"one")
+        feed.finish()
+
+        await asyncio.wait_for(feed.async_run(), timeout=1)
+
+    assert decoder.stopped
+    assert live.socket.closed
+
+
+async def test_regression_s4_an_open_that_is_cancelled_closes_its_socket(hass, live, target):
+    live.first = None
+    feed = ReplyFeed(hass, target, "mp3", {})
+
+    with patch.object(avatar_stream, "OPEN_TIMEOUT", 5):
+        opening = asyncio.create_task(feed.async_open())
+        while not live.sockets:
+            await asyncio.sleep(0)
+        opening.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await opening
 
     assert live.socket.closed
+    assert live.decoders[-1].stopped
+
+
+async def test_the_stream_is_opened_with_a_heartbeat(hass, live, target):
+    await ReplyFeed(hass, target, "mp3", {}).async_open()
+
+    assert live.connect_options == {"heartbeat": avatar_stream.HEARTBEAT}
 
 
 # Through the avatar's voice

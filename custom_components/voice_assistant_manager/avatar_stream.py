@@ -58,6 +58,16 @@ STALL_TIMEOUT: Final = 5.0
 HOLD_AFTER: Final = 0.5
 HOLD_EVERY: Final = 2.0
 HOLD_LIMIT: Final = 90.0
+# LiveTalking gets this long to take one piece of audio. One that stopped reading would
+# otherwise keep the reply, its decoder and its socket for good.
+SEND_TIMEOUT: Final = 5.0
+# How often the socket is pinged, so a connection that died without a word is noticed.
+HEARTBEAT: Final = 15.0
+# No reply runs longer than this, whatever went wrong: several long pauses and a long
+# answer fit in it, and nothing is left behind when one never ends.
+RUN_LIMIT: Final = 600.0
+# How much of what ffmpeg wrote about an error is kept for the log.
+_ERROR_TAIL: Final = 500
 PCM_RATE: Final = 16000
 _READ_BYTES: Final = 3200  # 100 ms of 16 kHz mono 16-bit audio
 _NO_SESSION: Final = ("", "unknown", "unavailable")
@@ -165,6 +175,15 @@ class Decoder(Protocol):
 class _FfmpegDecoder:
     def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process
+        self._errors = b""
+        # Read as it comes: a full pipe would stop ffmpeg.
+        self._error_reader = asyncio.create_task(self._async_read_errors())
+
+    async def _async_read_errors(self) -> None:
+        if self._process.stderr is None:
+            return
+        while written := await self._process.stderr.read(_ERROR_TAIL):
+            self._errors = (self._errors + written)[-_ERROR_TAIL:]
 
     async def async_write(self, audio: bytes) -> None:
         assert self._process.stdin is not None  # noqa: S101
@@ -183,10 +202,19 @@ class _FfmpegDecoder:
             yield pcm
 
     async def async_stop(self) -> None:
-        if self._process.returncode is None:
+        killed = self._process.returncode is None
+        if killed:
             with contextlib.suppress(ProcessLookupError):
                 self._process.kill()
         await self._process.wait()
+        with contextlib.suppress(asyncio.CancelledError, OSError):
+            await self._error_reader
+        if self._errors and not killed and self._process.returncode:
+            _LOGGER.warning(
+                "Avatar stream: ffmpeg ended with code %s: %s",
+                self._process.returncode,
+                self._errors.decode("utf-8", "replace").strip(),
+            )
 
 
 def decoder_arguments(extension: str, options: Mapping[str, Any]) -> list[str] | None:
@@ -233,7 +261,7 @@ async def async_start_decoder(
         *arguments,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     return _FfmpegDecoder(process)
 
@@ -257,6 +285,7 @@ class ReplyFeed:
         self._options = dict(options)
         self.reply_id = ulid.ulid_now()
         self._socket: aiohttp.ClientWebSocketResponse | None = None
+        self._decoder: Decoder | None = None
         self._audio: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._size = 0
         self._stopped = False
@@ -265,12 +294,25 @@ class ReplyFeed:
         self._sent_bytes = 0
 
     async def async_open(self) -> bool:
-        """Open the reply on LiveTalking. False when it did not say "ready" in time."""
+        """Open the reply on LiveTalking. False when it did not say "ready" in time.
+
+        The decoder is started first: a satellite that is told a reply is open leaves the
+        speaking to its avatar, so nothing is opened for audio that cannot be decoded.
+        Whatever ends this without "ready", a cancellation too, leaves nothing open.
+        """
+        ready = False
         try:
+            self._decoder = await async_start_decoder(
+                self._hass, self._extension, self._options
+            )
+            if self._decoder is None:
+                _LOGGER.debug("Avatar stream: this audio cannot be decoded, not opened")
+                return False
             async with asyncio.timeout(OPEN_TIMEOUT):
                 self._socket = await async_get_clientsession(self._hass).ws_connect(
                     f"{self._target.base_url}/stream_audio",
                     params={"sessionid": self._target.session_id, "reply_id": self.reply_id},
+                    heartbeat=HEARTBEAT,
                 )
                 message = await self._socket.receive()
             ready = (
@@ -281,9 +323,9 @@ class ReplyFeed:
             # A refusal (no such session, another reply open) or a LiveTalking without
             # /stream_audio: the satellite speaks the reply itself.
             _LOGGER.debug("Avatar stream: not opened (%s)", type(err).__name__)
-            ready = False
-        if not ready:
-            await self._async_close()
+        finally:
+            if not ready:
+                await self._async_release()
         return ready
 
     def write(self, audio: bytes) -> None:
@@ -311,23 +353,34 @@ class ReplyFeed:
         self._audio.put_nowait(None)
 
     async def async_run(self) -> None:
-        """Decode and send until the reply ends, then close it."""
-        decoder: Decoder | None = None
+        """Decode and send until the reply ends, then close it.
+
+        It ends when the audio was sent, and as soon as it cannot go on: LiveTalking
+        cancelled or closed it, the session changed, a step failed, or RUN_LIMIT passed.
+        It never waits for the decoder alone, whose input stops being read once nobody
+        takes its output.
+        """
+        decoder = self._decoder
         tasks: list[asyncio.Task[None]] = []
         try:
-            decoder = await async_start_decoder(self._hass, self._extension, self._options)
             if decoder is None or self._socket is None:
-                _LOGGER.debug("Avatar stream: this audio cannot be decoded, nothing sent")
+                _LOGGER.debug("Avatar stream: reply %s was not opened, nothing sent", self.reply_id)
                 return
-            tasks = [
-                asyncio.create_task(self._async_decode(decoder)),
-                asyncio.create_task(self._async_send(decoder)),
-                asyncio.create_task(self._async_listen()),
-            ]
+            decode = asyncio.create_task(self._async_decode(decoder))
+            send = asyncio.create_task(self._async_send(decoder))
             # The listener ends only when LiveTalking cancels or closes the reply.
-            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            if not tasks[2].done():
-                await asyncio.wait(tasks[:2])
+            listen = asyncio.create_task(self._async_listen())
+            tasks = [decode, send, listen]
+            async with asyncio.timeout(RUN_LIMIT):
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                if _ended_well(decode) and not send.done() and not listen.done():
+                    # All of the audio is with the decoder: what it still gives is sent.
+                    await asyncio.wait([send, listen], return_when=asyncio.FIRST_COMPLETED)
+        except TimeoutError:
+            _LOGGER.warning(
+                "Avatar stream: reply %s did not end within %d s, closing it",
+                self.reply_id, RUN_LIMIT,
+            )
         except Exception:  # noqa: BLE001 - the speech itself must never fail because of this
             _LOGGER.warning("Avatar stream: stopped by an unexpected error", exc_info=True)
         finally:
@@ -340,11 +393,17 @@ class ReplyFeed:
             )
             for task in tasks:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            if decoder is not None:
-                with contextlib.suppress(Exception):
-                    await decoder.async_stop()
-            await self._async_close()
+            for step, outcome in zip(
+                ("decoding", "sending", "listening"),
+                await asyncio.gather(*tasks, return_exceptions=True),
+                strict=False,
+            ):
+                if isinstance(outcome, Exception):
+                    _LOGGER.warning(
+                        "Avatar stream: reply %s stopped, %s failed",
+                        self.reply_id, step, exc_info=outcome,
+                    )
+            await self._async_release()
 
     async def _async_decode(self, decoder: Decoder) -> None:
         """Hand the engine's audio to the decoder until it ends, stalls or the session goes.
@@ -406,7 +465,17 @@ class ReplyFeed:
                     "Avatar stream: reply %s first audio forwarded %.2f s after it opened",
                     self.reply_id, _now() - self._opened,
                 )
-            await self._socket.send_bytes(pcm)
+            try:
+                async with asyncio.timeout(SEND_TIMEOUT):
+                    await self._socket.send_bytes(pcm)
+            except TimeoutError:
+                _LOGGER.warning(
+                    "Avatar stream: LiveTalking took no audio of reply %s for %d s, "
+                    "ending it there",
+                    self.reply_id, SEND_TIMEOUT,
+                )
+                self._stopped = True
+                return
             self._sent_bytes += len(pcm)
         if not self._stopped:
             await self._socket.send_json({"type": "end"})
@@ -430,7 +499,16 @@ class ReplyFeed:
             self._stopped = True
         return changed
 
-    async def _async_close(self) -> None:
+    async def _async_release(self) -> None:
+        """Stop the decoder and close the socket, whichever of them there is."""
+        decoder, self._decoder = self._decoder, None
+        if decoder is not None:
+            with contextlib.suppress(Exception):
+                await decoder.async_stop()
         if self._socket is not None:
             with contextlib.suppress(Exception):
                 await self._socket.close()
+
+
+def _ended_well(task: asyncio.Task[None]) -> bool:
+    return task.done() and not task.cancelled() and task.exception() is None
