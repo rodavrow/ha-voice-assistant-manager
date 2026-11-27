@@ -111,6 +111,8 @@ Otherwise the page says which of these is missing.
 
 **How a turn goes:** the microphone listens after a tap and stops by itself when you stop speaking. The page shows what was heard and the answer as text. While the avatar speaks the microphone is closed; when the assistant asked you something, it opens again by itself once the avatar is quiet.
 
+**From a shortcut:** opening the Voice Manager page with `?talk=` and an assistant's name, title or entry id starts the talk with that assistant at once, for example `/voice-assistant-manager?talk=jeeves`. In the Home Assistant app the same page is reached with the link `homeassistant://navigate/voice-assistant-manager?talk=jeeves`, which a phone shortcut can open (on an iPhone: a Shortcut with **Open URLs**, which can be put on the Action button). The microphone then opens by itself where the app lets a page do that without a tap; where it does not, one tap on the microphone starts it.
+
 **Who you are** is the Home Assistant user you are logged in as, not your voice. If that user is Person 1 or Person 2 of the assistant, you are that person; if not, the assistant treats you as its settings say for a request without a voice match.
 
 **What it does not do:** there is no wake word, and the avatar cannot be interrupted by speaking. One person at a time can talk to an assistant's avatar. Closing or leaving the page ends the talk. While a talk is open, anything the same user types to that assistant in Home Assistant's Assist dialog is also answered by the avatar on the page.

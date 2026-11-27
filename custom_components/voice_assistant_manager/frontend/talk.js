@@ -10,6 +10,9 @@
 const TALK_WS = "voice_assistant_manager/panel/talk";
 // LiveTalking takes the whole offer at once, so the page waits for its candidates.
 const GATHER_MS = 3000;
+// How long the microphone's sound engine may take to start. A browser that wants a tap first
+// never starts it.
+const RESUME_MS = 700;
 // The avatar has finished a reply when its sound has been this quiet for this long. A reply
 // that never makes a sound is given up on after FIRST_SOUND_MS.
 const QUIET_LEVEL = 0.01;
@@ -109,7 +112,7 @@ class VamTalk extends HTMLElement {
     this._closeButton.textContent = TEXTS.close;
     this._closeButton.addEventListener("click", () => this.close());
     this._micButton.setAttribute("aria-label", TEXTS.speak);
-    this._micButton.addEventListener("click", () => this._listen());
+    this._micButton.addEventListener("click", () => this._listen(false));
   }
 
   set hass(hass) {
@@ -120,8 +123,13 @@ class VamTalk extends HTMLElement {
     this._shutDown();
   }
 
-  /** Open the avatar of this assistant and wait for its stream. Shows why not when it cannot. */
-  async open({ hass, entryId, title }) {
+  /**
+   * Open the avatar of this assistant and wait for its stream. Shows why not when it cannot.
+   * With `listen` the microphone opens by itself once the avatar is there, where the browser
+   * lets a page do that without a tap; elsewhere it waits for the tap as usual.
+   */
+  async open({ hass, entryId, title, listen }) {
+    this._autoListen = !!listen;
     this._hass = hass;
     this._entryId = entryId;
     this._name.textContent = title;
@@ -138,7 +146,10 @@ class VamTalk extends HTMLElement {
     };
     pc.onconnectionstatechange = () => {
       if (this._closed) return;
-      if (pc.connectionState === "connected" && this._state === "connecting") this._set("idle", TEXTS.ready);
+      if (pc.connectionState === "connected" && this._state === "connecting") {
+        this._set("idle", TEXTS.ready);
+        if (this._autoListen) this._listen(true);
+      }
       else if (pc.connectionState === "failed" || pc.connectionState === "closed") this._fail(TEXTS.lost);
     };
     try {
@@ -216,7 +227,7 @@ class VamTalk extends HTMLElement {
   /** Open the microphone once, in the tap that asks for it. Throws when it cannot be had. */
   async _openMic() {
     if (this._mic) {
-      if (this._mic.context.state === "suspended") await this._mic.context.resume();
+      await this._running(this._mic.context);
       return this._mic;
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.AudioWorkletNode) {
@@ -235,11 +246,24 @@ class VamTalk extends HTMLElement {
     const node = new AudioWorkletNode(context, "vam-talk-recorder");
     context.createMediaStreamSource(stream).connect(node);
     this._mic = { stream, context, node };
+    await this._running(context);
     return this._mic;
   }
 
-  /** One turn: listen until the person stops, then wait for the avatar to have answered. */
-  async _listen() {
+  /** Wait for the sound engine to run. Throws "tap" when the browser holds it for a tap. */
+  async _running(context) {
+    if (context.state === "running") return;
+    const resumed = context.resume().catch(() => {});
+    await Promise.race([resumed, new Promise((resolve) => setTimeout(resolve, RESUME_MS))]);
+    if (context.state !== "running") throw new Error("tap");
+  }
+
+  /**
+   * One turn: listen until the person stops, then wait for the avatar to have answered.
+   * `unasked` is the page opening the microphone by itself: a browser that refuses that is
+   * no failure, the microphone button is there to tap.
+   */
+  async _listen(unasked) {
     if (this._state !== "idle" || this._closed) return;
     // The tap also lets a browser play the avatar's sound, if it would not before.
     if (this._video.muted) {
@@ -253,7 +277,8 @@ class VamTalk extends HTMLElement {
       mic = await this._openMic();
     } catch (err) {
       console.warn("Talk: no microphone", err);
-      this._set("idle", TEXTS.no_microphone, true);
+      const waits = unasked || (err && err.message === "tap");
+      this._set("idle", waits ? TEXTS.ready : TEXTS.no_microphone, !waits);
       return;
     }
     if (this._closed) return;
@@ -349,7 +374,7 @@ class VamTalk extends HTMLElement {
     await this._untilQuiet();
     if (this._closed || this._state !== "speaking") return;
     this._set("idle", TEXTS.ready);
-    if (again) this._listen();
+    if (again) this._listen(true);
   }
 
   _untilQuiet() {

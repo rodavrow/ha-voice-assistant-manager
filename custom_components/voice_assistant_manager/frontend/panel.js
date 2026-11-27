@@ -490,6 +490,8 @@ class VoicePersonaRouterPanel extends HTMLElement {
     this._stage = null; // { box, card, lock }
     this._talk = null; // the open talk with an avatar (talk.js), over the page
     this._talkBusy = false;
+    // A link to this page with ?talk=<assistant> opens that talk at once (a phone shortcut).
+    this._onLocation = () => this._followTalkLink();
     // Favorites: favorites/get's answer, fetched whenever the section opens. One change at a
     // time, as for memory: each answer replaces a whole list.
     this._fav = { data: null, stale: true, loading: false, error: "" };
@@ -519,12 +521,17 @@ class VoicePersonaRouterPanel extends HTMLElement {
   connectedCallback() {
     if (!this.shadowRoot.firstChild) this._render();
     else this._wantChat();
+    window.addEventListener("location-changed", this._onLocation);
+    window.addEventListener("popstate", this._onLocation);
+    this._followTalkLink();
   }
 
   disconnectedCallback() {
     this._stopChatPoll();
     this._closeStage();
     if (this._talk) this._talk.close();
+    window.removeEventListener("location-changed", this._onLocation);
+    window.removeEventListener("popstate", this._onLocation);
   }
 
   // Data.
@@ -554,6 +561,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       this._failed = (err && err.message) || "The settings could not be loaded.";
     }
     this._render();
+    this._followTalkLink();
   }
 
   get _router() {
@@ -1636,9 +1644,30 @@ class VoicePersonaRouterPanel extends HTMLElement {
     );
   }
 
-  async _openTalk() {
+  /**
+   * Open the talk a link asked for: ?talk= with an assistant's name, title or entry id.
+   * The name is taken off the address at once, so the talk is not opened again by a redraw
+   * or by going back to the page.
+   */
+  _followTalkLink() {
+    if (!this._data || !this.isConnected) return;
+    const url = new URL(window.location.href);
+    const wanted = (url.searchParams.get("talk") || "").trim().toLowerCase();
+    if (!wanted) return;
+    url.searchParams.delete("talk");
+    window.history.replaceState(window.history.state, "", url);
+    const router = this._data.routers.find((item) =>
+      [item.entry_id, item.title, item.assistant].some((name) => String(name || "").toLowerCase() === wanted)
+    );
+    if (!router) {
+      this._toast(`No assistant is called "${wanted}".`);
+      return;
+    }
+    this._openTalk(router, true);
+  }
+
+  async _openTalk(router = this._router, listen = false) {
     if (this._talk || this._talkBusy) return;
-    const router = this._router;
     this._talkBusy = true;
     this._render();
     try {
@@ -1652,7 +1681,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       // moment, which ends the talk.
       document.body.append(talk);
       this._talk = talk;
-      talk.open({ hass: this._hass, entryId: router.entry_id, title: router.title });
+      talk.open({ hass: this._hass, entryId: router.entry_id, title: router.title, listen });
     } catch (err) {
       this._toast(`Talking could not be started: ${reason(err)}`);
     }
