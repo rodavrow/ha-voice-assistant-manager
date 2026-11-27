@@ -238,11 +238,22 @@ async def test_the_assistant_notes_the_person_speaking_for_the_turn(hass: HomeAs
     kitchen = add_satellite(hass)
     match(hass, kitchen, "partner")
     context = Context()
+    agents = FakeAgents()
+    noted: list[str | None] = []
+    answer = agents.converse
 
-    with FakeAgents().patched():
+    async def converse(*args, **kwargs):
+        if kwargs.get("agent_id") == MAIN_AGENT:
+            noted.append(asker(hass, context))
+        return await answer(*args, **kwargs)
+
+    agents.converse = converse  # type: ignore[method-assign]
+    with agents.patched():
         await turn(hass, entry, context, kitchen)
 
-    assert asker(hass, context) == "sam"
+    # Noted while the main agent, and so its tools, run; gone when the turn is over.
+    assert noted == ["sam"]
+    assert asker(hass, context) is None
 
 
 async def test_an_unknown_voice_is_noted_as_nobody(hass: HomeAssistant):

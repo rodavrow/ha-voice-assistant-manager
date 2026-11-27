@@ -90,7 +90,7 @@ from .memory import (
     should_extract,
 )
 from .panel import speaker_overrides
-from .reminder_actions import note_asker
+from .reminder_actions import forget_asker, note_asker
 from .reminders import (
     CANCEL_TOOL,
     DEFAULT_ACTION_FAILURE_LINE,
@@ -574,7 +574,11 @@ class PersonaRouter(conversation.ConversationEntity):
         """
         known = resp is not None and resp.get("who") in ("owner", "wife")
         label = resp.get("label") if resp is not None and known else None
-        note_asker(self.hass, user_input.context, label)
+        user_id = None
+        if resp is not None and known:
+            person = self._entry.options.get(SETTINGS_KEY[resp["who"]]) or {}
+            user_id = person.get("user") or None
+        note_asker(self.hass, user_input.context, label, user_id)
 
     def _guard_reminder(
         self, user_input: Input, result: Result, log: ChatLog | None, log_start: int | None
@@ -1165,6 +1169,8 @@ class PersonaRouter(conversation.ConversationEntity):
         try:
             result = await self._async_answer(user_input)
         finally:
+            # The turn is over: nothing may act as this person under its context later.
+            forget_asker(self.hass, user_input.context)
             avatar_stream.turn_ended(turn)
             honest, second = _HONEST_LINE.get(), _SECOND_ANSWER.get()
             _HONEST_LINE.reset(corrected)

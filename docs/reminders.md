@@ -155,6 +155,8 @@ Each reminder comes back once, with its settings as they are in the calendar: ti
 
 **A person sees their own reminders and the household's, never the other person's.** The main agent does not say whose reminders to show, and cannot: the assistant notes who is speaking on each turn, and the action goes by that. When it is not known who is speaking (the action is called outside a turn, say from an automation), only the household's reminders are shown. So the script lists every person's calendars under that person's name, and the action leaves out what the person speaking may not see.
 
+**The settings decide whose a calendar is, where they say so.** The names in the script are labels, and any Home Assistant user can call an action with any label. So for a calendar listed under Settings > Reminders (of Person 1, of Person 2, of the household), the action goes by that list and ignores the label: a personal calendar is only shown to, and only cancelled in by, the person it is listed for. A Home Assistant user who calls `list_reminder_events` or `cancel_reminder_event` directly, outside a turn with an assistant, gets only calendars that are listed for that user or for the household; a calendar no assistant lists is refused. A calendar that is not listed still works by its label in a turn with an assistant, and for automations.
+
 > [!TIP]
 > [`examples/list_reminders.yaml`](../examples/list_reminders.yaml) is a complete script. Use the same names in it as in `create_reminder`.
 
