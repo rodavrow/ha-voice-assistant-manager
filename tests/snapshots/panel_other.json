@@ -1,0 +1,70 @@
+{
+  "chat/state": {
+    "chat": {
+      "assistant_ids": [],
+      "assistants": [],
+      "ended": "",
+      "lines": [],
+      "running": false,
+      "speaker": "",
+      "topic": ""
+    },
+    "defaults": {
+      "listen": false,
+      "max_lines": 12,
+      "minutes": 5,
+      "pause": 2.0,
+      "words": 30
+    },
+    "routers": [
+      {
+        "entry_id": "<entry 1>",
+        "has_character": false,
+        "has_writer": false,
+        "title": "Kitchen assistant"
+      }
+    ],
+    "speakers": [],
+    "stage": {
+      "captions": false,
+      "card": "vam-chat-stage-card",
+      "dashboard": "vam-chat-stage",
+      "enabled": true,
+      "problem": "no_dashboards",
+      "resource": "/voice_assistant_manager/stage.js?v=0.5.5b2",
+      "view": "stage"
+    }
+  },
+  "favorites/get": {
+    "assistants": [
+      {
+        "enabled": false,
+        "entry_id": "<entry 1>",
+        "title": "Kitchen assistant",
+        "tools_on": null
+      }
+    ],
+    "conflicts": {
+      "owner": [],
+      "wife": []
+    },
+    "lists": {
+      "household": [],
+      "person:owner": [],
+      "person:wife": []
+    },
+    "names": {
+      "household": "Household",
+      "person:owner": "Person 1",
+      "person:wife": "Person 2"
+    },
+    "overrides": {},
+    "players": [],
+    "satellites": []
+  },
+  "guide/satellites": {
+    "helper_payloads": {},
+    "ok": true,
+    "satellites": []
+  }
+}

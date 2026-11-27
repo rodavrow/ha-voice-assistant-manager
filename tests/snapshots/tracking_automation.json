@@ -1,0 +1,83 @@
+{
+  "config": {
+    "actions": [
+      {
+        "choose": [
+          {
+            "conditions": [
+              {
+                "condition": "trigger",
+                "id": "wake"
+              },
+              {
+                "condition": "template",
+                "value_template": "{{ not (trigger.from_state.state == 'idle' and (trigger.to_state.last_changed - trigger.from_state.last_changed).total_seconds() < 2) }}"
+              }
+            ],
+            "sequence": [
+              {
+                "action": "input_text.set_value",
+                "data": {
+                  "value": "pending"
+                },
+                "target": {
+                  "entity_id": "input_text.voice_speaker_kitchen-device"
+                }
+              }
+            ]
+          },
+          {
+            "conditions": [
+              {
+                "condition": "trigger",
+                "id": "score"
+              }
+            ],
+            "sequence": [
+              {
+                "variables": {
+                  "role": "{{ {\"alex\": 'owner', \"sam\": 'partner'}.get(states(\"sensor.kitchen_satellite_last_speaker\") | trim | lower, 'stranger') }}"
+                }
+              },
+              {
+                "action": "input_text.set_value",
+                "data": {
+                  "value": "{{ role }}"
+                },
+                "target": {
+                  "entity_id": "input_text.voice_speaker_kitchen-device"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "alias": "Voice: track who is speaking on Kitchen satellite",
+    "description": "Sets input_text.voice_speaker_kitchen-device to owner, partner, stranger or pending.",
+    "max": 10,
+    "mode": "queued",
+    "triggers": [
+      {
+        "entity_id": [
+          "assist_satellite.kitchen_satellite"
+        ],
+        "id": "wake",
+        "to": "listening",
+        "trigger": "state"
+      },
+      {
+        "entity_id": [
+          "sensor.kitchen_satellite_last_speaker_score"
+        ],
+        "id": "score",
+        "not_to": [
+          "unavailable",
+          "unknown"
+        ],
+        "trigger": "state"
+      }
+    ]
+  },
+  "id": "voice_assistant_manager_speaker_kitchen-device"
+}
