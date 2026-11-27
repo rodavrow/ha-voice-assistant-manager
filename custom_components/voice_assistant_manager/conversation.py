@@ -809,9 +809,10 @@ class PersonaRouter(conversation.ConversationEntity):
             self.hass, user_input, log, intent_filter=intent_filter
         )
         if response is None:
-            _LOGGER.debug(f"No built-in command for: {user_input.text}")
+            # What was said is personal and stays out of the log, also at debug level.
+            _LOGGER.debug("No built-in command matched the request")
             return None
-        _LOGGER.debug(f"Built-in command handled: {user_input.text}")
+        _LOGGER.debug("A built-in command handled the request")
         speech = (response.speech.get("plain") or {}).get("speech") or ""
         log.async_add_assistant_content_without_tools(
             conversation.AssistantContent(
@@ -932,8 +933,8 @@ class PersonaRouter(conversation.ConversationEntity):
                     entity_id = default_player(
                         self.hass, user_input.device_id, speaker_overrides(self.hass)
                     )
-            except PlayRefused as refused:
-                _LOGGER.debug("Favorite %r found, but no player: %s", name, refused.reply)
+            except PlayRefused:
+                _LOGGER.debug("A favorite was found, but no player for it")
                 return NO_PLAYER
             return favorite, entity_id, player is not None
         return None

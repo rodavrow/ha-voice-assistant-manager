@@ -458,7 +458,8 @@ async def test_async_play_says_so_when_the_action_rejects_its_data(
         await async_play(hass, favorite(), player, Context())
 
     assert refusal(caught) == "I couldn't start Radio 2 on Denon."
-    assert "Radio 2" in caplog.text
+    # The log names the player and the error, not the favorite (S12 of the 2026-11-27 review).
+    assert "media_player.denon: bad" in caplog.text
 
 
 async def test_async_play_treats_a_music_assistant_entity_without_speaker_class_as_plain(

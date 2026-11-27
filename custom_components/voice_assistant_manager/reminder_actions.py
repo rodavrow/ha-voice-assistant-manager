@@ -384,7 +384,11 @@ async def _async_cancel(hass: HomeAssistant, call: ServiceCall) -> ServiceRespon
             # Without a recurrence id, a repeating reminder goes as a whole.
             await entity.async_delete_event(uid)
     except (HomeAssistantError, ValueError) as err:
-        _LOGGER.warning("Could not cancel the reminder %r: %s", names[0], err)
+        _LOGGER.warning(
+            "Could not cancel a reminder in %s: %s",
+            ", ".join(sorted({entity.entity_id for entity, _ in matches})),
+            err,
+        )
         return _error(f"Reminder not cancelled. The calendar refused it: {err}")
     return {"status": "ok", "removed": len(matches), "title": names[0]}
 

@@ -270,7 +270,9 @@ async def async_play(
     except (HomeAssistantError, probatio.Invalid, vol.Invalid) as err:
         # Home Assistant re-raises probatio.Invalid when an action's schema refuses the data;
         # an integration's own handler may still raise voluptuous' Invalid.
-        _LOGGER.error("Could not play favorite %r on %s: %s", favorite["name"], entity_id, err)
+        _LOGGER.error(
+            "Could not play favorite %s on %s: %s", favorite.get("id", "?"), entity_id, err
+        )
         raise PlayRefused(
             COULD_NOT_START.format(name=favorite["name"], player=player_name(hass, entity_id))
         ) from err
@@ -397,7 +399,7 @@ async def _search_kind(
             return_response=True,
         )
     except HomeAssistantError as err:
-        _LOGGER.error("Music Assistant search for %r failed: %s", asked, err)
+        _LOGGER.error("A Music Assistant search for a %s failed: %s", kind, err)
         raise PlayRefused(SEARCH_FAILED) from err
     items = (response or {}).get(results_key) or []
     if not isinstance(items, list):
