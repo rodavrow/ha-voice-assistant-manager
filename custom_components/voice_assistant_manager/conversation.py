@@ -203,6 +203,15 @@ def _earlier_user_texts(log: ChatLog, log_start: int, count: int) -> list[str]:
     return texts
 
 
+def _empty_history(log: ChatLog, keep_last: bool) -> None:
+    """Take everything out of a chat log but its system prompt and, with `keep_last`, its
+    last entry (the request of the turn that is running)."""
+    kept = [log.content[-1]] if keep_last else []
+    del log.content[1:]
+    log.content.extend(kept)
+    log.turn_start = 1
+
+
 def _lines(text: object) -> list[str]:
     return [line.strip() for line in str(text or "").splitlines() if line.strip()]
 
@@ -240,6 +249,8 @@ class PersonaRouter(conversation.ConversationEntity):
         self._spoken_by: dict[str, Remembered] = {}
         # Satellites whose last voice turn got no voice match, to warn once per outage.
         self._no_match: set[str] = set()
+        # conversation_id -> the person whose turn last reached the history, and when.
+        self._last_in_history: dict[str, tuple[str, datetime]] = {}
         # Satellites that recognise speakers but have no helper, to warn once each.
         self._no_helper: set[str] = set()
 
@@ -1194,6 +1205,50 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not tell whether a chat line is in the conversation")
             return None
 
+    def _start_afresh_for_another_speaker(self, user_input: Input, who: str) -> bool:
+        """Empty the conversation's history when another person speaks in it than before.
+
+        Home Assistant keeps one conversation per satellite for five minutes, so the next
+        person's turn would give the main agent everything the person before said and
+        every tool result they got (their reminders, say), with only the prompt asking it
+        not to repeat them. The conversation itself is kept, not replaced by a new one: a
+        reply streams to the voice and the avatar through the conversation's own chat log.
+
+        False when the history could not be emptied: the main agent must then be asked in
+        a conversation of its own, never in one that may hold the other person's words.
+        """
+        key = user_input.conversation_id
+        if not key:
+            return True
+        try:
+            now = dt_util.utcnow()
+            self._last_in_history = {
+                conversation_id: seen
+                for conversation_id, seen in self._last_in_history.items()
+                if now - seen[1] <= CONVERSATION_LIFETIME
+            }
+            before = self._last_in_history.get(key)
+            self._last_in_history[key] = (who, now)
+            if before is None or before[0] == who:
+                return True
+            logs = self.hass.data.get(DATA_CHAT_LOGS, {})
+            # The request's conversation, and the one the main agent answers in when
+            # that is another (after a chat show's line).
+            for conversation_id in {key, self._main_conversation_id(user_input)}:
+                log = logs.get(conversation_id or "")
+                if log is None or len(log.content) < 2:
+                    continue
+                # This turn's request, which a voice pipeline has already written.
+                _empty_history(log, keep_last=self._turn_log(user_input) is log)
+            _LOGGER.debug("Another person speaks in a conversation: its history is emptied")
+        except Exception:  # noqa: BLE001 - fail closed, see above
+            _LOGGER.exception(
+                "Could not empty the history for another speaker; the main agent is asked "
+                "in a new conversation"
+            )
+            return False
+        return True
+
     def _after_clean_conversation(
         self, user_input: Input, result: Result
     ) -> tuple[Result, ChatLog | None, int | None]:
@@ -1520,6 +1575,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 "but gave no fixed reply and no reply agent, so the request is refused"
             )
             return self._speak(user_input, LAST_RESORT_REPLY)
+        emptied = self._start_afresh_for_another_speaker(user_input, str(who))
         log = self._turn_log(user_input) or current_chat_log.get()
         text = self._labelled_text(user_input, resp.get("label"))
         if who in ("owner", "wife"):
@@ -1533,7 +1589,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 if handled is not None:
                     return handled
 
-        conversation_id = self._main_conversation_id(user_input)
+        conversation_id = self._main_conversation_id(user_input) if emptied else None
         log_start = len(log.content) if log is not None else None
         context_id = user_input.context.id if user_input.context else None
         # Only this request's own record is forgotten: a router whose main agent is this
