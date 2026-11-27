@@ -149,6 +149,11 @@ def _target(hass: HomeAssistant, own: str, user_input: Any) -> _Handed | None:
     conversation_id = user_input.conversation_id
     if not device_id:
         return None
+    context = getattr(user_input, "context", None)
+    if context is not None and context.user_id:
+        # A typed request: no wake word started it, and any logged-in user can name any
+        # device, so it neither goes elsewhere nor counts as that satellite's last turn.
+        return None
     state = _state(hass)
     now = dt_util.utcnow()
     state.handed = {

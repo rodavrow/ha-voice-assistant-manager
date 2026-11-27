@@ -537,6 +537,7 @@ class EmotionSender:
                 f"{base_url}/set_emotion",
                 json={"avatar_id": avatar_id, "emotion": emotion},
                 timeout=aiohttp.ClientTimeout(total=SEND_TIMEOUT),
+                allow_redirects=False,
             ) as response:
                 if response.status == 404:
                     _LOGGER.debug("Emotion: LiveTalking has no /set_emotion yet")

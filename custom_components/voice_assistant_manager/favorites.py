@@ -113,15 +113,13 @@ def _clean_aliases(value: object, name: str) -> list[str]:
         return []
     if not isinstance(value, list):
         raise FavoriteError("bad_name", "The other names must be a list")
-    aliases = [
-        _clean_name(alias, "other name")
-        for alias in value
-        if not (isinstance(alias, str) and not alias.strip())
-    ]
-    if len(aliases) > MAX_ALIASES:
+    given = [alias for alias in value if not (isinstance(alias, str) and not alias.strip())]
+    # Counted before any is cleaned, so a list of any length costs nothing.
+    if len(given) > MAX_ALIASES:
         raise FavoriteError(
             "too_many_aliases", f"A favorite may have {MAX_ALIASES} other names at most"
         )
+    aliases = [_clean_name(alias, "other name") for alias in given]
     seen = {normalise(name)}
     for alias in aliases:
         if normalise(alias) in seen:

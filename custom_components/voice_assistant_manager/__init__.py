@@ -54,9 +54,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         platforms,
         _avatars(entry),
     )
+    try:
+        # Before the platforms: when it fails, nothing of the assistant is left loaded.
+        await async_start_watcher(hass, entry)
+        try:
+            await hass.config_entries.async_forward_entry_setups(entry, platforms)
+        except BaseException:
+            await async_stop_watcher(hass, entry)
+            raise
+    except BaseException:
+        hass.data[DOMAIN][_LOADED].pop(entry.entry_id, None)
+        raise
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
-    await hass.config_entries.async_forward_entry_setups(entry, platforms)
-    await async_start_watcher(hass, entry)
     avatar_devices.async_request(hass)
     return True
 

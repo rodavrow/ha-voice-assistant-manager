@@ -251,8 +251,11 @@ def decoder_arguments(extension: str, options: Mapping[str, Any]) -> list[str] |
         source = ["-probesize", "32", "-analyzeduration", "0", *source]
     # Never "-fflags nobuffer": it makes ffmpeg throw away what it read while working the
     # stream out, which was the first 1.26 s of every reply.
+    # Only the pipe may be read: audio whose format ffmpeg works out by itself could be a
+    # playlist that names a file or an address, which ffmpeg would otherwise open.
     return [
-        "-hide_banner", "-loglevel", "error", *source, "-i", "pipe:0",
+        "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "pipe", *source,
+        "-i", "pipe:0",
         "-f", "s16le", "-ac", "1", "-ar", str(PCM_RATE), "-flush_packets", "1", "pipe:1",
     ]
 
