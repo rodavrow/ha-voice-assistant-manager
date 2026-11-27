@@ -126,3 +126,35 @@ async def test_when_the_calendar_watcher_cannot_start_the_assistant_is_not_half_
     # Only Home Assistant's own agent: the assistant's was not set up.
     assert hass.states.async_entity_ids("conversation") == ["conversation.home_assistant"]
     assert entry.entry_id not in hass.data[DOMAIN]["loaded_entries"]
+
+
+# Found by the review of these fixes
+
+
+class _InPieces:
+    """An answer whose body arrives in pieces, as one larger than a network packet does."""
+
+    def __init__(self, *pieces: bytes) -> None:
+        self._pieces = list(pieces)
+        self.content = self
+
+    async def read(self, n: int = -1) -> bytes:
+        return self._pieces.pop(0) if self._pieces else b""
+
+
+async def test_regression_s14_a_livetalking_answer_that_arrives_in_pieces_is_read_whole():
+    response = _InPieces(b'{"sessions": [', b'"a", "b"', b"]}")
+
+    payload = await avatar._async_json(response, "sessions")  # type: ignore[arg-type]
+
+    assert payload == {"sessions": ["a", "b"]}
+
+
+async def test_regression_s14_an_answer_in_pieces_is_refused_once_it_is_too_large():
+    piece = b"x" * (avatar.MAX_REPLY_BYTES // 2 + 1)
+    response = _InPieces(piece, piece, piece)
+
+    with pytest.raises(LiveTalkingError, match="larger"):
+        await avatar._async_json(response, "sessions")  # type: ignore[arg-type]
+
+    assert response._pieces == [piece]  # it stopped reading

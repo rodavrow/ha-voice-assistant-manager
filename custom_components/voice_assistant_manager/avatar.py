@@ -321,9 +321,12 @@ class LiveTalkingClient:
 
 async def _async_json(response: aiohttp.ClientResponse, what: str) -> Any:
     """The JSON of an answer, read up to MAX_REPLY_BYTES. Raises LiveTalkingError."""
-    body = await response.content.read(MAX_REPLY_BYTES + 1)
-    if len(body) > MAX_REPLY_BYTES:
-        raise LiveTalkingError(f"{what} reply is larger than {MAX_REPLY_BYTES} bytes")
+    body, stream = bytearray(), response.content
+    # One read gives what has arrived so far, not the whole answer: read until the end.
+    while chunk := await stream.read(MAX_REPLY_BYTES + 1 - len(body)):
+        body += chunk
+        if len(body) > MAX_REPLY_BYTES:
+            raise LiveTalkingError(f"{what} reply is larger than {MAX_REPLY_BYTES} bytes")
     try:
         return json.loads(body)
     except ValueError as err:
