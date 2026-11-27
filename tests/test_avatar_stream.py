@@ -207,6 +207,29 @@ def test_a_request_without_a_satellite_is_nobody_asking(hass):
     assert asking_satellite(hass, "entry") is None
 
 
+def test_regression_s13_old_turns_are_dropped_when_a_new_one_starts(hass):
+    """An assistant without a streaming avatar never asks who is asking, so the turns
+    must not pile up until then."""
+    clock = [100.0]
+    with patch.object(avatar_stream, "_now", lambda: clock[0]):
+        for _ in range(50):
+            turn_ended(turn_started(hass, "entry", SATELLITE))
+            clock[0] += avatar_stream.TURN_GRACE + 1
+
+        turn_started(hass, "entry", SATELLITE)
+
+    assert len(avatar_stream._turns(hass)["entry"]) == 1
+
+
+async def test_regression_s13_an_unloaded_assistant_leaves_no_turns_behind(hass):
+    entry = await add_router(hass)
+    turn_started(hass, entry.entry_id, SATELLITE)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    assert entry.entry_id not in avatar_stream._turns(hass)
+
+
 async def test_the_router_notes_the_satellite_while_it_answers(hass):
     entry = await add_router(hass)
     seen: list[str | None] = []

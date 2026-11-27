@@ -99,8 +99,21 @@ def turn_started(hass: HomeAssistant, entry_id: str, satellite: str | None) -> _
     if not satellite:
         return None
     turn = _Turn(satellite)
-    _turns(hass).setdefault(entry_id, []).append(turn)
+    turns = _turns(hass).setdefault(entry_id, [])
+    # Here too: an assistant without a streaming avatar never asks who is asking.
+    _drop_old(turns)
+    turns.append(turn)
     return turn
+
+
+def _drop_old(turns: list[_Turn]) -> None:
+    now = _now()
+    turns[:] = [t for t in turns if t.ended is None or now - t.ended <= TURN_GRACE]
+
+
+def forget_turns(hass: HomeAssistant, entry_id: str) -> None:
+    """Drop what was noted for an assistant that was unloaded."""
+    _turns(hass).pop(entry_id, None)
 
 
 def turn_ended(turn: _Turn | None) -> None:
@@ -114,8 +127,7 @@ def asking_satellite(hass: HomeAssistant, entry_id: str) -> str | None:
     None too when two satellites are asking it: their replies cannot be told apart.
     """
     turns = _turns(hass).get(entry_id, [])
-    now = _now()
-    turns[:] = [t for t in turns if t.ended is None or now - t.ended <= TURN_GRACE]
+    _drop_old(turns)
     satellites = {turn.satellite for turn in turns}
     return satellites.pop() if len(satellites) == 1 else None
 
