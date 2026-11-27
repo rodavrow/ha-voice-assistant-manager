@@ -47,8 +47,7 @@ def my_routers(hass: HomeAssistant, user_id: str | None) -> list[MyRouter]:
         return []
     found: list[MyRouter] = []
     for entry in hass.config_entries.async_entries(DOMAIN):
-        # config_flow.current_settings has no annotations yet
-        settings = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+        settings = current_settings(hass, entry)
         names = person_names(settings)
         for role in ROLES:
             if (settings.get(role) or {}).get("user") != user_id:
@@ -149,8 +148,7 @@ def _my_calendars(
     entry = hass.config_entries.async_get_entry(mine["entry_id"])
     if entry is None:
         return []
-    # config_flow.current_settings has no annotations yet
-    settings = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+    settings = current_settings(hass, entry)
     own: list[tuple[str, Literal["mine", "household"]]] = [
         (entity_id, "mine") for entity_id in own_calendars(settings, mine["role"])
     ]
@@ -229,8 +227,7 @@ async def async_add_reminder(
     entry = hass.config_entries.async_get_entry(mine["entry_id"])
     if entry is None:
         raise ReminderRefused("mine_no_script")
-    # config_flow.current_settings has no annotations yet
-    settings = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+    settings = current_settings(hass, entry)
     # Without a name, for_whom would be the "Person 1" fallback, which no calendar is for.
     own_name = str((settings.get(mine["role"]) or {}).get("name") or "").strip()
     if scope == "me" and not own_name:

@@ -33,9 +33,9 @@ from .test_setup_guide import (
     _automation_using,
     add_entity,
     add_satellite,
-    pipelines,
-    router,
-    without_native_audio_libraries,
+    pipelines,  # noqa: F401 - fixture
+    router,  # noqa: F401 - fixture
+    without_native_audio_libraries,  # noqa: F401 - fixture
 )
 
 PREFIX = "voice_assistant_manager/panel"

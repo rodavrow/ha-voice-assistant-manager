@@ -28,10 +28,10 @@ import dataclasses
 import enum
 import logging
 import random
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation.chat_log import (
@@ -41,18 +41,26 @@ from homeassistant.components.conversation.chat_log import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
 from . import avatar_stream, emotion
 from .announce import safe_toolless_agent
+from .avatar import esphome_entity
 from .chat_show import GUEST, get_manager, is_stop_phrase
 from .const import REPLY_AGENT_TIMEOUT
-from .wake_handoff import async_hand_off
-from .favorites import async_get_favorites, favorites_on, find, lists_for, parse_play
+from .favorites import (
+    Favorite,
+    async_get_favorites,
+    favorites_on,
+    find,
+    lists_for,
+    parse_play,
+)
 from .favorites_context import Asker, forget, remember
 from .favorites_play import (
     PLAYING_LINE,
@@ -67,32 +75,34 @@ from .memory import (
     REMEMBER_RULE,
     REMEMBER_RULE_REMINDERS,
     Exchange,
+    MemoryItem,
     MemorySettings,
     Person,
     active_memory_settings,
     async_run_extraction,
     entry_key,
     get_loaded_memory,
-    has_memory_keyword,
     global_key,
+    has_memory_keyword,
     memory_block,
     router_agent_ids,
     shared_list_ok,
     should_extract,
 )
 from .panel import speaker_overrides
+from .reminder_actions import note_asker
 from .reminders import (
     CANCEL_TOOL,
     DEFAULT_ACTION_FAILURE_LINE,
-    RETRY_NOTES,
-    a_tool_worked,
     DEFAULT_CANCEL_FAILURE_LINE,
     DEFAULT_FAILURE_LINE,
     DEFAULT_LIST_FAILURE_LINE,
     LIST_TOOL,
     PUT_RIGHT,
     REMINDER_TOOL,
+    RETRY_NOTES,
     SPOKE_TOO_SOON,
+    a_tool_worked,
     assistant_name,
     is_cancel_turn,
     is_list_turn,
@@ -108,8 +118,6 @@ from .reminders import (
     reminder_tool_outcome,
     used_a_tool,
 )
-from .reminder_actions import note_asker
-from .avatar import esphome_entity
 from .speaker import (
     CONVERSATION_LIFETIME,
     Remembered,
@@ -118,8 +126,16 @@ from .speaker import (
     is_verdict,
     resolve_speaker,
 )
+from .wake_handoff import async_hand_off
 
 _LOGGER = logging.getLogger(__name__)
+type Input = conversation.ConversationInput
+type Result = conversation.ConversationResult
+type ChatLog = conversation.ChatLog
+# What a lookup of the speaker gives back (see the module docstring). A script writes it
+# too, so its values are whatever the script answered.
+type Lookup = dict[str, Any]
+type Settings = Mapping[str, Any]
 # The line the reminder check put in place of this turn's reply, if it did (_honest_reply):
 # a reply that streams in is then spoken as that line.
 _HONEST_LINE: ContextVar[str | None] = ContextVar(f"{__name__}.honest_line", default=None)
@@ -145,7 +161,7 @@ SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
 DEFAULT_MATCH_WITHIN = 6.0
 # The text sensor a satellite reports on each new turn's wake word (LANovo, EchoLocal).
 WAKE_WORD_SENSOR = "Last wake word"
-OTHER_PERSON = {"owner": "wife", "wife": "owner"}
+OTHER_PERSON: dict[Person, Person] = {"owner": "wife", "wife": "owner"}
 # How the settings screen calls each person, for one who has no name.
 PERSON_NUMBER = {"owner": "Person 1", "wife": "Person 2"}
 
@@ -168,9 +184,9 @@ NO_PLAYER = _NoPlayer.FOUND
 EARLIER_TURNS = 2
 
 
-def _earlier_user_texts(log, log_start, count):
+def _earlier_user_texts(log: ChatLog, log_start: int, count: int) -> list[str]:
     """The person's last `count` messages before the current one, newest first."""
-    texts = []
+    texts: list[str] = []
     # The current message is the last entry before the turn started.
     for entry in reversed(log.content[: max(log_start - 1, 0)]):
         if entry.role == "user" and entry.content:
@@ -180,16 +196,18 @@ def _earlier_user_texts(log, log_start, count):
     return texts
 
 
-def _lines(text):
+def _lines(text: object) -> list[str]:
     return [line.strip() for line in str(text or "").splitlines() if line.strip()]
 
 
-def _leave_to_main_agent(result):
+def _leave_to_main_agent(result: Any) -> bool:
     """Built-in commands that the main agent answers better: state questions and music searches."""
     return result.intent.name in ("HassGetState", "HassMediaSearchAndPlay")
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
+) -> None:
     async_add_entities([PersonaRouter(entry)])
 
 
@@ -217,15 +235,15 @@ class PersonaRouter(conversation.ConversationEntity):
         self._no_match: set[str] = set()
 
     @property
-    def supported_languages(self):
+    def supported_languages(self) -> list[str] | Literal["*"]:
         return MATCH_ALL
 
-    def _main_agent(self):
+    def _main_agent(self) -> str:
         saved = self._entry.options.get("agents")
         chosen = saved.get("agent") if isinstance(saved, Mapping) else None
-        return chosen or self._entry.data["agent"]
+        return str(chosen or self._entry.data["agent"])
 
-    def _turn_log(self, user_input):
+    def _turn_log(self, user_input: Input) -> ChatLog | None:
         """Return the chat log of the running turn if its last entry is this user message."""
         log = current_chat_log.get()
         if log is None or log.conversation_id != user_input.conversation_id:
@@ -240,7 +258,7 @@ class PersonaRouter(conversation.ConversationEntity):
     def _speak(
         self, user_input: conversation.ConversationInput, text: str
     ) -> conversation.ConversationResult:
-        """Speak a line without calling the real agent and keep the exchange out of the shared history."""
+        """Speak a line without calling the real agent; keep it out of the shared history."""
         try:
             log = self._turn_log(user_input)
             if log is not None:
@@ -256,14 +274,16 @@ class PersonaRouter(conversation.ConversationEntity):
             continue_conversation=False,
         )
 
-    def _fixed_reply(self, user_input, replies):
+    def _fixed_reply(self, user_input: Input, replies: list[str]) -> Result:
         """Answer with one of the fixed lines, without calling the real agent."""
         choices = [r for r in replies if r != self._last_fixed] or replies
-        text = random.choice(choices)
+        text = random.choice(choices)  # noqa: S311
         self._last_fixed = text
         return self._speak(user_input, text)
 
-    async def _reply_agent_text(self, user_input, agent_id, persona):
+    async def _reply_agent_text(
+        self, user_input: Input, agent_id: str, persona: str | None
+    ) -> str | None:
         """Let a separate agent without tools write the reply, in a conversation of its own."""
         try:
             async with asyncio.timeout(REPLY_AGENT_TIMEOUT):
@@ -286,7 +306,7 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Reply agent failed, using a fixed line")
             return None
 
-    def _labelled_text(self, user_input, label) -> str:
+    def _labelled_text(self, user_input: Input, label: object) -> str:
         """Store the user message as '<label>: <text>' and return that text."""
         text = user_input.text
         label = str(label or "").strip()
@@ -297,13 +317,16 @@ class PersonaRouter(conversation.ConversationEntity):
             log = self._turn_log(user_input)
             if log is not None:
                 old = log.content[-1]
-                log.content[-1] = UserContent(content=labelled, attachments=old.attachments)
+                # _turn_log only gives a log whose last entry is the user's message.
+                log.content[-1] = UserContent(
+                    content=labelled, attachments=getattr(old, "attachments", None)
+                )
         except Exception:  # noqa: BLE001 - labelling must never block the reply
             _LOGGER.exception("Could not label the user message")
             return text
         return labelled
 
-    async def _helper_state(self, device_id, advanced):
+    async def _helper_state(self, device_id: str | None, advanced: Settings) -> State | None:
         """The voice_speaker helper's state on the satellite, or None if it has none.
 
         While the helper says pending it waits for the voice match, until "the match
@@ -338,7 +361,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 return None
         return state
 
-    async def _who_is_speaking(self, user_input, settings) -> tuple[Role, bool]:
+    async def _who_is_speaking(self, user_input: Input, settings: Settings) -> tuple[Role, bool]:
         """Return the role and whether a voice match decided it."""
         advanced = settings.get("advanced") or {}
         user_id = user_input.context.user_id if user_input.context else None
@@ -358,7 +381,13 @@ class PersonaRouter(conversation.ConversationEntity):
             return resolve_speaker(None, user_id, user_map, no_helper_role)
         return await self._voice_speaker(user_input, advanced, user_map, no_helper_role)
 
-    async def _voice_speaker(self, user_input, advanced, user_map, no_helper_role):
+    async def _voice_speaker(
+        self,
+        user_input: Input,
+        advanced: Settings,
+        user_map: list[tuple[Role, str | None]],
+        no_helper_role: str | None,
+    ) -> tuple[Role, bool]:
         """The role for a request without a user, by the satellite's voice match.
 
         A follow-up in the same conversation keeps its person unless a new voice match
@@ -384,7 +413,7 @@ class PersonaRouter(conversation.ConversationEntity):
         kept = follow_up_role(
             remembered, device_id, state.state, state.last_changed, now, woke_since
         )
-        if kept is not None:
+        if kept is not None and remembered is not None:
             role, matched, decided_by = kept, True, remembered.decided_by
         else:
             role, matched = resolve_speaker(state.state, None, user_map, no_helper_role)
@@ -398,7 +427,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 self._spoken_by.pop(conversation_id, None)
         return role, matched
 
-    def _note_match(self, device_id, arrived: bool) -> None:
+    def _note_match(self, device_id: str | None, arrived: bool) -> None:
         """Keep which satellites gave no voice match on their last turn; warn once each."""
         if not device_id:
             return
@@ -412,7 +441,9 @@ class PersonaRouter(conversation.ConversationEntity):
                 device_id,
             )
 
-    def _woke_since(self, device_id, remembered: Remembered | None) -> bool | None:
+    def _woke_since(
+        self, device_id: str | None, remembered: Remembered | None
+    ) -> bool | None:
         """True when the satellite reported a wake word since the remembered turn, else None.
 
         A report proves a new turn (wake word, Wake button, a listen after an announcement).
@@ -476,18 +507,18 @@ class PersonaRouter(conversation.ConversationEntity):
         """Whether the memory agent may be asked what to save. Remembered facts stay in use."""
         return self._safe_agent("memory", settings.agent) is not None
 
-    def _person_name(self, person) -> str:
+    def _person_name(self, person: Person) -> str:
         section = self._entry.options.get(SETTINGS_KEY[person]) or {}
         return str(section.get("name") or "").strip()
 
-    def _memory_block(self, who, name, settings: MemorySettings) -> str:
+    def _memory_block(self, who: Person, name: str, settings: MemorySettings) -> str:
         """What this assistant remembers about one person. Reads memory only, no I/O."""
         try:
             memory = get_loaded_memory(self.hass)
             if memory is None:
                 return ""
 
-            def lists(person, shareable_only=False):
+            def lists(person: Person, shareable_only: bool = False) -> list[list[MemoryItem]]:
                 found = [memory.items(entry_key(self._entry.entry_id, person))]
                 # Only while the person is the same in every router using the shared lists.
                 shared = settings.use_global and shared_list_ok(self.hass, person)
@@ -514,12 +545,12 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not read memory, answering without it")
             return ""
 
-    def _reminder_settings(self) -> dict:
+    def _reminder_settings(self) -> dict[str, Any]:
         """The Reminders section of the settings, or {} when reminders are off."""
         section = self._entry.options.get("reminders") or {}
         return dict(section) if section.get("enabled") else {}
 
-    def _reminder_guidance(self, who, name) -> str:
+    def _reminder_guidance(self, who: Person, name: str) -> str:
         """Reminder rules for the main agent, or "" when reminders are off."""
         if not self._reminder_settings():
             return ""
@@ -531,16 +562,19 @@ class PersonaRouter(conversation.ConversationEntity):
             cancel=bool(self._reminder_settings().get("cancel", True)),
         )
 
-    def _note_asker(self, user_input, resp) -> None:
+    def _note_asker(self, user_input: Input, resp: Lookup | None) -> None:
         """Tell the reminder look-up who is speaking in this turn: a known person or nobody.
 
         The look-up shows a person their own reminders, and takes who that is from here,
         never from the main agent (reminder_actions.note_asker).
         """
-        known = bool(resp) and resp.get("who") in ("owner", "wife")
-        note_asker(self.hass, user_input.context, resp.get("label") if known else None)
+        known = resp is not None and resp.get("who") in ("owner", "wife")
+        label = resp.get("label") if resp is not None and known else None
+        note_asker(self.hass, user_input.context, label)
 
-    def _guard_reminder(self, user_input, result, log, log_start):
+    def _guard_reminder(
+        self, user_input: Input, result: Result, log: ChatLog | None, log_start: int | None
+    ) -> tuple[Result, bool]:
         """Check a finished turn for reminder trouble.
 
         Returns the result to give back and whether the turn was about a reminder, so
@@ -553,7 +587,7 @@ class PersonaRouter(conversation.ConversationEntity):
             visible = (
                 log is not None and log_start is not None and len(log.content) > log_start
             )
-            turn = log.content[log_start:] if visible else []
+            turn = log.content[log_start:] if log is not None and visible else []
             outcome = reminder_tool_outcome(turn)
             cancelled = reminder_tool_outcome(turn, CANCEL_TOOL)
             listed = reminder_tool_outcome(turn, LIST_TOOL)
@@ -568,7 +602,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 or looking_up
                 or is_reminder_turn(user_input.text)
             )
-            if not visible:
+            if log is None or log_start is None or not visible:
                 return result, about_reminder
             reply = str((result.response.speech.get("plain") or {}).get("speech") or "")
             if looking_up:
@@ -614,7 +648,9 @@ class PersonaRouter(conversation.ConversationEntity):
             return result, False
 
     @staticmethod
-    def _honest_reply(user_input, result, log, log_start, line):
+    def _honest_reply(
+        user_input: Input, result: Result, log: ChatLog, log_start: int, line: str
+    ) -> Result:
         """The result with `line` as its reply, in the history too."""
         _HONEST_LINE.set(line)
         for index in range(len(log.content) - 1, log_start - 1, -1):
@@ -630,7 +666,9 @@ class PersonaRouter(conversation.ConversationEntity):
             continue_conversation=False,
         )
 
-    def _start_memory_pass(self, user_input, resp, result) -> None:
+    def _start_memory_pass(
+        self, user_input: Input, resp: Lookup | None, result: Result
+    ) -> None:
         """Let the memory agent look at a finished turn, in the background.
 
         Only for a recognised person whose turn the main agent answered. The reply
@@ -670,7 +708,7 @@ class PersonaRouter(conversation.ConversationEntity):
         except Exception:  # noqa: BLE001 - memory must never block the reply
             _LOGGER.exception("Could not start the memory pass")
 
-    def _last_score(self, device_id):
+    def _last_score(self, device_id: str | None) -> float | None:
         """Voice match score of the satellite's last request, if it reports one."""
         if not device_id:
             return None
@@ -678,13 +716,15 @@ class PersonaRouter(conversation.ConversationEntity):
         for entity in er.async_entries_for_device(registry, device_id):
             if entity.entity_id.endswith("_last_speaker_score"):
                 state = self.hass.states.get(entity.entity_id)
+                if state is None:
+                    return None
                 try:
                     return float(state.state)
-                except (AttributeError, TypeError, ValueError):
+                except (TypeError, ValueError):
                     return None
         return None
 
-    async def _lookup_from_settings(self, user_input, settings):
+    async def _lookup_from_settings(self, user_input: Input, settings: Settings) -> Lookup:
         """Work out who is speaking and what to do with them, from the settings screen."""
         advanced = settings.get("advanced") or {}
         who, matched = await self._who_is_speaking(user_input, settings)
@@ -728,6 +768,7 @@ class PersonaRouter(conversation.ConversationEntity):
         persona = str(strangers.get("persona") or "").strip()
         lines = _lines(strangers.get("fixed_replies"))
         near = settings.get("near_miss") or {}
+        kind: str = who
         if matched and near.get("enabled"):
             score = self._last_score(user_input.device_id)
             try:
@@ -735,14 +776,14 @@ class PersonaRouter(conversation.ConversationEntity):
             except (TypeError, ValueError):
                 lowest = 0.5
             if score is not None and score >= lowest:
-                who = "near_miss"
+                kind = "near_miss"
                 persona = str(near.get("persona") or "").strip() or persona
                 lines = _lines(near.get("fixed_replies")) or lines
         reply_agent = ""
         if strangers.get("mode", "ai") == "ai":
             reply_agent = str(strangers.get("reply_agent") or "").strip()
         return {
-            "who": who,
+            "who": kind,
             "persona_for_this_message": persona,
             "rule": rule,
             "label": "",
@@ -751,7 +792,9 @@ class PersonaRouter(conversation.ConversationEntity):
             "reply_agent": reply_agent,
         }
 
-    async def _try_built_in(self, user_input, log, local):
+    async def _try_built_in(
+        self, user_input: Input, log: ChatLog, local: Settings
+    ) -> Result | None:
         """Run the request through the built-in commands, using the given history."""
         intent_filter = _leave_to_main_agent if local.get("leave_questions", True) else None
         response = await conversation.async_handle_intents(
@@ -763,11 +806,21 @@ class PersonaRouter(conversation.ConversationEntity):
         _LOGGER.debug(f"Built-in command handled: {user_input.text}")
         speech = (response.speech.get("plain") or {}).get("speech") or ""
         log.async_add_assistant_content_without_tools(
-            conversation.AssistantContent(agent_id=conversation.HOME_ASSISTANT_AGENT, content=speech)
+            conversation.AssistantContent(
+                agent_id=conversation.HOME_ASSISTANT_AGENT, content=speech
+            )
         )
-        return conversation.ConversationResult(response=response, conversation_id=log.conversation_id)
+        return conversation.ConversationResult(
+            response=response, conversation_id=log.conversation_id
+        )
 
-    async def _in_turn_log(self, user_input, log, text, answer):
+    async def _in_turn_log[T: Result | None](
+        self,
+        user_input: Input,
+        log: ChatLog | None,
+        text: str,
+        answer: Callable[[ChatLog], Awaitable[T]],
+    ) -> T:
         """Run `answer` with the turn's chat log, opening one when no voice assistant did.
 
         `answer` takes the log and returns a result, or None when it did not answer. In a
@@ -775,8 +828,8 @@ class PersonaRouter(conversation.ConversationEntity):
         """
         if log is not None:
             return await answer(log)
-        from homeassistant.components.conversation.chat_log import async_get_chat_log
-        from homeassistant.helpers.chat_session import async_get_chat_session
+        from homeassistant.components.conversation.chat_log import async_get_chat_log  # noqa: PLC0415
+        from homeassistant.helpers.chat_session import async_get_chat_session  # noqa: PLC0415
 
         with (
             async_get_chat_session(
@@ -792,7 +845,9 @@ class PersonaRouter(conversation.ConversationEntity):
                     own_log.content[place] = UserContent(content=text, attachments=old.attachments)
             return handled
 
-    async def _local_command(self, user_input, log, local, text):
+    async def _local_command(
+        self, user_input: Input, log: ChatLog | None, local: Settings, text: str
+    ) -> Result | None:
         """Let Home Assistant's built-in commands handle the request, if one matches exactly.
 
         Only called for a recognised speaker. Returns None when nothing matched,
@@ -811,7 +866,9 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Built-in command handling failed, asking the main agent")
             return None
 
-    async def _favorite_reply(self, user_input, who: Person, log, text):
+    async def _favorite_reply(
+        self, user_input: Input, who: Person, log: ChatLog | None, text: str
+    ) -> Result | _NoPlayer | None:
         """Play a favorite the request names exactly, and answer it, or None.
 
         None leaves the request to the built-in commands and the main agent: it is not
@@ -843,7 +900,9 @@ class PersonaRouter(conversation.ConversationEntity):
             return None
         return await self._answer_in_history(user_input, log, text, reply)
 
-    async def _favorite_and_player(self, user_input, who: Person):
+    async def _favorite_and_player(
+        self, user_input: Input, who: Person
+    ) -> tuple[Favorite, str, bool] | _NoPlayer | None:
         """(favorite, player entity id, whether the player was named), NO_PLAYER or None.
 
         The first reading of the request whose name is a favorite decides; when its player
@@ -871,13 +930,15 @@ class PersonaRouter(conversation.ConversationEntity):
             return favorite, entity_id, player is not None
         return None
 
-    async def _answer_in_history(self, user_input, log, text, reply):
+    async def _answer_in_history(
+        self, user_input: Input, log: ChatLog | None, text: str, reply: str
+    ) -> Result:
         """Speak `reply` and keep the exchange in the history, as a built-in command is.
 
         A failure to write the history is logged; the reply is still given.
         """
 
-        async def answer(turn_log):
+        async def answer(turn_log: ChatLog) -> Result:
             turn_log.async_add_assistant_content_without_tools(
                 conversation.AssistantContent(agent_id=self.entity_id, content=reply)
             )
@@ -890,14 +951,14 @@ class PersonaRouter(conversation.ConversationEntity):
         return self._spoken(user_input, reply, user_input.conversation_id or ulid.ulid_now())
 
     @staticmethod
-    def _spoken(user_input, reply: str, conversation_id: str):
+    def _spoken(user_input: Input, reply: str, conversation_id: str) -> Result:
         response = intent.IntentResponse(language=user_input.language)
         response.async_set_speech(reply)
         return conversation.ConversationResult(
             response=response, conversation_id=conversation_id
         )
 
-    async def _lookup_from_script(self, user_input):
+    async def _lookup_from_script(self, user_input: Input) -> Any:
         """Older way: ask the 'who is speaking' script named in the entry data.
 
         The script is only given the device, and Home Assistant lets any logged-in user
@@ -925,7 +986,7 @@ class PersonaRouter(conversation.ConversationEntity):
                 return_response=True,
             )
 
-    async def _chat_show_reply(self, user_input, resp):
+    async def _chat_show_reply(self, user_input: Input, resp: Lookup | None) -> Result | None:
         """Answer a request made while a chat show runs on this device, or None.
 
         Every turn from the chat's satellite belongs to the chat, whoever speaks: the
@@ -968,7 +1029,7 @@ class PersonaRouter(conversation.ConversationEntity):
         manager.add_person_line(GUEST, user_input.text)
         return self._chat_turn(user_input, "joined as a guest", "")
 
-    def _heard_a_chat(self, user_input, resp) -> bool:
+    def _heard_a_chat(self, user_input: Input, resp: Lookup | None) -> bool:
         """Whether a satellite most likely woke on a chat show playing on another speaker.
 
         The assistants say each other's names, which are wake words, and a television is
@@ -986,12 +1047,12 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not tell whether a chat show is playing")
             return False
 
-    def _chat_turn(self, user_input, kind: str, reply: str):
+    def _chat_turn(self, user_input: Input, kind: str, reply: str) -> Result:
         # What was said is personal and stays out of the log; how it was taken does not.
         _LOGGER.info("Chat show turn on device %s: %s", user_input.device_id, kind)
         return self._speak(user_input, reply)
 
-    def _chat_show_fallback(self, user_input):
+    def _chat_show_fallback(self, user_input: Input) -> Result | None:
         """After an unexpected chat show error: refuse while a chat may run here, else None.
 
         When even that cannot be told, a chat may be running, so the request is refused:
@@ -1004,7 +1065,7 @@ class PersonaRouter(conversation.ConversationEntity):
             running = True
         return self._speak(user_input, LAST_RESORT_REPLY) if running else None
 
-    def _main_conversation_id(self, user_input):
+    def _main_conversation_id(self, user_input: Input) -> str | None:
         """The conversation for the main agent: the request's, unless a chat line is in it.
 
         A satellite that spoke a chat line with start_conversation keeps that conversation,
@@ -1018,7 +1079,9 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not tell whether a chat line is in the conversation")
             return None
 
-    def _after_clean_conversation(self, user_input, result):
+    def _after_clean_conversation(
+        self, user_input: Input, result: Result
+    ) -> tuple[Result, ChatLog | None, int | None]:
         """After the main agent answered in a conversation of its own instead of this one.
 
         Remembers that conversation for the next request and returns its chat log and where
@@ -1062,7 +1125,7 @@ class PersonaRouter(conversation.ConversationEntity):
         ]
         return "\n\n".join(str(p) for p in parts if p)
 
-    async def async_process(self, user_input):
+    async def async_process(self, user_input: Input) -> Result:
         """Find out who is speaking, then let the right agent answer.
 
         When that cannot be worked out, the request is refused: the lookup failed, the
@@ -1113,11 +1176,19 @@ class PersonaRouter(conversation.ConversationEntity):
                     stream.say(f"{SPOKE_TOO_SOON} {honest}")
                 elif stream.speaking and second:
                     stream.say(f"{PUT_RIGHT} {second}")
-                if log.delta_listener is stream:
-                    log.delta_listener = stream.listener
+                wrapped = stream.listener
+                if log is not None and log.delta_listener is stream:
+                    log.delta_listener = wrapped
         return self._without_tag(result, stream)
 
-    def _unbacked_claim(self, user_input, result, log, log_start, reminders) -> str | None:
+    def _unbacked_claim(
+        self,
+        user_input: Input,
+        result: Result,
+        log: ChatLog | None,
+        log_start: int | None,
+        reminders: bool,
+    ) -> str | None:
         """What the reply says was done although no tool was called this turn, or None.
 
         "reminder" or "cancel" when reminders are on and the conversation is about one;
@@ -1154,7 +1225,7 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not check the reply for a claim without a tool call")
             return None
 
-    def _confirms(self, kind, result, log, log_start) -> bool:
+    def _confirms(self, kind: str, result: Result, log: ChatLog, log_start: int) -> bool:
         """Whether the second answer did what the first reply only said was done."""
         turn = log.content[log_start:]
         if kind == "reminder":
@@ -1165,14 +1236,21 @@ class PersonaRouter(conversation.ConversationEntity):
             return reminder_tool_outcome(turn, LIST_TOOL) == "ok"
         return a_tool_worked(turn) and looks_like_action_claim(self._shown(result))
 
-    def _shown(self, result) -> str:
+    def _shown(self, result: Result) -> str:
         """The reply as it is shown: without its face tag and audio tags."""
         said = str((result.response.speech.get("plain") or {}).get("speech") or "")
         return emotion.strip_audio_tags(
             emotion.split_tag(said, emotion.accepted_emotions(self._entry))[1]
         ).strip()
 
-    async def _async_retry(self, kind, result, log, log_start, ask):
+    async def _async_retry(
+        self,
+        kind: str,
+        result: Result,
+        log: ChatLog,
+        log_start: int,
+        ask: Callable[[str], Awaitable[Result]],
+    ) -> Result:
         """Ask the main agent once more after a reply that claimed what no tool did.
 
         Returns its second answer, with the first reply and the note taken out of the
@@ -1193,7 +1271,8 @@ class PersonaRouter(conversation.ConversationEntity):
             (
                 index
                 for index in range(len(log.content) - 1, log_start - 1, -1)
-                if log.content[index].role == "assistant" and log.content[index].content
+                if log.content[index].role == "assistant"
+                and getattr(log.content[index], "content", None)
             ),
             None,
         )
@@ -1255,7 +1334,7 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not read the reply's emotion tag")
         return result
 
-    async def _async_answer(self, user_input):
+    async def _async_answer(self, user_input: Input) -> Result:
         resp = None
         try:
             settings = self._entry.options
@@ -1326,17 +1405,18 @@ class PersonaRouter(conversation.ConversationEntity):
         # Only this request's own record is forgotten: a router whose main agent is this
         # one may have remembered its asker under the same context.
         remembered: str | None = None
-        if context_id and who in ("owner", "wife"):
+        person: Person | None = who if who in ("owner", "wife") else None
+        if context_id and person is not None:
             # The favorites tools read who is asking from the request's context.
             remembered = context_id
 
-        async def ask(words: str, in_conversation: str | None):
+        async def ask(words: str, in_conversation: str | None) -> Result:
             """Put `words` to the main agent, as this person on this satellite."""
-            if remembered:
+            if remembered and person is not None:
                 remember(
                     self.hass,
                     remembered,
-                    Asker(self._entry.entry_id, who, user_input.device_id),
+                    Asker(self._entry.entry_id, person, user_input.device_id),
                 )
             try:
                 return await conversation.async_converse(
@@ -1374,7 +1454,7 @@ class PersonaRouter(conversation.ConversationEntity):
             result, log, log_start = self._after_clean_conversation(user_input, result)
         reminders = bool(resp.get("reminders"))
         kind = self._unbacked_claim(user_input, result, log, log_start, reminders)
-        if kind is not None:
+        if kind is not None and log is not None and log_start is not None:
             # It said it did something and called no tool: one more try, with a note.
             first = result
             result = await self._async_retry(

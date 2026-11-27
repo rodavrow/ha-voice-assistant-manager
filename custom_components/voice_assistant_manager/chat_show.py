@@ -962,8 +962,9 @@ class ChatShowManager:
                 spoken + 1, own, "prepared" if use_prepared else "written now",
                 time.monotonic() - began,
             )
+            # Set by another task while the line was written, which mypy cannot know.
             if chat.ended:
-                return
+                return  # type: ignore[unreachable]
             if not line:
                 self._end(chat, "chat_agent_failed")
                 return
@@ -1175,7 +1176,7 @@ class ChatShowManager:
         """Have the assistant's avatar say the line on the stage. False when it could not."""
         from homeassistant.components import tts  # noqa: PLC0415 - only needed when speaking
 
-        assert chat.on_stage is not None
+        assert chat.on_stage is not None  # noqa: S101
         engine, voice = _chat_voice(entry)
         media_id = (
             await _async_chat_media_id(

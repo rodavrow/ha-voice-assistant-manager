@@ -58,7 +58,7 @@ def _pipelines_by_name(hass: HomeAssistant) -> dict[str, Pipeline]:
     store order, so the first one is kept here as well. Only call once assist_pipeline is
     set up.
     """
-    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines  # noqa: PLC0415
 
     by_name: dict[str, Pipeline] = {}
     for pipeline in async_get_pipelines(hass):
@@ -67,8 +67,8 @@ def _pipelines_by_name(hass: HomeAssistant) -> dict[str, Pipeline]:
 
 
 def _preferred_pipeline(hass: HomeAssistant) -> Pipeline | None:
-    from homeassistant.components.assist_pipeline.error import PipelineNotFound
-    from homeassistant.components.assist_pipeline.pipeline import async_get_pipeline
+    from homeassistant.components.assist_pipeline.error import PipelineNotFound  # noqa: PLC0415
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipeline  # noqa: PLC0415
 
     try:
         return async_get_pipeline(hass)
@@ -120,7 +120,7 @@ def _is_tracked(hass: HomeAssistant, sensors: list[str | None]) -> bool:
     """Whether any automation references one of the sensors."""
     if "automation" not in hass.config.components:
         return False
-    from homeassistant.components.automation import automations_with_entity
+    from homeassistant.components.automation import automations_with_entity  # noqa: PLC0415
 
     return any(sensor and automations_with_entity(hass, sensor) for sensor in sensors)
 
@@ -272,7 +272,7 @@ def reusable_pipeline(hass: HomeAssistant, title: str, router: str) -> str | Non
     None while another pipeline shares the name: a wake word could not be pointed at it
     (see ``pipeline_name_is_shared``), so the guide makes a copy with a free name instead.
     """
-    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines  # noqa: PLC0415
 
     if pipeline_name_is_shared(hass, title):
         return None
@@ -295,7 +295,7 @@ def router_pipeline(hass: HomeAssistant, pipeline_id: str, router: str) -> Pipel
     """
     if "assist_pipeline" not in hass.config.components:
         return None
-    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines  # noqa: PLC0415
 
     return next(
         (
@@ -309,7 +309,7 @@ def router_pipeline(hass: HomeAssistant, pipeline_id: str, router: str) -> Pipel
 
 def pipeline_name_is_shared(hass: HomeAssistant, name: str) -> bool:
     """Whether more than one pipeline has this name (a select picks its pipeline by name)."""
-    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipelines  # noqa: PLC0415
 
     return sum(pipeline.name == name for pipeline in async_get_pipelines(hass)) > 1
 
@@ -333,7 +333,7 @@ def pipeline_copy_payload(
     Every field of the source except its id is kept, so STT, TTS, language and wake word
     stay as they were. Local intents are off: the router has its own built-in commands.
     """
-    from homeassistant.components.assist_pipeline.pipeline import async_get_pipeline
+    from homeassistant.components.assist_pipeline.pipeline import async_get_pipeline  # noqa: PLC0415
 
     source = async_get_pipeline(hass, source_id)
     payload = {

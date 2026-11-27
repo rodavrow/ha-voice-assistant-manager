@@ -105,6 +105,7 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
         # A reply that was not streamed comes as the text that is shown: the voice gets
         # it back with its audio tags, when this assistant just gave that reply.
         message = emotion.take_spoken(self.hass, self._entry.entry_id, message)
+        data: bytes | None
         if engine.async_supports_streaming_input():
             # Only when the engine changed to a streaming one since this request started.
             response = await engine.internal_async_stream_tts_audio(

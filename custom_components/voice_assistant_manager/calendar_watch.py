@@ -184,8 +184,9 @@ class CalendarWatcher:
                 hours = DEFAULT_CATCH_UP_HOURS
             catch_up = timedelta(hours=max(hours, 0))
             for row in rows:
+                # async_stop sets it during an await below, which mypy cannot know.
                 if self._stopped:
-                    break
+                    break  # type: ignore[unreachable]
                 calendar = str(row["calendar"])
                 try:
                     await self._check_calendar(row, settings, now, catch_up)
@@ -196,7 +197,7 @@ class CalendarWatcher:
                 else:
                     self._row_errors.discard(calendar)
             if self._stopped:  # async_stop writes what there is to write.
-                return
+                return  # type: ignore[unreachable]
             self._forget_old(now, catch_up, {str(row["calendar"]) for row in rows})
             if self._saved_at is None or abs(now - self._saved_at) >= SAVE_EVERY:
                 await self._save(now)

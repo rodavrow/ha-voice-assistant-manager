@@ -3,6 +3,9 @@ __pycache__/
 .DS_Store
 .venv/
 .pytest_cache/
+.coverage
+.mypy_cache/
+.ruff_cache/
 tests/testing_config/
 
 # Development notes and tooling, never part of the public repository.

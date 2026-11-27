@@ -13,7 +13,6 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import (
@@ -388,7 +387,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_COMPOSE_ANNOUNCEMENT,
         compose_announcement,
-        SERVICE_SCHEMA,  # type: ignore[arg-type]
+        SERVICE_SCHEMA,
         SupportsResponse.ONLY,
     )
 
@@ -403,7 +402,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_PREPARE_ANNOUNCEMENT,
         prepare_announcement,
-        PREPARE_SCHEMA,  # type: ignore[arg-type]
+        PREPARE_SCHEMA,
     )
 
 

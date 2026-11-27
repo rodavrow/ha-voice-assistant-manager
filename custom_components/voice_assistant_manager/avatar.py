@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import re
 import wave
 from collections.abc import Mapping
 from typing import Any

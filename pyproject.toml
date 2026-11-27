@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Development tooling only. The integration itself has no build step.
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+extend-exclude = ["tests/testing_config"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",  # pycodestyle, pyflakes
+    "I",            # import order
+    "B",            # bugbear
+    "BLE",          # blind except
+    "S",            # bandit
+    "ASYNC",        # blocking calls in async code
+    "PLC0415",      # import outside top level
+    "PT",           # pytest style
+    "SIM",          # simplifications
+]
+ignore = [
+    # Style choices the code makes on purpose; not worth rewriting working code for.
+    "SIM102", "SIM108", "SIM114", "SIM117", "SIM905", "PT011", "PT018", "E741",
+    # A `timeout` parameter is part of these functions' contract with their callers.
+    "ASYNC109",
+]
+
+# An "unused" import in a test is usually a fixture: never remove one automatically.
+unfixable = ["F401"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, use fixed fake secrets and bind fake addresses.
+"tests/**" = [
+    "S101", "S104", "S105", "S106", "S108", "S607",
+    # Long literal strings (prompts, replies) read better unbroken.
+    "E501",
+    # Fixtures are imported from sibling test modules and named as parameters.
+    "F811",
+    # Tests import inside the test to patch first, and poll fakes in short loops.
+    "PLC0415", "ASYNC110", "ASYNC240",
+    # Not worth rewriting working tests for; sorting imports would also move the
+    # `noqa: F401` comments that mark imported fixtures.
+    "I001", "SIM300", "SIM401", "PT022",
+]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unreachable = true
+files = ["custom_components"]
+
+# Home Assistant 2026.11 types its own schemas with probatio, a drop-in replacement for
+# voluptuous. This integration still builds its schemas with voluptuous, which works at
+# run time but makes every schema handed to Home Assistant a type mismatch. Not following
+# the import turns `vol` into Any instead of marking each of those calls.
+[[tool.mypy.overrides]]
+module = ["voluptuous", "voluptuous.*"]
+follow_imports = "skip"
+
+[tool.coverage.run]
+source = ["custom_components/voice_assistant_manager"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

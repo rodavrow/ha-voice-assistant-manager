@@ -32,7 +32,6 @@ from custom_components.voice_assistant_manager.conversation import DEFAULT_AGENT
 
 from .router_helpers import (
     MAIN_AGENT,
-    MEMORY_AGENT,
     FakeAgents,
     add_router,
     ask,

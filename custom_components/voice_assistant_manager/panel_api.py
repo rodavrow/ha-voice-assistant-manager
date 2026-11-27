@@ -13,7 +13,6 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 import voluptuous as vol
-
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -24,6 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.translation import async_get_translations
 
+from . import stage
 from .announce import writer_agent
 from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_ENGINE, CONF_URL
 from .avatar import SUBENTRY_TYPE as AVATAR
@@ -52,7 +52,6 @@ from .config_flow import (
     settings_to_save,
     without_retired,
 )
-from . import stage
 from .const import DOMAIN
 from .favorites import (
     HOUSEHOLD,
@@ -306,7 +305,9 @@ def _voices(hass: HomeAssistant, engine_id: str) -> list[dict[str, str]]:
     if engine is None:
         return []
     try:
-        voices = engine.async_get_supported_voices(engine.default_language) or []
+        # An engine without a default language is asked all the same, as before types.
+        language: Any = engine.default_language
+        voices = engine.async_get_supported_voices(language) or []
     except Exception:  # noqa: BLE001 - only a nicer field: the page falls back to free text
         _LOGGER.warning("Could not list the voices of %s", engine_id, exc_info=True)
         return []
@@ -652,7 +653,7 @@ async def ws_guide_local_off(
         return
     # Imported here, not at the top: Home Assistant loads Assist only when it is set up, and
     # a pipeline was found, so it is.
-    from homeassistant.components.assist_pipeline import pipeline as assist_pipeline
+    from homeassistant.components.assist_pipeline import pipeline as assist_pipeline  # noqa: PLC0415
 
     try:
         await assist_pipeline.async_update_pipeline(hass, pipeline, prefer_local_intents=False)
@@ -981,11 +982,7 @@ def async_register_chat_services(hass: HomeAssistant) -> None:
     async def stop_chat(call: ServiceCall) -> None:
         await get_manager(hass).async_stop()
 
-    # Home Assistant types the schema as its own class, which voluptuous satisfies at run
-    # time. announce.py registers its schema the same way.
-    async_register_admin_service(
-        hass, DOMAIN, "start_chat", start_chat, START_CHAT_SCHEMA  # type: ignore[arg-type]
-    )
+    async_register_admin_service(hass, DOMAIN, "start_chat", start_chat, START_CHAT_SCHEMA)
     async_register_admin_service(hass, DOMAIN, "stop_chat", stop_chat)
 
 
