@@ -232,7 +232,9 @@ def current_settings(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
             "rule": str(texts.get("rule") or ""),
             "match_within": 6,
             "follow_up_window": 60,
-            "no_helper_role": "owner",
+            # Proposed for a new assistant: nobody is assumed for a device that cannot
+            # tell people apart. Settings saved without this choice still mean Person 1.
+            "no_helper_role": "stranger",
             "avatar_connection": "on_wake",
             "avatar_stream": True,
             "voice_tags": False,
