@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import avatar_devices, avatar_stream
+from . import avatar_devices, avatar_stream, listening
 from .announce import async_register_services
 from .avatar import SUBENTRY_TYPE as AVATAR
 from .calendar_watch import (
@@ -43,6 +43,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async_register_stage_commands(hass)
     async_register_favorites_api(hass)
     avatar_devices.async_setup(hass)
+    listening.async_setup(hass)
     return True
 
 

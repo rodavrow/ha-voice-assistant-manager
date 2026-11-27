@@ -1148,6 +1148,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
           placeholder: "neutral, happy, sad, angry, sarcastic",
         }),
         this._numberField("advanced", "match_within", 0, 15, 0.5, "seconds", 6),
+        this._numberField("advanced", "follow_up_window", 0, 300, 5, "seconds", 60),
         this._choiceField(
           "advanced",
           "no_helper_role",

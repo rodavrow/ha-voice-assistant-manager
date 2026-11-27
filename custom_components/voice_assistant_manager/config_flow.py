@@ -231,6 +231,7 @@ def current_settings(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
         "advanced": {
             "rule": str(texts.get("rule") or ""),
             "match_within": 6,
+            "follow_up_window": 60,
             "no_helper_role": "owner",
             "avatar_connection": "on_wake",
             "avatar_stream": True,
@@ -386,6 +387,7 @@ def settings_schema(current: Settings, users: Choices) -> vol.Schema:
                         _fixed("voice_tags", advanced, False): selector.BooleanSelector(),
                         _opt("face_for_tags", advanced): _text(True),
                         _fixed("match_within", advanced, 6): _number(0, 15, 0.5, "s"),
+                        _fixed("follow_up_window", advanced, 60): _number(0, 300, 5, "s"),
                         _fixed("no_helper_role", advanced, "owner"): _choice(
                             [
                                 ("owner", "Person 1"),

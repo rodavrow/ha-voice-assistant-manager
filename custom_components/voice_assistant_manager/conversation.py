@@ -30,7 +30,7 @@ import logging
 import random
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from homeassistant.components import conversation
@@ -71,6 +71,7 @@ from .favorites_play import (
     player_name,
     resolve_player,
 )
+from .listening import listening_since
 from .memory import (
     REMEMBER_RULE,
     REMEMBER_RULE_REMINDERS,
@@ -120,11 +121,13 @@ from .reminders import (
 )
 from .speaker import (
     CONVERSATION_LIFETIME,
+    FOLLOW_UP_WINDOW,
+    UTTERANCE_ALLOWANCE,
     Remembered,
     Role,
     follow_up_role,
-    is_verdict,
     resolve_speaker,
+    verdict_is_current,
 )
 from .wake_handoff import async_hand_off
 
@@ -330,40 +333,67 @@ class PersonaRouter(conversation.ConversationEntity):
             return text
         return labelled
 
-    async def _helper_state(self, device_id: str | None, advanced: Settings) -> State | None:
-        """The voice_speaker helper's state on the satellite, or None if it has none.
+    async def _await_match(
+        self, helper: str, within: float, since: datetime | None, wait_when_old: bool
+    ) -> State | None:
+        """The voice_speaker helper's state once this turn's voice match is in, or the
+        time for it is over. None if the helper is gone.
 
-        While the helper says pending it waits for the voice match, until "the match
-        arrives within" seconds after pending was last written, which is when the
-        satellite started listening. A satellite matches on a fixed stretch of audio after
-        the wake word, so the match lands a fixed time after it however long the person
-        speaks: after a long request it is already there, and nothing is waited for.
+        A satellite matches on a fixed stretch of audio after the wake word, so the match
+        lands a fixed time after it however long the person speaks: after a long request
+        it is already there, and nothing is waited for. It is waited for until "the match
+        arrives within" seconds after the turn started:
 
-        The last report counts, not the last change: a helper a follow-up left on pending
-        is written pending again at the next wake word, which changes nothing but the
-        report time.
+        - while the helper says pending, after pending was last written, which the
+          tracking automation does when the satellite starts listening. The last report
+          counts, not the last change: a helper a follow-up left on pending is written
+          pending again at the next wake word, which changes nothing but the report time;
+        - with `wait_when_old`, while the helper still holds a match from before `since`,
+          when this turn started. The automation writes no pending for a wake word that
+          follows a reply closely, and none at all when it is off.
         """
-        helper = f"input_text.voice_speaker_{device_id or ''}"
         state = self.hass.states.get(helper)
-        if state is None:
-            return None
-        try:
-            within = float(advanced.get("match_within", DEFAULT_MATCH_WITHIN))
-        except (TypeError, ValueError):
-            within = DEFAULT_MATCH_WITHIN
         # A cap on the steps too, so a clock that stands still can never keep it waiting.
         for _ in range(max(int(within * 10) + 1, 0)):
-            if state.state != "pending":
+            if state is None or self._is_current(state, since):
                 break
-            deadline = state.last_reported + timedelta(seconds=within)
-            remaining = (deadline - dt_util.utcnow()).total_seconds()
+            if state.state == "pending":
+                started = state.last_reported
+            elif wait_when_old and since is not None:
+                started = since
+            else:
+                break
+            remaining = (started + timedelta(seconds=within) - dt_util.utcnow()).total_seconds()
             if remaining <= 0:
                 break
             await asyncio.sleep(min(0.1, remaining))
             state = self.hass.states.get(helper)
-            if state is None:
-                return None
         return state
+
+    def _is_current(self, state: State, since: datetime | None) -> bool:
+        """Whether the helper holds a voice match made for the turn that started at `since`."""
+        return verdict_is_current(
+            state.state, state.last_reported, since, dt_util.utcnow(), self._match_lifetime()
+        )
+
+    def _match_within(self) -> float:
+        advanced = self._entry.options.get("advanced") or {}
+        try:
+            return float(advanced.get("match_within", DEFAULT_MATCH_WITHIN))
+        except (TypeError, ValueError):
+            return DEFAULT_MATCH_WITHIN
+
+    def _match_lifetime(self) -> timedelta:
+        """How long ago a voice match may have been written and still be this turn's."""
+        return timedelta(seconds=self._match_within()) + UTTERANCE_ALLOWANCE
+
+    def _follow_up_window(self) -> timedelta:
+        advanced = self._entry.options.get("advanced") or {}
+        try:
+            seconds = float(advanced.get("follow_up_window", FOLLOW_UP_WINDOW.total_seconds()))
+        except (TypeError, ValueError):
+            return FOLLOW_UP_WINDOW
+        return timedelta(seconds=max(seconds, 0))
 
     async def _who_is_speaking(self, user_input: Input, settings: Settings) -> tuple[Role, bool]:
         """Return the role and whether a voice match decided it."""
@@ -394,10 +424,16 @@ class PersonaRouter(conversation.ConversationEntity):
     ) -> tuple[Role, bool]:
         """The role for a request without a user, by the satellite's voice match.
 
-        A follow-up in the same conversation keeps its person unless a new voice match
-        says otherwise (speaker.follow_up_role), so it never depends on the satellite's
-        timing. Every turn waits for the match until its deadline (_helper_state), so a new wake
-        word's match, an unknown voice's too, still decides.
+        Only a match made for this turn counts (speaker.verdict_is_current): one written
+        after the satellite started listening or reported its wake word, and not long ago.
+        The helper keeps the last match until something writes over it, so without that an
+        earlier person's match would be taken for whoever speaks next. A turn without a
+        match of its own is refused as not told apart.
+
+        The answer to a question the assistant asked keeps its person unless a new voice
+        match says otherwise (speaker.follow_up_role): a satellite listens for it without
+        a wake word and often makes no match. Every other turn waits for its match until
+        the deadline (_await_match), so an unknown voice's match still decides.
         """
         now = dt_util.utcnow()
         conversation_id = user_input.conversation_id
@@ -410,19 +446,43 @@ class PersonaRouter(conversation.ConversationEntity):
         remembered = self._spoken_by.get(conversation_id or "")
         if remembered is not None and remembered.device_id != device_id:
             remembered = None
-        woke_since = self._woke_since(device_id, remembered)
-        state = await self._helper_state(device_id, advanced)
+        helper = f"input_text.voice_speaker_{device_id or ''}"
+        if self.hass.states.get(helper) is None:
+            return resolve_speaker(None, None, user_map, no_helper_role)
+        woke = self._wake_reported(device_id)
+        woke_since = True if remembered is not None and woke and woke > remembered.at else None
+        window = self._follow_up_window()
+        # This turn started when the satellite began to listen, or reported its wake word.
+        started = [
+            when
+            for when in (listening_since(self.hass, device_id, user_input.satellite_id), woke)
+            if when is not None
+        ]
+        since = max(started) if started else None
+        # An answer to the assistant's question brings no match: it is not waited for.
+        answering = (
+            follow_up_role(remembered, device_id, None, None, now, woke_since, window)
+            is not None
+        )
+        state = await self._await_match(helper, self._match_within(), since, not answering)
         if state is None:
             return resolve_speaker(None, None, user_map, no_helper_role)
+        now = dt_util.utcnow()
+        current = self._is_current(state, since)
         kept = follow_up_role(
-            remembered, device_id, state.state, state.last_changed, now, woke_since
+            remembered, device_id, state.state, state.last_changed, now, woke_since, window
         )
         if kept is not None and remembered is not None:
             role, matched, decided_by = kept, True, remembered.decided_by
-        else:
+        elif current:
             role, matched = resolve_speaker(state.state, None, user_map, no_helper_role)
             decided_by = state.last_changed
-            self._note_match(device_id, is_verdict(state.state))
+            self._note_match(device_id, True)
+        else:
+            # Pending, no role at all, or a match from an earlier turn: nobody was told
+            # apart, so nobody is taken for a person.
+            role, matched, decided_by = "stranger", False, None
+            self._note_match(device_id, False)
         if conversation_id and device_id:
             if role in ("owner", "wife"):
                 self._spoken_by[conversation_id] = Remembered(role, device_id, decided_by, now)
@@ -441,20 +501,19 @@ class PersonaRouter(conversation.ConversationEntity):
             self._no_match.add(device_id)
             _LOGGER.warning(
                 "No voice match arrived from the satellite on device %s, so its requests "
-                "are refused. Check that its speaker recognition sensors are available",
+                "are refused. Check that its speaker recognition sensors are available "
+                "and that the automation that copies them into its helper runs",
                 device_id,
             )
 
-    def _woke_since(
-        self, device_id: str | None, remembered: Remembered | None
-    ) -> bool | None:
-        """True when the satellite reported a wake word since the remembered turn, else None.
+    def _wake_reported(self, device_id: str | None) -> datetime | None:
+        """When the satellite last reported a wake word, or None when it does not.
 
         A report proves a new turn (wake word, Wake button, a listen after an announcement).
         No report proves nothing: Home Assistant drops an update with an unchanged value,
         so a second wake word with the same phrase never shows.
         """
-        if remembered is None or not device_id:
+        if not device_id:
             return None
         registry = er.async_get(self.hass)
         for entity in er.async_entries_for_device(registry, device_id):
@@ -468,8 +527,18 @@ class PersonaRouter(conversation.ConversationEntity):
             state = self.hass.states.get(entity.entity_id)
             if state is None or state.state in ("unavailable", "unknown"):
                 return None
-            return True if state.last_reported > remembered.at else None
+            return state.last_reported
         return None
+
+    def _note_reply(self, user_input: Input, result: Result) -> None:
+        """Keep whether the reply to a voice turn asked a question, so that only then the
+        next turn without a voice match is that person's answer (speaker.follow_up_role)."""
+        key = user_input.conversation_id or ""
+        seen = self._spoken_by.get(key)
+        if seen is not None and seen.device_id == user_input.device_id:
+            self._spoken_by[key] = dataclasses.replace(
+                seen, asked=bool(result.continue_conversation)
+            )
 
     async def _is_system_user(self, user_id: str) -> bool:
         """True for a user Home Assistant created for itself, which no one logs in as."""
@@ -1169,6 +1238,7 @@ class PersonaRouter(conversation.ConversationEntity):
         )
         try:
             result = await self._async_answer(user_input)
+            self._note_reply(user_input, result)
         finally:
             # The turn is over: nothing may act as this person under its context later.
             forget_asker(self.hass, user_input.context)

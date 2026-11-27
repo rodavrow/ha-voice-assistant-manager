@@ -63,9 +63,12 @@ def resolve_speaker(
     return fallback, False
 
 
-# A turn within this long of the conversation's previous turn, on the same satellite, counts
-# as a follow-up. Each follow-up that keeps the person starts it again.
+# How long after a turn whose reply asked a question the answer may come, on the same
+# satellite, to count as that person's. A setting; this is its default.
 FOLLOW_UP_WINDOW = timedelta(seconds=60)
+# A request may go on this long after its voice match was written: the match lands a few
+# seconds after the wake word, and Home Assistant ends a spoken request after 15 s.
+UTTERANCE_ALLOWANCE = timedelta(seconds=30)
 # How long a conversation's person is remembered at most: Home Assistant's own conversation
 # lifetime.
 CONVERSATION_LIFETIME = timedelta(minutes=5)
@@ -86,6 +89,8 @@ class Remembered:
     device_id: str
     decided_by: datetime | None  # when the helper got the voice match that decided it
     at: datetime  # when that person's last turn was resolved
+    # Whether the reply to that turn asked a question, so an answer is expected.
+    asked: bool = False
 
 
 def follow_up_role(
@@ -95,24 +100,28 @@ def follow_up_role(
     helper_changed: datetime | None,
     now: datetime,
     woke_since: bool | None,
+    window: timedelta = FOLLOW_UP_WINDOW,
 ) -> Role | None:
     """The person a follow-up keeps, or None when this turn needs its own voice match.
 
-    A follow-up carries no wake word, and satellites often make no voice match for it. So
-    the person of the conversation's previous turn is kept, on the same satellite, unless
-    a voice match arrived since then: another person switches, an unknown voice refuses.
+    A follow-up is the answer to a question the assistant asked: the satellite listens
+    again without a wake word, and satellites often make no voice match for it. So the
+    person who was asked is kept, on the same satellite, unless a voice match arrived
+    since then: another person switches, an unknown voice refuses. After a reply that
+    asked nothing no answer is expected, so the next turn needs its own match: otherwise
+    anyone who spoke next would be taken for that person.
 
     woke_since  True when the satellite reported a new wake word since the previous turn:
                 then this is a new turn. Anything else proves nothing, because Home
                 Assistant drops a report with an unchanged value, so a second wake word
-                with the same phrase never shows. Then a turn within FOLLOW_UP_WINDOW of the
-                previous one counts as a follow-up.
+                with the same phrase never shows.
+    window      how long after the previous turn the answer may come; zero keeps nobody.
     """
     if remembered is None or device_id != remembered.device_id:
         return None
-    if woke_since is True:
+    if not remembered.asked or woke_since is True:
         return None
-    if now - remembered.at > FOLLOW_UP_WINDOW:
+    if now - remembered.at > window or window <= timedelta(0):
         return None
     new_match = (
         is_verdict(helper_state)
@@ -120,3 +129,28 @@ def follow_up_role(
         and (remembered.decided_by is None or helper_changed > remembered.decided_by)
     )
     return None if new_match else remembered.role
+
+
+def verdict_is_current(
+    helper_state: str | None,
+    reported: datetime,
+    since: datetime | None,
+    now: datetime,
+    max_age: timedelta,
+) -> bool:
+    """Whether the helper holds a voice match that was made for the turn running now.
+
+    The helper keeps a match until something writes over it, so its value alone says who
+    spoke last, not who speaks now.
+
+    reported  when the helper's value was last written
+    since     when this turn started, as far as that is known (the satellite started
+              listening, or reported its wake word); a match written before it is an
+              earlier turn's
+    max_age   a match written longer ago than this is never this turn's
+    """
+    if not is_verdict(helper_state):
+        return False
+    if since is not None and reported < since:
+        return False
+    return now - reported <= max_age

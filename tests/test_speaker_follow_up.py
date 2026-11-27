@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """A follow-up in a voice conversation keeps its speaker, whatever the satellite's timing."""
 
+import dataclasses
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -55,6 +56,18 @@ async def speaker(hass, entry, turn) -> str:
     return role
 
 
+def asked_a_question(hass, entry, conversation_id: str = CONVERSATION) -> None:
+    """The reply to the last turn asked a question, so the person's answer is expected.
+
+    Only then is a turn without a voice match of its own taken for that person (decided
+    2026-11-27, S1 of the code review); before, any turn within a minute was.
+    """
+    entity = hass.data[conversation.DATA_COMPONENT].get_entity(router_entity_id(hass, entry))
+    entity._spoken_by[conversation_id] = dataclasses.replace(
+        entity._spoken_by[conversation_id], asked=True
+    )
+
+
 @pytest.fixture
 async def router(hass):
     return await add_router(hass)
@@ -64,6 +77,7 @@ async def test_a_follow_up_without_a_new_match_keeps_the_speaker(hass, router):
     kitchen = add_satellite(hass)
     match(hass, kitchen, "owner")
     assert await speaker(hass, router, voice_turn(kitchen)) == "owner"
+    asked_a_question(hass, router)
 
     match(hass, kitchen, "pending")  # the listen came too late for the 2-second rule
 
@@ -144,6 +158,7 @@ async def test_each_follow_up_extends_the_window(hass, router, freezer):
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
     for _ in range(3):
+        asked_a_question(hass, router)
         freezer.tick(FOLLOW_UP_WINDOW - timedelta(seconds=5))
         match(hass, kitchen, "pending")
         assert await speaker(hass, router, voice_turn(kitchen)) == "owner"
@@ -170,6 +185,7 @@ async def test_the_follow_up_is_answered_with_the_speakers_persona(hass, router)
     ):
         match(hass, kitchen, "owner")
         await entity.async_process(voice_turn(kitchen, text="hello"))
+        asked_a_question(hass, router)
         match(hass, kitchen, "pending")
         await entity.async_process(voice_turn(kitchen, text="and tomorrow?"))
 
@@ -233,6 +249,7 @@ async def test_a_follow_up_with_the_wake_word_unchanged_keeps_the_person(hass, r
     woke(hass, sensor)
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
+    asked_a_question(hass, router)
 
     match(hass, kitchen, "pending")
 
@@ -331,6 +348,7 @@ async def test_a_short_follow_up_waits_only_for_what_is_left_of_the_deadline(has
     kitchen = add_satellite(hass)
     match(hass, kitchen, "owner")
     await speaker(hass, router, voice_turn(kitchen))
+    asked_a_question(hass, router)
     match_since(hass, kitchen, "pending", 5.5)  # the follow-up began 5.5 s ago
 
     started = time.monotonic()

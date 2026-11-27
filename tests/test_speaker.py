@@ -118,7 +118,9 @@ def test_regression_security_helper_still_decides_a_request_without_a_user():
 # A follow-up in the same voice conversation keeps its speaker unless a new match says else.
 
 T0 = datetime(2026, 11, 24, 12, 0, tzinfo=UTC)
-ALEX_TURN = Remembered(role="owner", device_id="kitchen", decided_by=T0, at=T0)
+# Alex's turn, whose reply asked a question: only then is the next turn without a voice
+# match taken for the answer (decided 2026-11-27, S1 of the code review).
+ALEX_TURN = Remembered(role="owner", device_id="kitchen", decided_by=T0, at=T0, asked=True)
 
 
 def later(seconds: float) -> datetime:

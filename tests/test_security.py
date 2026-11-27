@@ -184,7 +184,7 @@ async def test_regression_security_request_with_a_user_never_waits_for_a_pending
 
     with (
         agents.patched(),
-        patch.object(PersonaRouter, "_helper_state", autospec=True) as helper_state,
+        patch.object(PersonaRouter, "_await_match", autospec=True) as helper_state,
     ):
         await ask(hass, entry, "Hello", device_id=device_id, user_id=ALEX_USER)
 
