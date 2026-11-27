@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 rodavrow
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Development only: the checks CI runs next to the tests (see pyproject.toml).
+#   ruff check .
+#   mypy
+#   pip-audit -r requirements-test.txt
+-r requirements-test.txt
+ruff==0.17.6
+mypy==2.4.1
+pip-audit==2.10.1
