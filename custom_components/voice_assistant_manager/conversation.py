@@ -524,7 +524,10 @@ class PersonaRouter(conversation.ConversationEntity):
             follow_up_role(remembered, device_id, None, None, now, woke_since, window)
             is not None
         )
-        state = await self._await_match(helper, self._match_within(), since, not answering)
+        # Not even while the helper says pending: the automation writes that whenever the
+        # satellite starts to listen, and for an answer nothing follows it.
+        within = 0.0 if answering else self._match_within()
+        state = await self._await_match(helper, within, since, not answering)
         if state is None:
             return resolve_speaker(None, None, user_map, no_helper_role)
         now = dt_util.utcnow()

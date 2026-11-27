@@ -201,6 +201,11 @@ From a review of the whole integration on 2026-11-27. None of these was found in
 
 ### Fixed
 
+- **The answer to an assistant's question is passed on at once.** A satellite listening
+  for the answer makes no voice match, but the router waited for one all the same, for
+  what was left of the "match arrives within" time (6 seconds by default) since the
+  satellite started to listen. A short answer such as "yes" was held up by a second or
+  more before the main agent was asked.
 - **The chat show's speaker list only offers speakers a chat can play on.** It listed
   every media player that accepts a play command, among them a TV's own integration
   (apps and channels only), Music Assistant's dashboard displays, players that were away
