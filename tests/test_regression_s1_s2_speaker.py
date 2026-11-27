@@ -355,3 +355,24 @@ async def test_regression_s1_a_pending_left_by_an_earlier_turn_does_not_end_the_
     await task
 
     assert role == "owner"
+
+
+async def test_regression_the_answer_to_a_question_does_not_wait_for_a_match(hass):
+    """Seen in the house: a satellite listening for the answer to a question makes no voice
+    match, but the tracking automation had written "pending" when it started to listen. The
+    router then waited out the rest of the six seconds a match may take before it asked
+    the main agent, on every short answer."""
+    router = await add_router(hass, options_with(advanced={"match_within": 6}))
+    kitchen = add_satellite(hass)
+    entity = hass.data[conversation.DATA_COMPONENT].get_entity(router_entity_id(hass, router))
+    match(hass, kitchen, "owner")
+    turn = voice_turn(kitchen)
+    await speaker(hass, router, turn)
+    entity._note_reply(turn, SimpleNamespace(continue_conversation=True))
+    match(hass, kitchen, "pending")
+
+    began = time.monotonic()
+    who = await speaker(hass, router, voice_turn(kitchen))
+
+    assert who == "owner"
+    assert time.monotonic() - began < 1
