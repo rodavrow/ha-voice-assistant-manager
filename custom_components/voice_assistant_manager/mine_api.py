@@ -66,6 +66,14 @@ _LOGGER = logging.getLogger(__name__)
 PREFIX = "voice_assistant_manager/me"
 MAX_PERSONA_LENGTH = 2000
 MAX_TITLE_LENGTH = 200
+# Hard limits of what a command takes at all. The page never comes near them, and a
+# friendlier answer exists for the fields a person can get wrong (the title, the persona).
+MAX_MINUTES = 525600  # a year
+MAX_SCRIPT_MESSAGE = 500
+_ID = vol.All(str, vol.Length(max=64))
+_WORD = vol.All(str, vol.Length(max=32))
+_NAME = vol.All(str, vol.Length(max=255))
+_LONG_TEXT = vol.All(str, vol.Length(max=10 * MAX_PERSONA_LENGTH))
 TIME_OF_DAY = re.compile(r"([01][0-9]|2[0-3]):[0-5][0-9]")
 # The days the page offers (DAYS in frontend/mine.js), or a date as MM-DD.
 DAYS = (
@@ -180,8 +188,10 @@ async def _own_router(
 
 
 async def _failed(hass: HomeAssistant, mine: MyRouter, err: Exception) -> dict[str, Any]:
+    # What Home Assistant says can name entities, a script's insides or the other person's
+    # calendar, so it stays in the log.
     _LOGGER.error("My assistant action failed for assistant %s: %s", mine["entry_id"], err)
-    return _refused(await _error_text(hass, "mine_failed", reason=str(err)))
+    return _refused(await _error_text(hass, "mine_failed"))
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{PREFIX}/get"})
@@ -204,8 +214,8 @@ async def ws_get(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{PREFIX}/save_persona",
-        vol.Required("entry_id"): str,
-        vol.Required("persona"): str,
+        vol.Required("entry_id"): _ID,
+        vol.Required("persona"): _LONG_TEXT,
     }
 )
 @websocket_api.async_response
@@ -249,8 +259,8 @@ async def ws_save_persona(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{PREFIX}/save_memory",
-        vol.Required("entry_id"): str,
-        vol.Required("key"): str,
+        vol.Required("entry_id"): _ID,
+        vol.Required("key"): _NAME,
         vol.Required("shown"): vol.All(
             [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
         ),
@@ -289,7 +299,7 @@ async def ws_save_memory(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{PREFIX}/reminders", vol.Required("entry_id"): str}
+    {vol.Required("type"): f"{PREFIX}/reminders", vol.Required("entry_id"): _ID}
 )
 @websocket_api.async_response
 async def ws_reminders(
@@ -330,13 +340,13 @@ async def _reminder_error(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{PREFIX}/add_reminder",
-        vol.Required("entry_id"): str,
-        vol.Required("scope"): str,
-        vol.Required("title"): str,
+        vol.Required("entry_id"): _ID,
+        vol.Required("scope"): _WORD,
+        vol.Required("title"): vol.All(str, vol.Length(max=10 * MAX_TITLE_LENGTH)),
         vol.Required("announce"): bool,
-        vol.Optional("in_minutes"): int,
-        vol.Optional("at_time"): str,
-        vol.Optional("on_day"): str,
+        vol.Optional("in_minutes"): vol.All(int, vol.Range(max=MAX_MINUTES)),
+        vol.Optional("at_time"): _WORD,
+        vol.Optional("on_day"): _WORD,
     }
 )
 @websocket_api.async_response
@@ -366,16 +376,24 @@ async def ws_add_reminder(
     except (HomeAssistantError, vol.Invalid) as err:
         connection.send_result(msg["id"], await _failed(hass, mine, err))
         return
-    connection.send_result(msg["id"], response)
+    # Only what the page shows: a script may answer with more than a person should see.
+    connection.send_result(
+        msg["id"],
+        {
+            key: str(response[key])[:MAX_SCRIPT_MESSAGE]
+            for key in ("status", "message")
+            if response.get(key) is not None
+        },
+    )
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{PREFIX}/delete_reminder",
-        vol.Required("entry_id"): str,
-        vol.Required("calendar"): str,
-        vol.Required("uid"): str,
-        vol.Optional("recurrence_id"): vol.Any(str, None),
+        vol.Required("entry_id"): _ID,
+        vol.Required("calendar"): _NAME,
+        vol.Required("uid"): _NAME,
+        vol.Optional("recurrence_id"): vol.Any(_NAME, None),
     }
 )
 @websocket_api.async_response
@@ -478,7 +496,7 @@ async def ws_favorites_add(
     {
         vol.Required("type"): f"{PREFIX}/favorites/update",
         vol.Required("list"): vol.In(LIST_CHOICES),
-        vol.Required("favorite_id"): str,
+        vol.Required("favorite_id"): _ID,
         vol.Required("data"): dict,
     }
 )
@@ -496,7 +514,7 @@ async def ws_favorites_update(
     {
         vol.Required("type"): f"{PREFIX}/favorites/remove",
         vol.Required("list"): vol.In(LIST_CHOICES),
-        vol.Required("favorite_id"): str,
+        vol.Required("favorite_id"): _ID,
     }
 )
 @websocket_api.async_response

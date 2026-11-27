@@ -219,7 +219,7 @@
     "error.memory_agent_invalid": "The agent that decides what to save may not be the main agent, another assistant or an agent that can control the home, and it must exist. Pick an agent without tools.",
     "error.memory_agent_required": "Choose an agent that decides what to save, or turn memory off.",
     "error.mine_cannot_delete": "This reminder cannot be deleted. It may be gone already, or its calendar does not allow deleting.",
-    "error.mine_failed": "Home Assistant refused this: {reason}",
+    "error.mine_failed": "Home Assistant could not do this. The reason is in its log.",
     "error.mine_favorites_conflict": "Your favorites are not shared until every assistant agrees who you are; ask an administrator.",
     "error.mine_favorites_not_linked": "Favorites are kept for the people of an assistant. Ask an administrator to choose your Home Assistant user under People on the Voice Manager page.",
     "error.mine_favorites_off": "Favorites are off for your assistants. Ask an administrator to switch them on.",
