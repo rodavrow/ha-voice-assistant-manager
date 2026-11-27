@@ -19,6 +19,8 @@ _GENERATED_ID = re.compile(r"\b(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{32})\b")
 # A value that is nothing but a short random id (a remembered fact's) or today's date.
 _SHORT_ID = re.compile(r"[0-9a-f]{8}")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+# The release a page file is asked for, which changes with every release.
+_VERSION = re.compile(r"(?<=\?v=)[0-9][0-9a-z.]*")
 
 
 def stable(value: Any, names: dict[str, str] | None = None) -> Any:
@@ -32,7 +34,7 @@ def stable(value: Any, names: dict[str, str] | None = None) -> Any:
             return "<date>"
         for real, name in names.items():
             found = found.replace(real, f"<{name}>")
-        return _GENERATED_ID.sub("<id>", found)
+        return _GENERATED_ID.sub("<id>", _VERSION.sub("<version>", found))
 
     if isinstance(value, str):
         return text(value)

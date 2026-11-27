@@ -271,6 +271,15 @@ class MemoryStore:
         """Copies of the items of one list, in saved order."""
         return [MemoryItem(**item) for item in self._lists.get(key, [])]
 
+    def has_room(self, key: str) -> bool:
+        """Whether async_add can still save a fact a person asked to remember.
+
+        It cannot when the list is at MAX_MAX_ITEMS and holds only told facts, which are
+        never dropped for a new one.
+        """
+        items = self._lists.get(key, [])
+        return len(items) < MAX_MAX_ITEMS or any(item["source"] == "judged" for item in items)
+
     def _new_item(
         self,
         key: str,
@@ -427,6 +436,14 @@ async def async_get_memory(hass: HomeAssistant) -> MemoryStore:
 REMEMBER_RULE = (
     "If the person asks you to remember or forget something, confirm briefly. "
     "It is saved for you after this reply, so do not call any tool for it."
+)
+# Instead of REMEMBER_RULE while the person's list has no room (MemoryStore.has_room): the
+# fact is saved after the reply, so a "noted" could not be taken back.
+MEMORY_FULL_RULE = (
+    "Your memory about this person is full. If the person asks you to remember something, "
+    "do not confirm it: say that it cannot be saved because your memory is full, and that "
+    "facts can be removed on the Voice Manager page. If the person asks you to forget "
+    "something, confirm briefly. Do not call any tool for either."
 )
 # Added to REMEMBER_RULE for a router that can set reminders.
 REMEMBER_RULE_REMINDERS = (

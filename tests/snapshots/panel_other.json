@@ -31,7 +31,7 @@
       "dashboard": "vam-chat-stage",
       "enabled": true,
       "problem": "no_dashboards",
-      "resource": "/voice_assistant_manager/stage.js?v=0.5.5b2",
+      "resource": "/voice_assistant_manager/stage.js?v=<version>",
       "view": "stage"
     }
   },

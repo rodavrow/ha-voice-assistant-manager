@@ -73,6 +73,7 @@ from .favorites_play import (
 )
 from .listening import listening_since
 from .memory import (
+    MEMORY_FULL_RULE,
     REMEMBER_RULE,
     REMEMBER_RULE_REMINDERS,
     Exchange,
@@ -632,6 +633,11 @@ class PersonaRouter(conversation.ConversationEntity):
         """Whether the memory agent may be asked what to save. Remembered facts stay in use."""
         return self._safe_agent("memory", settings.agent) is not None
 
+    def _memory_has_room(self, who: Person) -> bool:
+        """Whether a fact this person asks to remember can still be saved by this assistant."""
+        memory = get_loaded_memory(self.hass)
+        return memory is None or memory.has_room(entry_key(self._entry.entry_id, who))
+
     def _person_name(self, person: Person) -> str:
         section = self._entry.options.get(SETTINGS_KEY[person]) or {}
         return str(section.get("name") or "").strip()
@@ -869,7 +875,10 @@ class PersonaRouter(conversation.ConversationEntity):
                 # The rule promises a save, so it is only given while the memory agent is safe.
                 if self._memory_saves(memory_settings):
                     timed = REMEMBER_RULE_REMINDERS if self._reminder_settings() else ""
-                    rule = "\n".join(part for part in (rule, REMEMBER_RULE, timed) if part)
+                    remember_rule = (
+                        REMEMBER_RULE if self._memory_has_room(who) else MEMORY_FULL_RULE
+                    )
+                    rule = "\n".join(part for part in (rule, remember_rule, timed) if part)
             return {
                 "who": who,
                 "persona_for_this_message": str(person.get("persona") or "").strip(),
