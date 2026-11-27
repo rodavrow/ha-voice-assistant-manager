@@ -142,13 +142,13 @@ _LOGGER = logging.getLogger(__name__)
 type Input = conversation.ConversationInput
 type Result = conversation.ConversationResult
 type ChatLog = conversation.ChatLog
-# What a lookup of the speaker gives back (see the module docstring). A script writes it
-# too, so its values are whatever the script answered.
 
 
 class Lookup(TypedDict, total=False):
-    """Who is speaking and how to answer them. `who` is "owner", "wife", "stranger",
-    "near_miss" or "unsure"; an older lookup script may leave any field out."""
+    """What a lookup of the speaker gives back (see the module docstring): who is speaking
+    and how to answer them. `who` is "owner", "wife", "stranger", "near_miss" or "unsure".
+    A script writes it too, so a field may be missing or hold whatever the script answered.
+    """
 
     who: str
     persona_for_this_message: str
@@ -182,6 +182,8 @@ def _refusal(
         "fixed_replies": lines,
         "reply_agent": reply_agent,
     }
+
+
 type Settings = Mapping[str, Any]
 # The line the reminder check put in place of this turn's reply, if it did (_honest_reply):
 # a reply that streams in is then spoken as that line.
