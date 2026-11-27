@@ -99,7 +99,7 @@ Asked to tell Sam that the plumber comes on Friday.
 - **Add a fact:** type a new line. It is treated as something the person told the assistant.
 - **Make a fact private:** put `(private)` at the start of its line. Delete the mark to share it again.
 
-There are two limits. A fact may be 200 characters at most, and a list may hold 200 facts at most. A save that breaks one is refused as a whole and nothing is changed: the editor names the line that is too long, or says to remove some facts. An editor also refuses a save with more than 200 lines, or lines far longer than a fact can be, without saving anything.
+There are two limits. A fact may be 200 characters at most, and a list may hold 200 facts at most. A save that breaks one is refused as a whole and nothing is changed: the editor names the line that is too long, or says to remove some facts. An editor also refuses a save with more than 200 lines, or lines far longer than a fact can be, without saving anything. The same limit holds for what is saved by voice: when a list is full, the oldest facts the assistant judged worth keeping make room, and when only facts you asked it to remember are left, a new one is not saved and a warning in the log says the list is full.
 
 The [settings page](../README.md#the-settings-page) shows the same lists under **Memory**, with a button to forget a fact and a label that switches it between shared and private:
 
@@ -109,7 +109,7 @@ Saving returns to the menu, so you can go on to another list. You can edit the l
 
 The "all assistants" lists belong to Person 1 and Person 2, not to a Home Assistant user. On [My assistant](../README.md#my-assistant) a person only sees theirs when that place is the same person in every assistant that uses the shared lists, and that person is them.
 
-Memory is kept in `.storage/voice_assistant_manager.memory` in your Home Assistant configuration. It creates no entities, so nothing shows up on dashboards or in the To-do panel. Removing an assistant deletes that assistant's own lists and leaves the "all assistants" lists alone.
+Memory is kept in `.storage/voice_assistant_manager.memory` in your Home Assistant configuration. It creates no entities, so nothing shows up on dashboards or in the To-do panel. Removing an assistant deletes that assistant's own lists and leaves the "all assistants" lists alone, unless it was the last assistant: then those are deleted too, so nothing personal stays behind.
 
 ## Told or judged
 

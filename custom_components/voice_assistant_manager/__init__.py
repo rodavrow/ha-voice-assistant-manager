@@ -17,6 +17,7 @@ from .calendar_watch import (
     async_stop_watcher,
 )
 from .const import DOMAIN
+from .favorites import async_get_favorites
 from .favorites_llm import async_register_favorites_api
 from .memory import async_get_memory
 from .mine_api import async_register_mine_commands
@@ -99,7 +100,18 @@ async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Forget what this assistant remembered. Lists shared by every assistant stay."""
+    """Forget what this assistant remembered.
+
+    Lists shared by every assistant (remembered facts and favorites) stay while another
+    assistant is left; with the last one they go too, so nothing personal stays behind.
+    """
+    others = [
+        other
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ]
     memory = await async_get_memory(hass)
-    await memory.async_remove_entry(entry.entry_id)
+    await memory.async_remove_entry(entry.entry_id, last=not others)
+    if not others:
+        await (await async_get_favorites(hass)).async_clear()
     await async_remove_watcher_data(hass, entry)

@@ -233,10 +233,17 @@ async def test_removing_an_entry_deletes_its_lists_and_keeps_global_and_other_en
     kitchen.add_to_hass(hass)
     assert await hass.config_entries.async_setup(kitchen.entry_id)
     await hass.async_block_till_done()
+    # A second assistant stays: the lists shared by all go only with the last one.
+    office = MockConfigEntry(
+        domain=DOMAIN,
+        title="Office assistant",
+        data={"name": "Office assistant", "agent": "conversation.home_assistant"},
+    )
+    office.add_to_hass(hass)
     memory = await async_get_memory(hass)
     await memory.async_add(entry_key(kitchen.entry_id, "owner"), "Likes jazz.", "told")
     await memory.async_add(entry_key(kitchen.entry_id, "wife"), "Likes tea.", "told")
-    await memory.async_add(entry_key("office-entry", "owner"), "Likes coffee.", "told")
+    await memory.async_add(entry_key(office.entry_id, "owner"), "Likes coffee.", "told")
     await memory.async_add(GLOBAL_ALEX, "Has a cat called Pixel.", "told")
 
     await hass.config_entries.async_remove(kitchen.entry_id)
@@ -244,7 +251,7 @@ async def test_removing_an_entry_deletes_its_lists_and_keeps_global_and_other_en
 
     assert memory.items(entry_key(kitchen.entry_id, "owner")) == []
     assert memory.items(entry_key(kitchen.entry_id, "wife")) == []
-    assert texts(memory, entry_key("office-entry", "owner")) == ["Likes coffee."]
+    assert texts(memory, entry_key(office.entry_id, "owner")) == ["Likes coffee."]
     assert texts(memory, GLOBAL_ALEX) == ["Has a cat called Pixel."]
 
 

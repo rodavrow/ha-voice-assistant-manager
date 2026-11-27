@@ -125,7 +125,7 @@ A favorite goes to your own list. Say it is for the household or for everyone to
 
 To add something from Music Assistant, choose **Find with Music Assistant**, search for a station, podcast or playlist, and choose **Add** next to the right result. To add a stream, choose **Add a stream address**, give it a name such as "Radio 2" and the address of the stream.
 
-Favorites are kept in `.storage/voice_assistant_manager.favorites` in your Home Assistant configuration. They create no entities.
+Favorites are kept in `.storage/voice_assistant_manager.favorites` in your Home Assistant configuration. They create no entities. Removing the last assistant deletes every list of favorites.
 
 ## Limits
 
