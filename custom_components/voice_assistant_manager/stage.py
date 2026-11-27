@@ -43,7 +43,6 @@ from .avatar import (
     STAGE_DATA,
     LiveTalkingClient,
     LiveTalkingError,
-    device_sessions,
     enabled_avatar,
     normalize_url,
     present_device_sessions,
