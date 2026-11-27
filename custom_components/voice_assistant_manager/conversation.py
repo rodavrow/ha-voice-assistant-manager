@@ -31,7 +31,7 @@ import random
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from homeassistant.components import conversation
 from homeassistant.components.conversation.chat_log import (
@@ -143,7 +143,44 @@ type Result = conversation.ConversationResult
 type ChatLog = conversation.ChatLog
 # What a lookup of the speaker gives back (see the module docstring). A script writes it
 # too, so its values are whatever the script answered.
-type Lookup = dict[str, Any]
+
+
+class Lookup(TypedDict, total=False):
+    """Who is speaking and how to answer them. `who` is "owner", "wife", "stranger",
+    "near_miss" or "unsure"; an older lookup script may leave any field out."""
+
+    who: str
+    persona_for_this_message: str
+    memory: str
+    rule: str
+    reminders: str
+    label: str
+    fixed_replies: list[str] | str
+    reply_agent: str
+
+
+def _known_person(resp: Lookup | None) -> Person | None:
+    """The person the lookup recognised, or None for anyone else."""
+    who = resp.get("who") if resp else None
+    if who == "owner":
+        return "owner"
+    if who == "wife":
+        return "wife"
+    return None
+
+
+def _refusal(
+    who: str, lines: list[str], rule: str = "", persona: str = "", reply_agent: str = ""
+) -> Lookup:
+    """The lookup result for someone who is not answered by the main agent."""
+    return {
+        "who": who,
+        "persona_for_this_message": persona,
+        "rule": rule,
+        "label": "",
+        "fixed_replies": lines,
+        "reply_agent": reply_agent,
+    }
 type Settings = Mapping[str, Any]
 # The line the reminder check put in place of this turn's reply, if it did (_honest_reply):
 # a reply that streams in is then spoken as that line.
@@ -721,11 +758,11 @@ class PersonaRouter(conversation.ConversationEntity):
         The look-up shows a person their own reminders, and takes who that is from here,
         never from the main agent (reminder_actions.note_asker).
         """
-        known = resp is not None and resp.get("who") in ("owner", "wife")
+        known = _known_person(resp)
         label = resp.get("label") if resp is not None and known else None
         user_id = None
-        if resp is not None and known:
-            person = self._entry.options.get(SETTINGS_KEY[resp["who"]]) or {}
+        if resp is not None and known is not None:
+            person = self._entry.options.get(SETTINGS_KEY[known]) or {}
             user_id = person.get("user") or None
         note_asker(self.hass, user_input.context, label, user_id)
 
@@ -832,7 +869,8 @@ class PersonaRouter(conversation.ConversationEntity):
         never waits for this.
         """
         try:
-            if not resp or resp.get("who") not in ("owner", "wife"):
+            known = _known_person(resp)
+            if not resp or known is None:
                 return
             settings = self._memory_settings()
             memory = get_loaded_memory(self.hass)
@@ -844,9 +882,9 @@ class PersonaRouter(conversation.ConversationEntity):
                 return
             exchange = Exchange(
                 entry_id=self._entry.entry_id,
-                person=resp["who"],
+                person=known,
                 name=str(resp.get("label") or ""),
-                other_name=self._person_name(OTHER_PERSON[resp["who"]]),
+                other_name=self._person_name(OTHER_PERSON[known]),
                 user_text=user_input.text,
                 reply_text=emotion.strip_audio_tags(
                     emotion.split_tag(
@@ -915,14 +953,7 @@ class PersonaRouter(conversation.ConversationEntity):
         by_voice = not (user_input.context and user_input.context.user_id)
         if by_voice and not matched and user_input.device_id in self._no_match:
             # Nobody was told apart, so nobody is called unknown: refuse and say why.
-            return {
-                "who": "unsure",
-                "persona_for_this_message": "",
-                "rule": rule,
-                "label": "",
-                "fixed_replies": [UNSURE_LINE],
-                "reply_agent": "",
-            }
+            return _refusal("unsure", [UNSURE_LINE], rule)
 
         strangers = settings.get("strangers") or {}
         persona = str(strangers.get("persona") or "").strip()
@@ -942,15 +973,8 @@ class PersonaRouter(conversation.ConversationEntity):
         reply_agent = ""
         if strangers.get("mode", "ai") == "ai":
             reply_agent = str(strangers.get("reply_agent") or "").strip()
-        return {
-            "who": kind,
-            "persona_for_this_message": persona,
-            "rule": rule,
-            "label": "",
-            # Never empty for an unknown voice, so the real agent stays out of reach.
-            "fixed_replies": lines or [LAST_RESORT_REPLY],
-            "reply_agent": reply_agent,
-        }
+        # Never empty for an unknown voice, so the real agent stays out of reach.
+        return _refusal(kind, lines or [LAST_RESORT_REPLY], rule, persona, reply_agent)
 
     async def _try_built_in(
         self, user_input: Input, log: ChatLog, local: Settings
@@ -1130,14 +1154,7 @@ class PersonaRouter(conversation.ConversationEntity):
         if not script:
             return None
         if user_input.context and user_input.context.user_id:
-            return {
-                "who": "stranger",
-                "persona_for_this_message": "",
-                "rule": "",
-                "label": "",
-                "fixed_replies": [LAST_RESORT_REPLY],
-                "reply_agent": "",
-            }
+            return _refusal("stranger", [LAST_RESORT_REPLY])
         async with asyncio.timeout(SCRIPT_TIMEOUT):
             return await self.hass.services.async_call(
                 "script",
@@ -1183,9 +1200,9 @@ class PersonaRouter(conversation.ConversationEntity):
             return self._chat_turn(user_input, "after the chat, ignored", "")
         if manager.is_fragment(user_input.text):
             return self._chat_turn(user_input, "fragment dropped", "")
-        who = resp.get("who") if resp else None
-        if who in ("owner", "wife"):
-            manager.add_person_line(self._person_name(who) or "Someone", user_input.text)
+        known = _known_person(resp)
+        if known is not None:
+            manager.add_person_line(self._person_name(known) or "Someone", user_input.text)
             return self._chat_turn(user_input, "joined as a recognised person", "")
         manager.add_person_line(GUEST, user_input.text)
         return self._chat_turn(user_input, "joined as a guest", "")
@@ -1310,7 +1327,7 @@ class PersonaRouter(conversation.ConversationEntity):
         advanced = self._entry.options.get("advanced") or {}
         return str(advanced.get("agent_down_line") or "").strip() or DEFAULT_AGENT_DOWN_LINE
 
-    def _main_prompt(self, resp: dict[str, Any], extra: str | None) -> str:
+    def _main_prompt(self, resp: Lookup, extra: str | None) -> str:
         """The extra prompt for the main agent, never empty.
 
         Home Assistant keeps the previous turn's extra prompt when a turn gives none
@@ -1600,7 +1617,8 @@ class PersonaRouter(conversation.ConversationEntity):
         if replies:
             return self._fixed_reply(user_input, replies)
         who = resp.get("who")
-        if "who" in resp and who not in ("owner", "wife"):
+        person = _known_person(resp)
+        if "who" in resp and person is None:
             # Only an older "who is speaking" script gets here: the settings always give
             # someone who is no person a line to speak. Its persona asking the main agent
             # to refuse is no guarantee, so the main agent, and its tools, is not asked.
@@ -1613,8 +1631,8 @@ class PersonaRouter(conversation.ConversationEntity):
         emptied = self._start_afresh_for_another_speaker(user_input, str(who))
         log = self._turn_log(user_input) or current_chat_log.get()
         text = self._labelled_text(user_input, resp.get("label"))
-        if who in ("owner", "wife"):
-            played = await self._favorite_reply(user_input, who, log, text)
+        if person is not None:
+            played = await self._favorite_reply(user_input, person, log, text)
             if played is not None and played is not NO_PLAYER:
                 return played
             if played is None and not self._answers_a_question(user_input):
@@ -1630,7 +1648,6 @@ class PersonaRouter(conversation.ConversationEntity):
         # Only this request's own record is forgotten: a router whose main agent is this
         # one may have remembered its asker under the same context.
         remembered: str | None = None
-        person: Person | None = who if who in ("owner", "wife") else None
         if context_id and person is not None:
             # The favorites tools read who is asking from the request's context.
             remembered = context_id
