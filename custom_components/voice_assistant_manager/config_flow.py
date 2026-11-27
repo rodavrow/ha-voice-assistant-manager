@@ -2,15 +2,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Config flow and settings screen for Voice Assistant Manager."""
 
-import voluptuous as vol
+from collections.abc import Iterable, Mapping
+from typing import Any
 
+import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
+    ConfigFlowResult,
     ConfigSubentryFlow,
     OptionsFlow,
 )
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
@@ -39,14 +42,19 @@ from .memory import (
     router_agent_ids,
 )
 
-MEMORY_DEFAULTS = {
+# Settings as the forms show and save them: section name to its fields. The values are
+# whatever the form's selectors produce, hence Any.
+type Settings = Mapping[str, Any]
+type Choices = Iterable[tuple[str, str]]
+
+MEMORY_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "auto_save": True,
     "max_items": 50,
     "use_global": True,
     "shared": True,
 }
-REMINDER_DEFAULTS = {
+REMINDER_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "cancel": True,
     "owner_calendars": [],
@@ -54,7 +62,7 @@ REMINDER_DEFAULTS = {
     "household_calendars": [],
 }
 FAVORITES_DEFAULTS = {"enabled": False}
-CALENDAR_DEFAULTS = {
+CALENDAR_DEFAULTS: dict[str, Any] = {
     "all_day_time": DEFAULT_ALL_DAY_TIME,
     "catch_up_hours": DEFAULT_CATCH_UP_HOURS,
 }
@@ -70,21 +78,21 @@ DEFAULT_NEAR_PERSONA = (
 DEFAULT_NEAR_LINES = "You sound familiar, but I am not sure it is you. Say that again?"
 
 
-def _text(multiline=False):
+def _text(multiline: bool = False) -> selector.TextSelector:
     return selector.TextSelector(selector.TextSelectorConfig(multiline=multiline))
 
 
-def _agent():
+def _agent() -> selector.EntitySelector:
     return selector.EntitySelector(selector.EntitySelectorConfig(domain="conversation"))
 
 
-def _calendars():
+def _calendars() -> selector.EntitySelector:
     return selector.EntitySelector(
         selector.EntitySelectorConfig(domain="calendar", multiple=True)
     )
 
 
-def _choice(options):
+def _choice(options: Choices) -> selector.SelectSelector:
     return selector.SelectSelector(
         selector.SelectSelectorConfig(
             options=[selector.SelectOptionDict(value=v, label=l) for v, l in options],
@@ -93,14 +101,21 @@ def _choice(options):
     )
 
 
-def _number(low, high, step, unit=None):
-    config = {"min": low, "max": high, "step": step, "mode": selector.NumberSelectorMode.BOX}
+def _number(
+    low: float, high: float, step: float, unit: str | None = None
+) -> selector.NumberSelector:
+    config: selector.NumberSelectorConfig = {
+        "min": low,
+        "max": high,
+        "step": step,
+        "mode": selector.NumberSelectorMode.BOX,
+    }
     if unit:
         config["unit_of_measurement"] = unit
-    return selector.NumberSelector(selector.NumberSelectorConfig(**config))
+    return selector.NumberSelector(config)
 
 
-def _opt(key, current, allowed=None):
+def _opt(key: str, current: Settings, allowed: set[str] | None = None) -> vol.Optional:
     """Optional field that shows the saved value and may be cleared.
 
     With `allowed`, a saved value that is no longer one of the choices (a deleted
@@ -112,19 +127,19 @@ def _opt(key, current, allowed=None):
     return vol.Optional(key, description={"suggested_value": value})
 
 
-async def login_users(hass):
+async def login_users(hass: HomeAssistant) -> list[tuple[str, str]]:
     """(id, name) of the active people who can log in, without Home Assistant's own accounts."""
     users = await hass.auth.async_get_users()
     return [(u.id, u.name or u.id) for u in users if u.is_active and not u.system_generated]
 
 
-def same_user_for_both(settings) -> bool:
+def same_user_for_both(settings: Settings) -> bool:
     owner_user = (settings.get("owner") or {}).get("user")
     partner_user = (settings.get("partner") or {}).get("user")
     return bool(owner_user) and owner_user == partner_user
 
 
-def _required(key, current):
+def _required(key: str, current: Settings) -> vol.Required:
     """Required field that shows the saved value, if there is one."""
     value = current.get(key)
     if not value:
@@ -132,17 +147,17 @@ def _required(key, current):
     return vol.Required(key, description={"suggested_value": value})
 
 
-def _fixed(key, current, fallback):
+def _fixed(key: str, current: Settings, fallback: object) -> vol.Optional:
     """Field that always has a value."""
     value = current.get(key)
     return vol.Optional(key, default=fallback if value is None else value)
 
 
-def _script_texts(hass, script_entity_id):
+def _script_texts(hass: HomeAssistant, script_entity_id: str | None) -> dict[str, Any]:
     """Collect the texts of an older 'who is speaking' script, if it has the expected shape."""
-    found = {}
+    found: dict[str, Any] = {}
 
-    def walk(node):
+    def walk(node: object) -> None:
         if isinstance(node, list):
             for item in node:
                 walk(item)
@@ -173,19 +188,20 @@ def _script_texts(hass, script_entity_id):
 RETIRED_SETTINGS = {"advanced": ("wait_seconds",)}  # replaced by match_within in 0.5.2
 
 
-def without_retired(settings):
+def without_retired[T](settings: T) -> T:
     """The settings without RETIRED_SETTINGS. Anything that is not a mapping is left as is."""
     if not isinstance(settings, dict):
         return settings
-    cleaned = dict(settings)
-    for section, keys in RETIRED_SETTINGS.items():
-        part = cleaned.get(section)
+    cleaned: dict[str, Any] = dict(settings)
+    for section_name, keys in RETIRED_SETTINGS.items():
+        part = cleaned.get(section_name)
         if isinstance(part, dict):
-            cleaned[section] = {k: v for k, v in part.items() if k not in keys}
-    return cleaned
+            cleaned[section_name] = {k: v for k, v in part.items() if k not in keys}
+    # T is a dict here; mypy cannot follow the isinstance guard back to T.
+    return cleaned  # type: ignore[return-value]
 
 
-def current_settings(hass, entry):
+def current_settings(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Saved settings, or a first proposal taken from the older script."""
     if entry.options:
         return without_retired(dict(entry.options))
@@ -223,7 +239,7 @@ def current_settings(hass, entry):
     }
 
 
-def settings_schema(current, users):
+def settings_schema(current: Settings, users: Choices) -> vol.Schema:
     """Build the settings form. `users` is the (id, name) list from login_users."""
     user_ids = {user_id for user_id, _ in users}
     agents = current.get("agents") or {}
@@ -392,7 +408,7 @@ def settings_schema(current, users):
     )
 
 
-def memory_settings_error(settings, other_agents) -> str | None:
+def memory_settings_error(settings: Settings, other_agents: set[str]) -> str | None:
     """Form error key for the Memory section, or None when it is fine.
 
     `other_agents` are the entity ids the memory agent may not be: the main agent
@@ -410,7 +426,7 @@ def memory_settings_error(settings, other_agents) -> str | None:
     return None
 
 
-def person_names(settings) -> dict[str, str]:
+def person_names(settings: Settings) -> dict[str, str]:
     """What to call who a calendar is for: the two names, and everyone."""
     names = {"household": "everyone"}
     for key, fallback in (("owner", "Person 1"), ("partner", "Person 2")):
@@ -418,9 +434,9 @@ def person_names(settings) -> dict[str, str]:
     return names
 
 
-def calendar_row_schema(row, names, editing: bool):
+def calendar_row_schema(row: Settings, names: Mapping[str, str], editing: bool) -> vol.Schema:
     """The form for one calendar. `row` holds the values to show."""
-    fields = {
+    fields: dict[vol.Marker, object] = {
         _required("calendar", row): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="calendar")
         ),
@@ -444,9 +460,9 @@ def calendar_row_schema(row, names, editing: bool):
     return vol.Schema(fields)
 
 
-def clean_calendar_row(values) -> dict:
+def clean_calendar_row(values: Settings) -> dict[str, Any]:
     """One calendar as it is saved: texts trimmed, empty ones left out."""
-    row = {
+    row: dict[str, Any] = {
         "calendar": values["calendar"],
         "for": values.get("for") or "household",
         "all_day_day": values.get("all_day_day") or DAY_SAME,
@@ -462,7 +478,7 @@ def clean_calendar_row(values) -> dict:
     return row
 
 
-def calendar_row_errors(values, other_calendars) -> dict[str, str]:
+def calendar_row_errors(values: Settings, other_calendars: set[str]) -> dict[str, str]:
     """Form errors for one calendar. `other_calendars` are the router's other rows."""
     errors = {}
     if values.get("calendar") in other_calendars:
@@ -473,16 +489,17 @@ def calendar_row_errors(values, other_calendars) -> dict[str, str]:
     return errors
 
 
-def other_agents(hass, entry, settings) -> set[str]:
+def other_agents(hass: HomeAssistant, entry: ConfigEntry, settings: Settings) -> set[str]:
     """Agents the memory agent may not be: the main agent and any router."""
-    return {
+    agents: set[str | None] = {
         (settings.get("agents") or {}).get("agent"),
         entry.data.get("agent"),
         *router_agent_ids(hass),
-    } - {None}
+    }
+    return {agent for agent in agents if agent is not None}
 
 
-def _personal_calendars(settings) -> dict[str, tuple[str | None, list[str]]]:
+def _personal_calendars(settings: Settings) -> dict[str, tuple[str | None, list[str]]]:
     """Per person ("owner", "partner"): the Home Assistant user and personal calendars."""
     reminders = settings.get("reminders") or {}
     return {
@@ -494,7 +511,9 @@ def _personal_calendars(settings) -> dict[str, tuple[str | None, list[str]]]:
     }
 
 
-def reminder_calendar_error(hass, entry, settings) -> tuple[str, dict[str, str]] | None:
+def reminder_calendar_error(
+    hass: HomeAssistant, entry: ConfigEntry, settings: Settings
+) -> tuple[str, dict[str, str]] | None:
     """Error key and placeholders for reminder calendars that may not be saved, or None.
 
     A personal calendar belongs to one Home Assistant user, across every router, and is
@@ -527,13 +546,15 @@ def reminder_calendar_error(hass, entry, settings) -> tuple[str, dict[str, str]]
     return None
 
 
-def settings_error_placeholders(hass, entry, settings) -> dict[str, str]:
+def settings_error_placeholders(
+    hass: HomeAssistant, entry: ConfigEntry, settings: Settings
+) -> dict[str, str]:
     """What fills the {name} places of the message for the calendar error, if it is that."""
     found = reminder_calendar_error(hass, entry, settings)
     return found[1] if found and found[0] == settings_error(hass, entry, settings) else {}
 
 
-def settings_error(hass, entry, settings) -> str | None:
+def settings_error(hass: HomeAssistant, entry: ConfigEntry, settings: Settings) -> str | None:
     """Error key for settings that may not be saved, or None when they are fine."""
     error = memory_settings_error(settings, other_agents(hass, entry, settings))
     main_agent = (settings.get("agents") or {}).get("agent")
@@ -570,13 +591,15 @@ def settings_error(hass, entry, settings) -> str | None:
     return error
 
 
-def settings_to_save(entry, settings) -> dict:
+def settings_to_save(entry: ConfigEntry, settings: Settings) -> dict[str, Any]:
     """The options to store for saved settings. The calendars are edited apart, and kept."""
     rows = entry.options.get("calendar_rows")
     return {**settings, **({"calendar_rows": rows} if rows else {})}
 
 
-def changed_calendar_rows(options, original, values) -> tuple[list[dict], dict[str, str]]:
+def changed_calendar_rows(
+    options: Settings, original: str | None, values: Settings
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """The router's calendars after adding, changing or removing one, and form errors.
 
     `original` is the calendar being changed, or None when one is added. With errors,
@@ -600,7 +623,9 @@ def changed_calendar_rows(options, original, values) -> tuple[list[dict], dict[s
     return saved, {}
 
 
-def memory_list_choices(memory: MemoryStore, entry_id: str, settings) -> list[tuple[str, str]]:
+def memory_list_choices(
+    memory: MemoryStore, entry_id: str, settings: Settings
+) -> list[tuple[str, str]]:
     """(list key, label) of the lists one router entry can see, with their item counts."""
     choices = []
     people: tuple[tuple[Person, str, str], ...] = (
@@ -622,7 +647,7 @@ class PersonaRouterFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return PersonaRouterOptionsFlow()
 
     @classmethod
@@ -632,7 +657,9 @@ class PersonaRouterFlow(ConfigFlow, domain=DOMAIN):
     ) -> dict[str, type[ConfigSubentryFlow]]:
         return {AVATAR: AvatarSubentryFlow}
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(title=user_input["name"], data=user_input)
         return self.async_show_form(
@@ -657,12 +684,16 @@ class PersonaRouterOptionsFlow(OptionsFlow):
         # The calendar being changed, or None while a new one is added.
         self._calendar: str | None = None
 
-    async def async_step_init(self, user_input=None):
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init", menu_options=["settings", "calendars", "memory"]
         )
 
-    async def async_step_settings(self, user_input=None):
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors = {}
         placeholders: dict[str, str] = {}
         if user_input is not None:
@@ -681,7 +712,9 @@ class PersonaRouterOptionsFlow(OptionsFlow):
             description_placeholders=placeholders,
         )
 
-    async def async_step_calendars(self, user_input=None):
+    async def async_step_calendars(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Pick the calendar to change, or add one."""
         if not self.config_entry.options:
             # The calendars are saved next to the settings, which do not exist yet.
@@ -696,7 +729,10 @@ class PersonaRouterOptionsFlow(OptionsFlow):
             return await self.async_step_calendar_edit()
         names = person_names(self.config_entry.options)
         choices = [
-            (row["calendar"], f"{row['calendar']} (for {names.get(row.get('for'), 'everyone')})")
+            (
+                row["calendar"],
+                f"{row['calendar']} (for {names.get(str(row.get('for')), 'everyone')})",
+            )
             for row in rows
         ]
         return self.async_show_form(
@@ -706,11 +742,13 @@ class PersonaRouterOptionsFlow(OptionsFlow):
             ),
         )
 
-    async def async_step_calendar_edit(self, user_input=None):
+    async def async_step_calendar_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Add, change or remove one calendar. The other settings are left as they are."""
         options = self.config_entry.options
         rows = [dict(row) for row in calendar_rows(options)]
-        errors = {}
+        errors: dict[str, str] = {}
         if user_input is not None:
             saved, errors = changed_calendar_rows(options, self._calendar, user_input)
             if not errors:
@@ -728,7 +766,9 @@ class PersonaRouterOptionsFlow(OptionsFlow):
             errors=errors,
         )
 
-    async def async_step_memory(self, user_input=None):
+    async def async_step_memory(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Pick the list to edit."""
         memory = await async_get_memory(self.hass)
         choices = memory_list_choices(
@@ -744,7 +784,9 @@ class PersonaRouterOptionsFlow(OptionsFlow):
             data_schema=vol.Schema({vol.Required("list"): _choice(choices)}),
         )
 
-    async def async_step_memory_edit(self, user_input=None):
+    async def async_step_memory_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         """Edit one list, one fact per line. Saving never touches the entry's options."""
         errors = {}
         placeholders = {"list": self._list_label}

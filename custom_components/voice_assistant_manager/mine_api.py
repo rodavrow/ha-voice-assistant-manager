@@ -13,7 +13,6 @@ from datetime import date
 from typing import Any, Literal
 
 import voluptuous as vol
-
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -146,8 +145,7 @@ async def _router_view(
     entry = hass.config_entries.async_get_entry(mine["entry_id"])
     if entry is None:
         return None
-    # config_flow.current_settings has no annotations yet
-    settings: dict[str, Any] = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+    settings: dict[str, Any] = current_settings(hass, entry)
     memory = await async_get_memory(hass)
     keys = _memory_keys(hass, user_id, mine)
     return {
@@ -227,8 +225,7 @@ async def ws_save_persona(
     if entry is None:
         connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_not_yours")))
         return
-    # config_flow.current_settings has no annotations yet
-    current: dict[str, Any] = current_settings(hass, entry)  # type: ignore[no-untyped-call]
+    current: dict[str, Any] = current_settings(hass, entry)
     role = mine["role"]
     settings = {**current, role: {**(current.get(role) or {}), "persona": persona}}
     error = settings_error(hass, entry, settings)

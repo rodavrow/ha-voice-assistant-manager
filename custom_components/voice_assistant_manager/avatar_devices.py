@@ -221,7 +221,8 @@ def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntitie
 
 def _held(hass: HomeAssistant) -> dict[str, datetime]:
     """Connection select (entity id) -> until when a chat holds it at "Always connected"."""
-    return hass.data.setdefault(DOMAIN, {}).setdefault(_HELD, {})
+    held: dict[str, datetime] = hass.data.setdefault(DOMAIN, {}).setdefault(_HELD, {})
+    return held
 
 
 @callback

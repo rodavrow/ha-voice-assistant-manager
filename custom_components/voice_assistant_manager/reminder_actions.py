@@ -27,11 +27,8 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.auth.permissions.const import POLICY_CONTROL, POLICY_READ
-from homeassistant.components.calendar import (
-    DATA_COMPONENT,
-    CalendarEntity,
-    CalendarEntityFeature,
-)
+from homeassistant.components.calendar import CalendarEntity, CalendarEntityFeature
+from homeassistant.components.calendar.const import DATA_COMPONENT
 from homeassistant.core import (
     Context,
     HomeAssistant,

@@ -167,18 +167,18 @@ class _FfmpegDecoder:
         self._process = process
 
     async def async_write(self, audio: bytes) -> None:
-        assert self._process.stdin is not None
+        assert self._process.stdin is not None  # noqa: S101
         self._process.stdin.write(audio)
         await self._process.stdin.drain()
 
     async def async_close_input(self) -> None:
-        assert self._process.stdin is not None
+        assert self._process.stdin is not None  # noqa: S101
         with contextlib.suppress(OSError):
             self._process.stdin.close()
             await self._process.stdin.wait_closed()
 
     async def output(self) -> AsyncIterator[bytes]:
-        assert self._process.stdout is not None
+        assert self._process.stdout is not None  # noqa: S101
         while pcm := await self._process.stdout.read(_READ_BYTES):
             yield pcm
 
@@ -397,7 +397,7 @@ class ReplyFeed:
             await self._socket.send_json({"type": "hold"})
 
     async def _async_send(self, decoder: Decoder) -> None:
-        assert self._socket is not None
+        assert self._socket is not None  # noqa: S101
         async for pcm in decoder.output():
             if self._stopped or self._session_changed():
                 return
@@ -413,7 +413,7 @@ class ReplyFeed:
 
     async def _async_listen(self) -> None:
         """Returns when LiveTalking cancels the reply (an interrupt) or closes the stream."""
-        assert self._socket is not None
+        assert self._socket is not None  # noqa: S101
         async for message in self._socket:
             if message.type is not aiohttp.WSMsgType.TEXT:
                 continue

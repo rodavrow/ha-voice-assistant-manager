@@ -128,7 +128,7 @@ async def _async_hold(
                 continue
             room -= 1
         select = entities.connection
-        assert select is not None  # _participants keeps only slots with one
+        assert select is not None  # _participants keeps only slots with one  # noqa: S101
         if override:
             # Held before writing, so a check running meanwhile does not write it back.
             avatar_devices.hold_connection(hass, select, until)

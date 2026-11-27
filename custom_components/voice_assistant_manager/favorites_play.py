@@ -400,6 +400,8 @@ async def _search_kind(
         _LOGGER.error("Music Assistant search for %r failed: %s", asked, err)
         raise PlayRefused(SEARCH_FAILED) from err
     items = (response or {}).get(results_key) or []
+    if not isinstance(items, list):
+        return []
     return [
         item
         for item in items

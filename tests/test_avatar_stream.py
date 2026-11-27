@@ -19,7 +19,7 @@ from homeassistant.core import Context
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 
-from custom_components.voice_assistant_manager import avatar_devices, avatar_stream
+from custom_components.voice_assistant_manager import avatar_stream
 from custom_components.voice_assistant_manager.avatar_stream import (
     FeedTarget,
     ReplyFeed,

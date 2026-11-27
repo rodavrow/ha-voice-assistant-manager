@@ -127,6 +127,7 @@ def woken_agent(hass: HomeAssistant, device_id: str, phrase: str) -> str | None:
     chosen = hass.states.get(pipeline_select.entity_id) if pipeline_select else None
     if chosen is None or chosen.state in ("unknown", "unavailable"):
         return None
+    pipeline: assist_pipeline.Pipeline | None
     if chosen.state == "preferred":
         pipeline = assist_pipeline.async_get_pipeline(hass)
     else:
@@ -172,11 +173,11 @@ def _target(hass: HomeAssistant, own: str, user_input: Any) -> _Handed | None:
         if conversation_id:
             state.handed[conversation_id] = handed
         return handed
-    handed = state.handed.get(conversation_id or "")
-    if handed is None or handed.device_id != device_id or handed.agent_id == own:
+    earlier = state.handed.get(conversation_id or "")
+    if earlier is None or earlier.device_id != device_id or earlier.agent_id == own:
         return None
-    handed.at = now
-    return handed
+    earlier.at = now
+    return earlier
 
 
 async def async_hand_off(

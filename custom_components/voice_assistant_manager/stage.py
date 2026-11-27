@@ -22,8 +22,8 @@ import contextlib
 import io
 import logging
 import time
-import wave
 import uuid
+import wave
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -208,7 +208,7 @@ class Stage:
 
 def get_stage(hass: HomeAssistant) -> Stage:
     data = hass.data.setdefault(DOMAIN, {})
-    stage = data.get(STAGE_DATA)
+    stage: Stage | None = data.get(STAGE_DATA)
     if stage is None:
         stage = data[STAGE_DATA] = Stage()
     return stage
@@ -317,7 +317,7 @@ def clip_seconds(extension: str, audio: bytes) -> float | None:
                 # A streamed WAV header often claims more samples than the clip has.
                 samples = len(audio) - (audio.find(b"data") + 8)
                 frames = min(wav.getnframes(), samples // frame)
-                return frames / rate
+                return float(frames / rate)
         return None
     if extension == "mp3":
         try:
@@ -326,7 +326,9 @@ def clip_seconds(extension: str, audio: bytes) -> float | None:
         except ImportError:
             return None
         with contextlib.suppress(MutagenError, ValueError):
-            length = float(MP3(io.BytesIO(audio)).info.length)
+            # mutagen has no type information; a file it could read always has `info`.
+            info: Any = MP3(io.BytesIO(audio)).info  # type: ignore[no-untyped-call]
+            length = float(info.length)
             return length if length > 0 else None
     return None
 
