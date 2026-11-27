@@ -36,9 +36,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import ulid
 
-from . import avatar_devices
+from . import avatar_devices, data_keys
 from .avatar import MAX_CLIP_BYTES
-from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,7 +72,7 @@ _ERROR_TAIL: Final = 500
 PCM_RATE: Final = 16000
 _READ_BYTES: Final = 3200  # 100 ms of 16 kHz mono 16-bit audio
 _NO_SESSION: Final = ("", "unknown", "unavailable")
-_TURNS: Final = "avatar_stream_turns"
+_TURNS: Final = data_keys.AVATAR_STREAM_TURNS
 _FFMPEG_FORMATS: Final = {"mp3": "mp3", "wav": "wav", "ogg": "ogg", "flac": "flac"}
 _RAW: Final = ("pcm", "raw")
 
@@ -92,7 +91,7 @@ class _Turn:
 
 
 def _turns(hass: HomeAssistant) -> dict[str, list[_Turn]]:
-    turns: dict[str, list[_Turn]] = hass.data.setdefault(DOMAIN, {}).setdefault(_TURNS, {})
+    turns: dict[str, list[_Turn]] = data_keys.domain_data(hass).setdefault(_TURNS, {})
     return turns
 
 

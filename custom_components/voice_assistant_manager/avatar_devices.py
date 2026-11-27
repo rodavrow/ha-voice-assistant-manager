@@ -50,6 +50,7 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_URL, SUBENTRY_TYPE, esphome_entity
 from .const import DOMAIN
 from .setup_guide import find_satellites
@@ -64,10 +65,10 @@ CONNECTION_OPTIONS = {"always": "Always connected", "on_wake": "Connect when wok
 DEFAULT_CONNECTION = "on_wake"
 CALL_TIMEOUT = 5.0
 RECHECK = timedelta(minutes=1)
-_DATA = "avatar_devices"
-_OWNED = "avatar_devices_owned"
-_WARNED = "avatar_devices_warned"
-_HELD = "avatar_devices_held"
+_DATA = data_keys.AVATAR_DEVICES
+_OWNED = data_keys.AVATAR_DEVICES_OWNED
+_WARNED = data_keys.AVATAR_DEVICES_WARNED
+_HELD = data_keys.AVATAR_DEVICES_HELD
 _STORE_KEY = f"{DOMAIN}.avatar_devices"
 # Home Assistant's wake-word select of slot N: unique_id <mac>-pipeline, <mac>-pipeline_N.
 _WAKE_SELECT = re.compile(r"-pipeline(?:_(\d+))?$")
@@ -221,7 +222,7 @@ def slot_entities(hass: HomeAssistant, satellite: str, slot: int) -> SlotEntitie
 
 def _held(hass: HomeAssistant) -> dict[str, datetime]:
     """Connection select (entity id) -> until when a chat holds it at "Always connected"."""
-    held: dict[str, datetime] = hass.data.setdefault(DOMAIN, {}).setdefault(_HELD, {})
+    held: dict[str, datetime] = data_keys.domain_data(hass).setdefault(_HELD, {})
     return held
 
 
@@ -283,7 +284,7 @@ async def async_reconcile(hass: HomeAssistant) -> None:
     if any(entry.state in _BUSY for entry in hass.config_entries.async_entries(DOMAIN)):
         _LOGGER.debug("Avatar check skipped: an assistant is setting up or unloading")
         return  # The next request or the minute check catches up.
-    data = hass.data.setdefault(DOMAIN, {})
+    data = data_keys.domain_data(hass)
     owned: _Owned = data.setdefault(_OWNED, _Owned(hass))
     await owned.async_load()
     registry = er.async_get(hass)
@@ -395,7 +396,7 @@ async def async_call(
     hass: HomeAssistant, domain: str, service: str, entity_id: str, data: dict[str, Any]
 ) -> bool:
     """Call a service on one avatar entity; a failure is logged once and returns False."""
-    warned: set[str] = hass.data.setdefault(DOMAIN, {}).setdefault(_WARNED, set())
+    warned: set[str] = data_keys.domain_data(hass).setdefault(_WARNED, set())
     try:
         async with asyncio.timeout(CALL_TIMEOUT):
             await hass.services.async_call(
@@ -460,7 +461,7 @@ def async_setup(hass: HomeAssistant) -> None:
     """Reconcile when Home Assistant has started, when avatar entities appear, and every
     minute, which also catches wake words and pipelines that changed."""
     runner = _Runner(hass)
-    hass.data.setdefault(DOMAIN, {})[_DATA] = runner
+    data_keys.domain_data(hass)[_DATA] = runner
 
     @callback
     def registry_changed(event: Event[er.EventEntityRegistryUpdatedData]) -> None:

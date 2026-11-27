@@ -40,6 +40,7 @@ from homeassistant.exceptions import HomeAssistantError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .const import DOMAIN
 from .recurring import RepeatError, plan_repeat
 from .reminder_search import DATA_NOTE, Occurrence, SearchError, day_range, shown, summarise
@@ -51,7 +52,7 @@ SERVICE_CREATE = "create_reminder_event"
 SERVICE_CANCEL = "cancel_reminder_event"
 SERVICE_LIST = "list_reminder_events"
 # hass.data[DOMAIN][ASKERS]: context id -> who is asking in that turn.
-ASKERS = "reminder_askers"
+ASKERS = data_keys.REMINDER_ASKERS
 # A turn's tool calls come well within this; after it the note is dropped.
 ASKER_LIFETIME = timedelta(minutes=10)
 MAX_TITLE = 200
@@ -136,7 +137,7 @@ def note_asker(
     if context is None:
         return
     now = dt_util.utcnow()
-    askers: dict[str, _Asker] = hass.data.setdefault(DOMAIN, {}).setdefault(ASKERS, {})
+    askers: dict[str, _Asker] = data_keys.domain_data(hass).setdefault(ASKERS, {})
     for context_id in [key for key, seen in askers.items() if now - seen.at > ASKER_LIFETIME]:
         del askers[context_id]
     shown = " ".join(str(name or "").split()).casefold()

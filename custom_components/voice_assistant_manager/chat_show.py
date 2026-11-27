@@ -39,7 +39,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from . import announcement_look, avatar_chat, avatar_hold, emotion, stage
+from . import announcement_look, avatar_chat, avatar_hold, data_keys, emotion, stage
 from .announce import writer_agent
 from .avatar import prepare_clip
 from .const import DOMAIN
@@ -49,7 +49,7 @@ from .setup_guide import Satellite, find_satellites
 
 _LOGGER = logging.getLogger(__name__)
 
-DATA_MANAGER = "chat_show"
+DATA_MANAGER = data_keys.CHAT_SHOW
 MAX_TOPIC_LENGTH = 200
 MAX_PERSON_LINE_LENGTH = 200
 # Seconds an agent gets to write one line.
@@ -1446,7 +1446,7 @@ class _ListenWatch:
 
 def get_manager(hass: HomeAssistant) -> ChatShowManager:
     """The one chat show manager of this Home Assistant."""
-    data = hass.data.setdefault(DOMAIN, {})
+    data = data_keys.domain_data(hass)
     manager: ChatShowManager | None = data.get(DATA_MANAGER)
     if manager is None:
         manager = ChatShowManager(hass)

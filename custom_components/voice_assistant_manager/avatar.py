@@ -23,12 +23,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from . import data_keys
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 # Where stage.py keeps the chat shown on a cast device, in hass.data[DOMAIN].
-STAGE_DATA = "stage"
+STAGE_DATA = data_keys.STAGE
 
 SUBENTRY_TYPE = "avatar"
 CONF_ENGINE = "engine"
@@ -74,7 +75,7 @@ def stage_sessions(hass: HomeAssistant) -> frozenset[str]:
 
 
 # Where the last session each satellite reported is kept, in hass.data[DOMAIN].
-_LAST_SESSIONS = "avatar_last_sessions"
+_LAST_SESSIONS = data_keys.AVATAR_LAST_SESSIONS
 _NOT_READABLE = ("unknown", "unavailable")
 
 
@@ -98,7 +99,7 @@ def _read_sessions(hass: HomeAssistant) -> tuple[frozenset[str], list[str]]:
     last session it reported counts until it reports again. One that was never read is
     unknown.
     """
-    last: dict[str, str] = hass.data.setdefault(DOMAIN, {}).setdefault(_LAST_SESSIONS, {})
+    last: dict[str, str] = data_keys.domain_data(hass).setdefault(_LAST_SESSIONS, {})
     sessions: set[str] = set()
     unknown: list[str] = []
     for entity_id in _session_sensors(hass):

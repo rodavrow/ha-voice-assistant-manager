@@ -31,6 +31,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .avatar import esphome_entity
 from .const import DOMAIN, WAKE_WORD_SENSOR
 
@@ -43,7 +44,7 @@ LIFETIME = timedelta(minutes=5)
 # The selects of each wake word and its pipeline: <mac>-wake_word, <mac>-wake_word_2, ...
 _WAKE_SELECT = re.compile(r"-wake_word(?:_(\d+))?$")
 _PIPELINE_SELECT = re.compile(r"-pipeline(?:_(\d+))?$")
-_DATA = "wake_handoff"
+_DATA = data_keys.WAKE_HANDOFF
 
 
 @dataclass
@@ -66,7 +67,7 @@ class _State:
 
 
 def _state(hass: HomeAssistant) -> _State:
-    data = hass.data.setdefault(DOMAIN, {})
+    data = data_keys.domain_data(hass)
     if _DATA not in data:
         data[_DATA] = _State()
     state: _State = data[_DATA]

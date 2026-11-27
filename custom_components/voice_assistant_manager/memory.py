@@ -26,6 +26,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .const import DEFAULT_MAX_ITEMS as DEFAULT_MAX_ITEMS
 from .const import DOMAIN, PERSON_SECTION
 from .const import Person as Person
@@ -421,13 +422,13 @@ class MemoryStore:
 
 async def async_get_memory(hass: HomeAssistant) -> MemoryStore:
     """The one shared store, loaded on first use."""
-    data = hass.data.setdefault(DOMAIN, {})
-    async with data.setdefault("memory_lock", asyncio.Lock()):
-        if "memory" not in data:
+    data = data_keys.domain_data(hass)
+    async with data.setdefault(data_keys.MEMORY_LOCK, asyncio.Lock()):
+        if data_keys.MEMORY not in data:
             memory = MemoryStore(hass)
             await memory.async_load()
-            data["memory"] = memory
-    loaded: MemoryStore = data["memory"]
+            data[data_keys.MEMORY] = memory
+    loaded: MemoryStore = data[data_keys.MEMORY]
     return loaded
 
 
@@ -508,7 +509,7 @@ def router_agent_ids(hass: HomeAssistant) -> set[str]:
 
 def get_loaded_memory(hass: HomeAssistant) -> MemoryStore | None:
     """The shared store if it is loaded. Never waits, so it is safe in the reply path."""
-    loaded: MemoryStore | None = hass.data.get(DOMAIN, {}).get("memory")
+    loaded: MemoryStore | None = hass.data.get(DOMAIN, {}).get(data_keys.MEMORY)
     return loaded
 
 

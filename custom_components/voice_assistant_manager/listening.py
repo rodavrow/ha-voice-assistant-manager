@@ -21,15 +21,15 @@ from homeassistant.core import Event, EventStateChangedData, HomeAssistant, call
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import TrackStates, async_track_state_change_filtered
 
-from .const import DOMAIN
+from . import data_keys
 
 SATELLITE_DOMAIN = "assist_satellite"
 LISTENING = "listening"
-_SINCE = "listening_since"
+_SINCE = data_keys.LISTENING_SINCE
 
 
 def _since(hass: HomeAssistant) -> dict[str, datetime]:
-    since: dict[str, datetime] = hass.data.setdefault(DOMAIN, {}).setdefault(_SINCE, {})
+    since: dict[str, datetime] = data_keys.domain_data(hass).setdefault(_SINCE, {})
     return since
 
 

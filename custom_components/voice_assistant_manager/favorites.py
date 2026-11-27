@@ -22,6 +22,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util.ulid import ulid_now
 
+from . import data_keys
 from .const import DOMAIN
 from .memory import Person, clean_text, holder_conflicts, holder_user, role_holders
 
@@ -496,11 +497,11 @@ class FavoritesStore:
 
 async def async_get_favorites(hass: HomeAssistant) -> FavoritesStore:
     """The one shared store, loaded on first use."""
-    data = hass.data.setdefault(DOMAIN, {})
-    async with data.setdefault("favorites_lock", asyncio.Lock()):
-        if "favorites" not in data:
+    data = data_keys.domain_data(hass)
+    async with data.setdefault(data_keys.FAVORITES_LOCK, asyncio.Lock()):
+        if data_keys.FAVORITES not in data:
             favorites = FavoritesStore(hass)
             await favorites.async_load()
-            data["favorites"] = favorites
-    loaded: FavoritesStore = data["favorites"]
+            data[data_keys.FAVORITES] = favorites
+    loaded: FavoritesStore = data[data_keys.FAVORITES]
     return loaded

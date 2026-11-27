@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import avatar_devices, avatar_stream, listening
+from . import avatar_devices, avatar_stream, data_keys, listening
 from .announce import async_register_services
 from .avatar import SUBENTRY_TYPE as AVATAR
 from .calendar_watch import (
@@ -28,7 +28,7 @@ from .stage_api import async_register_stage_commands
 
 PLATFORMS = [Platform.CONVERSATION]
 # Per loaded entry: the platforms it set up (so unloading matches) and its avatars.
-_LOADED = "loaded_entries"
+_LOADED = data_keys.LOADED_ENTRIES
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
@@ -50,7 +50,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_get_memory(hass)
     platforms = _platforms(entry)
-    hass.data.setdefault(DOMAIN, {}).setdefault(_LOADED, {})[entry.entry_id] = (
+    data_keys.domain_data(hass).setdefault(_LOADED, {})[entry.entry_id] = (
         platforms,
         _avatars(entry),
     )

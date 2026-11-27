@@ -20,6 +20,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import data_keys
 from .announce import async_compose_calendar_line
 from .calendars import (
     DEFAULT_ALL_DAY_TIME,
@@ -54,7 +55,7 @@ SAVE_EVERY = timedelta(minutes=15)
 # then does not count as a check, or the catch-up would find nothing to catch up.
 STARTUP_GRACE = timedelta(minutes=10)
 KEEP_ANNOUNCED = timedelta(days=1)
-WATCHERS = "calendar_watchers"
+WATCHERS = data_keys.CALENDAR_WATCHERS
 # A calendar that does not answer in this many seconds is treated as one that failed.
 FETCH_TIMEOUT = 30
 # More due events than this in one check of one calendar is abnormal (an import, or a
@@ -378,7 +379,7 @@ async def async_start_watcher(hass: HomeAssistant, entry: ConfigEntry) -> Calend
     """Load and start the watcher of a router entry."""
     watcher = CalendarWatcher(hass, entry)
     await watcher.async_load()
-    hass.data.setdefault(DOMAIN, {}).setdefault(WATCHERS, {})[entry.entry_id] = watcher
+    data_keys.domain_data(hass).setdefault(WATCHERS, {})[entry.entry_id] = watcher
     watcher.async_start()
     return watcher
 

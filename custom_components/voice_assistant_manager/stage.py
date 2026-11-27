@@ -35,6 +35,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from . import data_keys
 from .avatar import (
     CONF_AVATAR_ID,
     CONF_ENABLED,
@@ -94,7 +95,7 @@ class StageSettings:
 
 
 def settings(hass: HomeAssistant) -> StageSettings:
-    panel = hass.data.get(DOMAIN, {}).get("panel")
+    panel = hass.data.get(DOMAIN, {}).get(data_keys.PANEL)
     saved = getattr(panel, "chat_stage", None)
     return saved if isinstance(saved, StageSettings) else StageSettings()
 
@@ -207,7 +208,7 @@ class Stage:
 
 
 def get_stage(hass: HomeAssistant) -> Stage:
-    data = hass.data.setdefault(DOMAIN, {})
+    data = data_keys.domain_data(hass)
     stage: Stage | None = data.get(STAGE_DATA)
     if stage is None:
         stage = data[STAGE_DATA] = Stage()
