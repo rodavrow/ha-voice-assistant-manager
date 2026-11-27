@@ -155,6 +155,10 @@ CHAT_STOPPED_LINE = "Okay."
 # Spoken when the satellite never said whose voice it heard (its voice match did not
 # arrive). The request is refused all the same, but not as if the voice were unknown.
 UNSURE_LINE = "Sorry, I can't tell who is speaking right now. Please try again in a moment."
+# No request is longer than this: speech never is, and text this long is not a request to
+# an assistant. Longer ones are refused before anything reads them.
+MAX_REQUEST_CHARS = 2000
+TOO_LONG_LINE = "Sorry, that is too long for me. Please say it in fewer words."
 SETTINGS_KEY = {"owner": "owner", "wife": "partner"}
 # How long after a satellite starts listening its voice match can still arrive, unless set
 # under Advanced. LANovo publishes it 4.6-5.5 s after the wake word, whatever is said.
@@ -1335,6 +1339,12 @@ class PersonaRouter(conversation.ConversationEntity):
         return result
 
     async def _async_answer(self, user_input: Input) -> Result:
+        if len(user_input.text) > MAX_REQUEST_CHARS:
+            _LOGGER.warning(
+                "A request of %d characters is longer than an assistant takes, refusing it",
+                len(user_input.text),
+            )
+            return self._speak(user_input, TOO_LONG_LINE)
         resp = None
         try:
             settings = self._entry.options
