@@ -15,12 +15,14 @@ from homeassistant.core import HomeAssistant
 from custom_components.voice_assistant_manager.favorites import async_get_favorites
 from custom_components.voice_assistant_manager.memory import (
     MAX_MAX_ITEMS,
+    MEMORY_FULL_RULE,
+    REMEMBER_RULE,
     async_get_memory,
     entry_key,
     global_key,
 )
 
-from .router_helpers import add_router
+from .router_helpers import FakeAgents, add_router, ask
 
 KEY = "entry:kitchen:owner"
 
@@ -103,3 +105,48 @@ async def test_removing_one_of_two_assistants_keeps_the_lists_shared_by_all(
     assert [item["text"] for item in memory.items(global_key("owner"))] == ["Alex is vegetarian"]
     assert len(memory.items(entry_key(other.entry_id, "owner"))) == 1
     assert len(favorites.items("household")) == 1
+
+
+# A full list must not be confirmed as saved (found after the cap was added).
+
+
+async def fill(hass: HomeAssistant, key: str, source: str = "told") -> None:
+    memory = await async_get_memory(hass)
+    for number in range(MAX_MAX_ITEMS):
+        await memory.async_add(key, f"Fact number {number}", source)  # type: ignore[arg-type]
+
+
+async def test_regression_s8_the_agent_is_told_not_to_confirm_a_save_when_the_list_is_full(
+    hass: HomeAssistant,
+):
+    """The fact is saved after the reply, so the assistant said "noted" and then it was
+    refused. Now the main agent knows beforehand and says it cannot be saved."""
+    entry = await add_router(hass)
+    await fill(hass, entry_key(entry.entry_id, "owner"))
+    agents = FakeAgents()
+
+    with agents.patched():
+        await ask(hass, entry, "Remember that I like tea.")
+
+    assert MEMORY_FULL_RULE in agents.main_prompt
+    assert REMEMBER_RULE not in agents.main_prompt
+
+
+async def test_a_full_list_with_facts_that_can_make_room_still_confirms(hass: HomeAssistant):
+    entry = await add_router(hass)
+    await fill(hass, entry_key(entry.entry_id, "owner"), "judged")
+    agents = FakeAgents()
+
+    with agents.patched():
+        await ask(hass, entry, "Remember that I like tea.")
+
+    assert REMEMBER_RULE in agents.main_prompt
+    assert MEMORY_FULL_RULE not in agents.main_prompt
+
+
+async def test_only_the_person_whose_list_is_full_is_told_so(hass: HomeAssistant):
+    memory = await async_get_memory(hass)
+    await fill(hass, "entry:kitchen:owner")
+
+    assert not memory.has_room("entry:kitchen:owner")
+    assert memory.has_room("entry:kitchen:wife")

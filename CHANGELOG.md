@@ -208,7 +208,8 @@ From a review of the whole integration on 2026-11-27. None of these was found in
   latest after ten minutes, and what went wrong is logged.
 - **Memory by voice has the same limit as the editors.** "Remember ..." could grow a list
   past 200 facts, and every prompt with it. When a list is full of facts you asked it to
-  remember, a new one is not saved and the log says the list is full.
+  remember, a new one is not saved and the log says the list is full. The assistant is
+  told so before it answers, so it says the fact cannot be saved instead of confirming it.
 - **Removing the last assistant deletes the lists shared by all assistants**: the "all
   assistants" memory lists and every favourites list.
 - The list of satellite turns kept for the avatar stream no longer grows until a restart.
