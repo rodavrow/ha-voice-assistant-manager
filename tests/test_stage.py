@@ -18,7 +18,7 @@ from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.voice_assistant_manager import stage
+from custom_components.voice_assistant_manager import avatar, stage
 from custom_components.voice_assistant_manager.avatar import stage_sessions
 from custom_components.voice_assistant_manager.chat_show import ChatLimits
 
@@ -279,7 +279,7 @@ async def test_an_assistant_without_an_avatar_plays_the_lines(hass, show, cast):
 
 async def test_no_room_on_livetalking_plays_the_lines(hass, show, cast, caplog):
     taken = frozenset(f"s{n}" for n in range(stage.MAX_SESSIONS - 1))
-    with patch.object(stage, "device_sessions", return_value=taken):
+    with patch.object(stage, "present_device_sessions", return_value=taken):
         await chat_on_tv(hass, show)
 
     assert cast.device.shown == []
@@ -292,7 +292,7 @@ async def test_regression_a_stage_that_is_not_shown_is_a_warning_with_the_reason
     """Seen in the house: with the displays holding three of LiveTalking's four sessions, a
     chat on the TV played as sound without the avatars, and nothing in the log said why."""
     taken = frozenset(f"s{n}" for n in range(stage.MAX_SESSIONS - 1))
-    with patch.object(stage, "device_sessions", return_value=taken):
+    with patch.object(stage, "present_device_sessions", return_value=taken):
         await chat_on_tv(hass, show)
 
     refused = [r for r in caplog.records if "plays as audio" in r.getMessage()]
@@ -595,3 +595,23 @@ async def test_a_device_that_is_not_cast_still_gets_the_usual_format(
     await run_chat(hass, show, speaker="media_player.kitchen_speaker", limits=TWO_LINES)
 
     assert all("preferred_format" not in asked for asked in chat_audio.asked)
+
+
+# Room on LiveTalking is judged by the displays that are there
+
+
+async def test_regression_a_display_that_went_away_takes_no_room_from_the_stage(
+    hass, show, cast
+):
+    """Seen in the house: a display reported its session and was then unplugged. Its last
+    session kept counting, so with two other displays connected the stage found room for
+    one avatar only and every chat on the TV played without the avatars."""
+    remembered = frozenset({"living", "office", "unplugged"})
+    there_now = frozenset({"living", "office"})
+    with (
+        patch.object(avatar, "device_sessions", return_value=remembered),
+        patch.object(stage, "present_device_sessions", return_value=there_now),
+    ):
+        await chat_on_tv(hass, show)
+
+    assert len(cast.device.shown) == 1

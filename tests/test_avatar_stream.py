@@ -20,6 +20,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.voice_assistant_manager import avatar_stream
+from custom_components.voice_assistant_manager.avatar import (
+    device_sessions,
+    present_device_sessions,
+)
 from custom_components.voice_assistant_manager.avatar_stream import (
     FeedTarget,
     ReplyFeed,
@@ -895,3 +899,18 @@ async def test_a_whole_clip_from_an_engine_that_does_not_stream_is_fed_in_one_pi
         await hass.async_block_till_done(wait_background_tasks=True)
 
     assert live.socket.sent == [b"pcm:" + audio, {"type": "end"}]
+
+
+# The sessions of displays that are there now
+
+
+async def test_regression_a_session_last_reported_by_an_away_display_is_not_present(
+    hass, device
+):
+    add_fed_entities(hass, 1, session="sess-1")
+    assert present_device_sessions(hass) == device_sessions(hass) == frozenset({"sess-1"})
+
+    hass.states.async_set("sensor.kitchen_assistant_1_avatar_session", "unavailable")
+
+    assert device_sessions(hass) == frozenset({"sess-1"})  # A copy still skips it.
+    assert present_device_sessions(hass) == frozenset()

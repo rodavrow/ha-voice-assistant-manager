@@ -119,6 +119,22 @@ def device_sessions(hass: HomeAssistant) -> frozenset[str]:
     return _read_sessions(hass)[0]
 
 
+def present_device_sessions(hass: HomeAssistant) -> frozenset[str]:
+    """The sessions of satellites that are there right now.
+
+    For judging how much room LiveTalking has: a satellite that was unplugged still counts
+    in device_sessions with the last session it reported, which LiveTalking has long
+    closed. Should an away satellite hold its session after all, LiveTalking refuses the
+    extra one and the caller falls back as it does for any refusal.
+    """
+    sessions: set[str] = set()
+    for entity_id in _session_sensors(hass):
+        state = hass.states.get(entity_id)
+        if state is not None and state.state not in _NOT_READABLE and state.state:
+            sessions.add(state.state)
+    return frozenset(sessions)
+
+
 def unknown_device_sessions(hass: HomeAssistant) -> list[str]:
     """The session sensors of satellites whose session cannot be known right now.
 
