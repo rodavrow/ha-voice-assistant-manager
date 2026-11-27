@@ -16,7 +16,7 @@ Changes apply to the next request. No restart is needed.
 
 | Setting | What it does |
 | --- | --- |
-| Try built-in commands first | A request that exactly matches one of Home Assistant's own commands is carried out at once, without the main agent. Recognised speakers only. |
+| Try built-in commands first | A request that exactly matches one of Home Assistant's own commands is carried out at once, without the main agent. Recognised speakers only. Not for the answer to a question the assistant just asked: that goes to the main agent. |
 | Leave questions and music searches to the main agent | State questions ("is the door closed") and play-music requests go to the main agent even when a built-in command matches. |
 
 ## Memory
