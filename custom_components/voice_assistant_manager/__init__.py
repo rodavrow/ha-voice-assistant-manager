@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import avatar_devices
+from . import avatar_devices, avatar_stream
 from .announce import async_register_services
 from .avatar import SUBENTRY_TYPE as AVATAR
 from .calendar_watch import (
@@ -65,6 +65,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not await hass.config_entries.async_unload_platforms(entry, platforms):
         return False
     loaded.pop(entry.entry_id, None)
+    avatar_stream.forget_turns(hass, entry.entry_id)
     await async_stop_watcher(hass, entry)
     return True
 
