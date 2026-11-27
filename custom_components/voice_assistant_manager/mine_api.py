@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
+from .chat_show import get_manager
 from .config_flow import (
     current_settings,
     memory_list_choices,
@@ -49,10 +50,16 @@ from .mine import (
     my_routers,
     owns_global_list,
 )
+from .panel import panel_state
 from .panel_api import (
     LINE_PREVIEW_LENGTH,
+    chat_default_limits,
+    chat_speakers,
+    chat_start_refusal,
     favorites_change,
     favorites_search,
+    routers_for_chat,
+    shown_chat,
 )
 from .reminders import assistant_name
 from .ws_helpers import MEMORY_LINES
@@ -537,6 +544,83 @@ async def ws_favorites_search(
         connection.send_result(msg["id"], await favorites_search(hass, msg["name"]))
 
 
+# The chat show. A person starts one between assistants they are in, on any speaker a chat
+# can play on or on their own page, with limits of their own, held to the same ranges as an
+# administrator's; the saved ones stay an administrator's to change. Anyone in an assistant
+# may stop a chat and read its lines, which were spoken aloud.
+
+
+async def _may_chat(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> set[str] | None:
+    """The asking user's routers, by entry id, or None after answering one who has none."""
+    mine = {router["entry_id"] for router in my_routers(hass, connection.user.id)}
+    if mine:
+        return mine
+    connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_chat_not_linked")))
+    return None
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{PREFIX}/chat/state"})
+@websocket_api.async_response
+async def ws_chat_state(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The chat, and what this person may choose from for a new one."""
+    mine = await _may_chat(hass, connection, msg)
+    if mine is None:
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "ok": True,
+            "chat": shown_chat(hass),
+            "defaults": chat_default_limits(hass),
+            "routers": [r for r in routers_for_chat(hass) if r["entry_id"] in mine],
+            "speakers": chat_speakers(hass),
+            # The stage card, which the page shows for a chat on "This device".
+            "stage_script": panel_state(hass).stage_url,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/chat/start",
+        vol.Required("a"): _ID,
+        vol.Required("b"): _ID,
+        vol.Required("speaker"): _NAME,
+        vol.Optional("topic", default=""): _LONG_TEXT,
+        vol.Optional("limits", default=dict): vol.All(dict, vol.Length(max=16)),
+    }
+)
+@websocket_api.async_response
+async def ws_chat_start(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Start a chat between two of this person's assistants, or say why not."""
+    mine = await _may_chat(hass, connection, msg)
+    if mine is None:
+        return
+    if msg["a"] not in mine or msg["b"] not in mine:
+        connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_not_yours")))
+        return
+    text = await chat_start_refusal(hass, msg, msg["limits"])
+    connection.send_result(msg["id"], {"ok": True} if text is None else _refused(text))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{PREFIX}/chat/stop"})
+@websocket_api.async_response
+async def ws_chat_stop(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """End the running chat; the line being spoken finishes. Nothing running is no error."""
+    if await _may_chat(hass, connection, msg) is None:
+        return
+    await get_manager(hass).async_stop()
+    connection.send_result(msg["id"], {"ok": True})
+
+
 @callback
 def async_register_mine_commands(hass: HomeAssistant) -> None:
     """Register the commands of the My assistant page. Called once per start."""
@@ -552,5 +636,8 @@ def async_register_mine_commands(hass: HomeAssistant) -> None:
         ws_favorites_update,
         ws_favorites_remove,
         ws_favorites_search,
+        ws_chat_state,
+        ws_chat_start,
+        ws_chat_stop,
     ):
         websocket_api.async_register_command(hass, command)
