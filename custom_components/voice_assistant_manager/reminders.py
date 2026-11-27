@@ -370,13 +370,18 @@ def needs_honest_failure(reply: str, outcome: ToolOutcome, memory_request: bool 
     return outcome != "ok" and not memory_request and looks_like_confirmation(reply)
 
 
+def plain_name(name: object) -> str:
+    """A name as it is compared: one space between words, case folded, "" for none."""
+    return " ".join(str(name or "").split()).casefold()
+
+
 def for_whom(name: str) -> str:
     """The create_reminder value for a person: their name from the settings, lower case."""
-    return " ".join(str(name or "").split()).casefold()
+    return plain_name(name)
 
 
 def _normalise(name: str) -> str:
-    return " ".join(str(name or "").split()).casefold()
+    return plain_name(name)
 
 
 def assistant_name(title: str, setting: str | None) -> str:
