@@ -254,6 +254,8 @@ class PersonaRouter(conversation.ConversationEntity):
         self._last_in_history: dict[str, tuple[str, datetime]] = {}
         # Satellites that recognise speakers but have no helper, to warn once each.
         self._no_helper: set[str] = set()
+        # conversation_id -> when its last reply asked the person a question.
+        self._asked: dict[str, datetime] = {}
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
@@ -583,15 +585,34 @@ class PersonaRouter(conversation.ConversationEntity):
         return None
 
     def _note_reply(self, user_input: Input, result: Result) -> None:
-        """Keep whether the reply to a voice turn asked a question, so that only then the
-        next turn without a voice match is that person's answer (speaker.follow_up_role)."""
+        """Keep whether the reply asked a question: the next turn is then its answer, not
+        a built-in command (_answers_a_question), and on a voice turn without a voice
+        match it is that person's (speaker.follow_up_role)."""
         key = user_input.conversation_id or ""
+        now = dt_util.utcnow()
+        self._asked = {
+            asked: when
+            for asked, when in self._asked.items()
+            if asked != key and now - when <= CONVERSATION_LIFETIME
+        }
+        if key and result.continue_conversation:
+            self._asked[key] = now
         seen = self._spoken_by.get(key)
         if seen is not None and seen.device_id == user_input.device_id:
             # The time to answer runs from here, not from when the request came in.
             self._spoken_by[key] = dataclasses.replace(
                 seen, asked=bool(result.continue_conversation), at=dt_util.utcnow()
             )
+
+    def _answers_a_question(self, user_input: Input) -> bool:
+        """Whether this turn answers a question the last reply in its conversation asked.
+
+        Such an answer belongs to whoever asked. Read as a request of its own it can match
+        a built-in command: "in five minutes to drink some water", the answer to "when,
+        and what for?", is Home Assistant's "in <time> <command>" and set a timer.
+        """
+        asked = self._asked.get(user_input.conversation_id or "")
+        return asked is not None and dt_util.utcnow() - asked <= CONVERSATION_LIFETIME
 
     async def _is_system_user(self, user_id: str) -> bool:
         """True for a user Home Assistant created for itself, which no one logs in as."""
@@ -1595,7 +1616,7 @@ class PersonaRouter(conversation.ConversationEntity):
             played = await self._favorite_reply(user_input, who, log, text)
             if played is not None and played is not NO_PLAYER:
                 return played
-            if played is None:
+            if played is None and not self._answers_a_question(user_input):
                 handled = await self._local_command(
                     user_input, log, self._entry.options.get("local") or {}, text
                 )

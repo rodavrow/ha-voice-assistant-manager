@@ -206,6 +206,11 @@ From a review of the whole integration on 2026-11-27. None of these was found in
   for its decoder for ever: one ffmpeg process, one connection and up to 10 MB of audio
   stayed until the assistant was reloaded. A reply now ends when it cannot go on, at the
   latest after ten minutes, and what went wrong is logged.
+- **The answer to the assistant's question is no longer taken for a built-in command.**
+  Asked "when, and what for?", the answer "in five minutes to drink some water" matched
+  Home Assistant's "in <time> <command>" and set a timer, and the main agent never got its
+  answer. With built-in commands first, the turn after a reply that asked a question now
+  goes straight to the main agent.
 - **Memory by voice has the same limit as the editors.** "Remember ..." could grow a list
   past 200 facts, and every prompt with it. When a list is full of facts you asked it to
   remember, a new one is not saved and the log says the list is full. The assistant is
