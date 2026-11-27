@@ -115,6 +115,9 @@ async def _async_hold(
     until: datetime,
     held: list[str],
 ) -> None:
+    # A wake word given to an assistant since the last minute check still has avatar mode
+    # off, and a select held on such a slot connects nothing.
+    await avatar_devices.async_reconcile(hass)
     room = MAX_SESSIONS - len(device_sessions(hass))
     waiting: list[tuple[int, str, SlotEntities, bool]] = []
     for slot, title, entities, override in _participants(hass, satellite, routers):

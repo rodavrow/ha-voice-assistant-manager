@@ -453,3 +453,24 @@ async def test_a_chat_that_fails_still_releases(hass, show, recorder):
 
     assert recorder.events[0] == "connect"
     assert recorder.events[-1] == "release ['select.held']"
+
+
+# A chat started before the minute check has seen a changed pipeline
+
+
+async def test_regression_chat_turns_avatar_mode_on_for_a_wake_word_not_yet_checked(
+    hass, engines, sent, device, screen
+):
+    """A wake word given to an assistant moments ago still has avatar mode off: the minute
+    check has not run. Holding its select alone connects nothing, so every line of the chat
+    opened a session of its own."""
+    jeeves, ada = await two_assistants(hass)
+    held: list[str] = []
+    with slots(jeeves, ada):
+        await hold(hass, (jeeves.entry_id, ada.entry_id), held)
+
+    mode_on = [call for call in device.calls if call.startswith("turn_on switch.")]
+    assert len(mode_on) == 2, device.calls
+    first_select = device.calls.index(f"select_option {select(1)} {ALWAYS}")
+    assert all(device.calls.index(call) < first_select for call in mode_on)
+    assert held == [select(1), select(2)]
