@@ -54,6 +54,7 @@ Example for Ada:
 - **A satellite** plays each line as an announcement, in the assistant's chat voice, or in the satellite's own voice when none is set.
 - **A media player** plays the line as text to speech. When an assistant has no chat voice, Home Assistant's default text-to-speech engine is used.
 - **A Google Cast device** (a Nest Hub, a Chromecast or Google TV) shows the avatars talking, when both assistants have an [avatar](avatar.md) that is on and the stage is set up. See [On a cast device](#on-a-cast-device).
+- **This device**, the first choice in the Speaker list, plays the chat on the Voice Manager page you start it from, with the avatars talking. See [On this device](#on-this-device).
 
 ## On a cast device
 
@@ -74,6 +75,24 @@ On a Nest Hub, a Chromecast or a Google TV, a chat can show the assistants' avat
 **When something goes wrong,** the chat plays as audio on the device, as it would without the stage. That happens when the stage is not set up or is switched off, when an assistant has no avatar, when LiveTalking has no room, when the device does not connect in time, and from the line where a stream drops or a line cannot be sent. The log says why.
 
 A speaker group of cast devices plays audio only.
+
+## On this device
+
+Choose **This device** as the speaker to watch a chat on the phone, tablet or computer you start it from, in a browser or in the Home Assistant app. The page shows the same stage as a cast device does: the speaking avatar across the screen, the other in an inset, each voice from the same stream as its lips. Nothing is cast and no satellite or media player is used.
+
+**It needs:**
+
+- both assistants with an [avatar](avatar.md) that is on
+- room for two more sessions on LiveTalking
+- a device that can reach LiveTalking, at home or through a VPN into your network
+
+It does not need the stage set up for cast devices, and the **Avatars on cast devices** switch does not apply to it.
+
+**During a chat:** the stage covers the page, with a **Stop** button at the top right. The screen is kept on where the browser allows that. If the browser will not play sound that nobody tapped for, the picture plays muted and a **Tap for sound** button appears.
+
+**The chat ends** a few seconds after the page is closed, left or loses its connection, and when a stream to an avatar drops: there is nowhere else to play it. For the same reason a chat is refused, with the reason, when an assistant has no avatar or LiveTalking has no room, where a cast device would play audio instead.
+
+Nobody can join in by voice on this device. The `start_chat` action cannot start a chat here; only the page can.
 
 ## Showing who speaks
 

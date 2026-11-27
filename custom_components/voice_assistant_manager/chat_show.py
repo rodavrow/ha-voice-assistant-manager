@@ -603,7 +603,10 @@ class ChatShowManager:
             raise ChatRefused("chat_no_router")
         if writer_agent(self.hass, first) is None or writer_agent(self.hass, second) is None:
             raise ChatRefused("chat_no_writer")
-        if not can_speak(self.hass, speaker):
+        if stage.viewer_of(speaker):
+            if why := stage.page_refusal(self.hass, speaker, (first, second)):
+                raise ChatRefused(why)
+        elif not can_speak(self.hass, speaker):
             raise ChatRefused("chat_bad_speaker")
 
         chat = _Chat(
@@ -887,6 +890,10 @@ class ChatShowManager:
             pair = self._chat_pair(chat)
             if pair is not None:
                 chat.on_stage = await stage.async_open(self.hass, chat.speaker, pair, chat.names)
+            if stage.viewer_of(chat.speaker) and chat.on_stage is None:
+                # A chat on the page has nowhere else to play.
+                self._end(chat, "chat_page_not_connected")
+                return
             await self._async_talk(chat)
         except asyncio.CancelledError:
             self._end(chat, "chat_stopped")
@@ -1158,6 +1165,8 @@ class ChatShowManager:
         satellite listens after the line; what a person answers arrives through the
         joining-in path.
         """
+        if stage.viewer_of(chat.speaker):
+            return await self._async_page_line(chat, entry, line)
         if not await self._async_wait_back(chat.speaker):
             _LOGGER.warning("%s is unavailable, ending the chat", chat.speaker)
             return "chat_speaker_failed"
@@ -1172,6 +1181,20 @@ class ChatShowManager:
                 return ""
             # Played as audio from now on, which takes the cast device off the stage.
         return await self._async_play(chat, entry, line)
+
+    async def _async_page_line(self, chat: _Chat, entry: ConfigEntry, line: str) -> str:
+        """Speak the line on the page that shows the chat. "" or the reason the chat must end:
+        a page that is gone, or lost a stream, leaves nowhere to play it."""
+        show = chat.on_stage
+        if (
+            show is None
+            or show.broken
+            or not await stage.async_page_watching(self.hass, show)
+            or not await self._async_stage_line(chat, entry, line)
+        ):
+            _LOGGER.warning("The page showing the chat is gone, ending the chat")
+            return "chat_page_gone"
+        return ""
 
     async def _async_stage_line(self, chat: _Chat, entry: ConfigEntry, line: str) -> bool:
         """Have the assistant's avatar say the line on the stage. False when it could not."""

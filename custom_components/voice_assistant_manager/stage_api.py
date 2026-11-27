@@ -29,12 +29,18 @@ MAX_SDP = 64 * 1024
 
 
 @websocket_api.require_admin
-@websocket_api.websocket_command({vol.Required("type"): f"{PREFIX}/subscribe"})
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/subscribe",
+        # The Voice Manager page watches as itself; the card cast to a device sends none.
+        vol.Optional("viewer", default=""): vol.Any("", vol.Match(stage.VIEWER)),
+    }
+)
 @callback
 def ws_subscribe(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """The chat on the stage now, then each change: a line starting, the chat ending."""
+    """The chat this viewer shows now, then each change: a line starting, the chat ending."""
 
     @callback
     def send(message: dict[str, Any]) -> None:
@@ -42,7 +48,7 @@ def ws_subscribe(
 
     # The result first: the frontend only takes events of a subscription it has a result for.
     connection.send_result(msg["id"])
-    connection.subscriptions[msg["id"]] = stage.get_stage(hass).listen(send)
+    connection.subscriptions[msg["id"]] = stage.get_stage(hass).listen(send, msg["viewer"])
 
 
 @websocket_api.require_admin
