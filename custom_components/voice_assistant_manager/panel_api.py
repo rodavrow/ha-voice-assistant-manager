@@ -24,7 +24,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.translation import async_get_translations
 
-from . import stage
+from . import stage, talk
 from .announce import writer_agent
 from .avatar import CONF_AVATAR_ID, CONF_ENABLED, CONF_ENGINE, CONF_URL
 from .avatar import SUBENTRY_TYPE as AVATAR
@@ -725,6 +725,62 @@ async def chat_start_refusal(
     return None
 
 
+# Talking to an assistant's avatar on the page (talk.py).
+
+# An SDP offer is a few kilobytes.
+MAX_SDP = 64 * 1024
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/talk/open",
+        vol.Required("entry_id"): str,
+        vol.Required("sdp"): vol.All(str, vol.Length(min=1, max=MAX_SDP)),
+    }
+)
+@websocket_api.async_response
+async def ws_talk_open(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Open the assistant's avatar for the page, and name the pipeline to talk through.
+
+    The talk is closed when the page says so or when its connection ends.
+    """
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    user_id = connection.user.id
+    try:
+        if entry is None or entry.domain != DOMAIN:
+            raise talk.TalkRefused("talk_no_router")
+        pipeline = talk.pipeline_for(hass, entry)
+        if pipeline is None:
+            raise talk.TalkRefused("talk_no_pipeline")
+        answer = await talk.async_open(hass, entry, user_id, msg["sdp"])
+    except talk.TalkRefused as refused:
+        connection.send_result(msg["id"], _refused(await _error_text(hass, refused.key)))
+        return
+
+    @callback
+    def gone() -> None:
+        talk.close(hass, msg["entry_id"], user_id)
+
+    connection.subscriptions[msg["id"]] = gone
+    connection.send_result(msg["id"], {"ok": True, "sdp": answer, "pipeline": pipeline})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{PREFIX}/talk/close", vol.Required("entry_id"): str}
+)
+@callback
+def ws_talk_close(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """End the page's talk with this assistant. None open is no error."""
+    talk.close(hass, msg["entry_id"], connection.user.id)
+    connection.send_result(msg["id"], {"ok": True})
+
+
 def chat_default_limits(hass: HomeAssistant) -> dict[str, Any]:
     """The limits a chat starts with, as saved on the Voice Manager page."""
     return asdict(chat_defaults(hass))
@@ -1259,6 +1315,8 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_chat_start,
         ws_chat_stop,
         ws_chat_state,
+        ws_talk_open,
+        ws_talk_close,
         ws_chat_save_defaults,
         ws_chat_save_stage,
         ws_favorites_get,

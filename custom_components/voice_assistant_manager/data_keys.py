@@ -44,6 +44,8 @@ AVATAR_STREAM_TURNS: Final = "avatar_stream_turns"
 CALENDAR_WATCHERS: Final = "calendar_watchers"
 # The chat shown on a cast device (stage.py).
 STAGE: Final = "stage"
+# The open talks with an avatar on the Voice Manager page (talk.py), by entry id.
+TALKS: Final = "talks"
 # Satellite -> the last LiveTalking session it reported.
 AVATAR_LAST_SESSIONS: Final = "avatar_last_sessions"
 # The settings page's state.

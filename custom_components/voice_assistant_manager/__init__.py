@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from . import avatar_devices, avatar_stream, data_keys, emotion, listening
+from . import avatar_devices, avatar_stream, data_keys, emotion, listening, talk
 from .announce import async_register_services
 from .avatar import SUBENTRY_TYPE as AVATAR
 from .calendar_watch import (
@@ -77,6 +77,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     loaded.pop(entry.entry_id, None)
     avatar_stream.forget_turns(hass, entry.entry_id)
+    talk.close(hass, entry.entry_id)
     emotion.forget_spoken(hass, entry.entry_id)
     await async_stop_watcher(hass, entry)
     return True

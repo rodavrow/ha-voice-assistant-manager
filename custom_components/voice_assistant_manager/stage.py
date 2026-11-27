@@ -51,6 +51,7 @@ from .avatar import (
     enabled_avatar,
     normalize_url,
     present_device_sessions,
+    talk_sessions,
 )
 from .const import DOMAIN
 
@@ -264,8 +265,9 @@ def _actor(entry: ConfigEntry, name: str) -> Actor | None:
 
 def _room(hass: HomeAssistant) -> int:
     """How many sessions LiveTalking has free, going by the displays that are there now:
-    one that was unplugged holds nothing on LiveTalking."""
-    return MAX_SESSIONS - len(present_device_sessions(hass))
+    one that was unplugged holds nothing on LiveTalking. Someone talking to an avatar on
+    the Voice Manager page holds one too."""
+    return MAX_SESSIONS - len(present_device_sessions(hass)) - len(talk_sessions(hass))
 
 
 def page_refusal(hass: HomeAssistant, speaker: str, entries: Iterable[ConfigEntry]) -> str:

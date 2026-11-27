@@ -7,6 +7,15 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
+- **Talk to an assistant's avatar on the Voice Manager page.** For administrators: **Talk**
+  in an assistant's Avatar section opens the avatar over the page and listens through the
+  device's microphone, with no satellite. The reply is streamed to the page's avatar as it
+  is made, voice and lips together, and it is an ordinary turn with that assistant. Needs
+  a voice assistant with speech-to-text, this assistant as its agent and its avatar voice,
+  room for one session on LiveTalking, and a page that may use the microphone (https or
+  the Home Assistant app). A link to the page with `?talk=` and the assistant's name opens
+  the talk at once, for a phone shortcut. See
+  [Talking to the avatar on the Voice Manager page](docs/avatar.md#talking-to-the-avatar-on-the-voice-manager-page).
 - **The chat show is on My assistant too.** People who are not administrators get a
   **Chat show** section: they choose two assistants they are linked to, a speaker or
   **This device**, a topic and the limits of that chat, start and stop a chat, and read its

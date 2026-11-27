@@ -75,6 +75,18 @@ def stage_sessions(hass: HomeAssistant) -> frozenset[str]:
     return stage.sessions() if stage is not None else frozenset()
 
 
+def talk_sessions(hass: HomeAssistant) -> frozenset[str]:
+    """The sessions of people talking to an avatar on the Voice Manager page (talk.py),
+    which are fed the reply as it is made."""
+    talks = hass.data.get(DOMAIN, {}).get(data_keys.TALKS, {})
+    return frozenset(talk.session for talk in talks.values())
+
+
+def own_sessions(hass: HomeAssistant) -> frozenset[str]:
+    """Every session that gets its speech some other way than as a copy of a clip."""
+    return device_sessions(hass) | stage_sessions(hass) | talk_sessions(hass)
+
+
 # Where the last session each satellite reported is kept, in hass.data[DOMAIN].
 _LAST_SESSIONS = data_keys.AVATAR_LAST_SESSIONS
 _NOT_READABLE = ("unknown", "unavailable")
@@ -462,8 +474,7 @@ class AvatarSender:
             try:
                 async with asyncio.timeout(TOTAL_TIMEOUT):
                     played = await client.async_play(
-                        *clip, device_sessions(self._hass) | stage_sessions(self._hass),
-                        avatar_id,
+                        *clip, own_sessions(self._hass), avatar_id,
                     )
             except (aiohttp.ClientError, TimeoutError, LiveTalkingError) as err:
                 self._log_failure(err)

@@ -36,7 +36,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import ulid
 
-from . import avatar_devices, data_keys
+from . import avatar_devices, data_keys, talk
 from .avatar import MAX_CLIP_BYTES
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,21 +143,26 @@ def asking_satellite(hass: HomeAssistant, entry_id: str) -> str | None:
 
 @dataclass(frozen=True)
 class FeedTarget:
-    """The LiveTalking session of the satellite that asked."""
+    """The LiveTalking session of the satellite that asked, or of the page that did."""
 
     base_url: str
     session_id: str
-    # The satellite's "Avatar session" sensor: when it changes, the session is gone.
+    # The satellite's "Avatar session" sensor: when it changes, the session is gone. "" for
+    # a page (talk.py), whose session is gone when its talk is closed or opened anew.
     session_entity: str
 
 
 def feed_target(hass: HomeAssistant, entry: ConfigEntry, base_url: str) -> FeedTarget | None:
     """Where this assistant's reply can be fed now, or None to leave it to the satellite."""
-    advanced = entry.options.get("advanced")
-    if isinstance(advanced, Mapping) and advanced.get(CONF_STREAM) is False:
-        return None
     satellite = asking_satellite(hass, entry.entry_id)
     if satellite is None:
+        return None
+    if (page := talk.target(hass, satellite)) is not None:
+        # Whatever the setting for satellites says: the page has no other way to hear the
+        # reply. Fed on the address its session was opened on.
+        return FeedTarget(page.base_url, page.session, "")
+    advanced = entry.options.get("advanced")
+    if isinstance(advanced, Mapping) and advanced.get(CONF_STREAM) is False:
         return None
     found: list[FeedTarget] = []
     for slot, entry_id in avatar_devices.satellite_slots(hass).get(satellite, {}).items():
@@ -531,8 +536,11 @@ class ReplyFeed:
         self._stopped = True
 
     def _session_changed(self) -> bool:
-        state = self._hass.states.get(self._target.session_entity)
-        changed = state is None or state.state != self._target.session_id
+        if not self._target.session_entity:
+            changed = self._target.session_id not in talk.sessions(self._hass)
+        else:
+            state = self._hass.states.get(self._target.session_entity)
+            changed = state is None or state.state != self._target.session_id
         if changed:
             self._stopped = True
         return changed
