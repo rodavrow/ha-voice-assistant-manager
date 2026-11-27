@@ -733,6 +733,39 @@ async def test_the_main_prompt_names_the_speaker_before_the_persona(
     )
 
 
+@pytest.mark.parametrize("who", ["stranger", "near_miss", "unsure", "guest", ""])
+async def test_regression_s10_a_script_that_says_it_is_no_person_never_reaches_the_main_agent(
+    hass: HomeAssistant, who: str
+) -> None:
+    """S10 of the 2026-11-27 review: such an answer with a persona but no fixed replies and
+    no reply agent went to the main agent, with only the persona asking it to refuse."""
+    entry = await script_router_answering(
+        hass, {"who": who, "persona_for_this_message": "Refuse politely. Never use a tool."}
+    )
+    agents = FakeAgents()
+
+    with agents.patched():
+        result = await ask(hass, entry, KNOWN_ONLY)
+
+    assert agents.calls == []
+    assert result.response.speech["plain"]["speech"] == LAST_RESORT_REPLY
+
+
+@pytest.mark.parametrize("who", ["owner", "wife"])
+async def test_a_script_that_names_a_person_still_reaches_the_main_agent(
+    hass: HomeAssistant, who: str
+) -> None:
+    entry = await script_router_answering(
+        hass, {"who": who, "persona_for_this_message": "The person speaking is Alex."}
+    )
+    agents = FakeAgents()
+
+    with agents.patched():
+        await ask(hass, entry, KNOWN_ONLY)
+
+    assert len(agents.calls_to(MAIN_AGENT)) == 1
+
+
 async def test_regression_security_a_script_answer_without_a_name_names_someone_unnamed(
     hass: HomeAssistant,
 ) -> None:

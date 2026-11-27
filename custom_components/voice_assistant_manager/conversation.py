@@ -1402,9 +1402,19 @@ class PersonaRouter(conversation.ConversationEntity):
 
         if replies:
             return self._fixed_reply(user_input, replies)
+        who = resp.get("who")
+        if "who" in resp and who not in ("owner", "wife"):
+            # Only an older "who is speaking" script gets here: the settings always give
+            # someone who is no person a line to speak. Its persona asking the main agent
+            # to refuse is no guarantee, so the main agent, and its tools, is not asked.
+            # (A script that does not say who is speaking is trusted as before.)
+            _LOGGER.warning(
+                "The 'who is speaking' script answered that the speaker is no known person "
+                "but gave no fixed reply and no reply agent, so the request is refused"
+            )
+            return self._speak(user_input, LAST_RESORT_REPLY)
         log = self._turn_log(user_input) or current_chat_log.get()
         text = self._labelled_text(user_input, resp.get("label"))
-        who = resp.get("who")
         if who in ("owner", "wife"):
             played = await self._favorite_reply(user_input, who, log, text)
             if played is not None and played is not NO_PLAYER:

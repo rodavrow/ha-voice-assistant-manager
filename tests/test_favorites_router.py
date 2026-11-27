@@ -414,8 +414,9 @@ async def test_regression_a_request_that_remembered_nobody_keeps_another_request
     outer = Asker("outer-entry", "wife", None)
     context = Context()
     remember(hass, context.id, outer)
+    # An older script's answer that does not say who is speaking: the one answer without
+    # a person that still reaches the main agent.
     guest = {
-        "who": "guest",
         "persona_for_this_message": "",
         "rule": "",
         "label": "",
