@@ -42,7 +42,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .recurring import RepeatError, plan_repeat
-from .reminder_search import Occurrence, SearchError, day_range, summarise
+from .reminder_search import DATA_NOTE, Occurrence, SearchError, day_range, shown, summarise
 from .reminders import HOUSEHOLD
 
 _LOGGER = logging.getLogger(__name__)
@@ -372,12 +372,13 @@ async def _async_cancel(hass: HomeAssistant, call: ServiceCall) -> ServiceRespon
     wanted = title.casefold()
     exact = {key: name for key, name in found.items() if name.strip().casefold() == wanted}
     matches = exact or {key: name for key, name in found.items() if wanted in name.casefold()}
+    # Which reminders match is decided on the whole titles; the agent gets them cut to size.
     names = sorted(set(matches.values()))
     if not names:
         return _error(f'No reminder called "{title}" is coming up.')
     if len(names) > 1:
         return _error(
-            f'Several reminders match "{title}": {"; ".join(names)}. Ask which one.'
+            f'Several reminders match "{title}": {"; ".join(map(shown, names))}. Ask which one.'
         )
     try:
         for entity, uid in matches:
@@ -390,7 +391,7 @@ async def _async_cancel(hass: HomeAssistant, call: ServiceCall) -> ServiceRespon
             err,
         )
         return _error(f"Reminder not cancelled. The calendar refused it: {err}")
-    return {"status": "ok", "removed": len(matches), "title": names[0]}
+    return {"status": "ok", "removed": len(matches), "title": shown(names[0])}
 
 
 def _as_local(when: datetime | date) -> tuple[datetime, bool]:
@@ -467,6 +468,7 @@ async def _async_list(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse
         "from": start.strftime("%A %Y-%m-%d %H:%M"),
         "count": len(found),
         "reminders": found,
+        "data_note": DATA_NOTE,
     }
     if ranged:
         answer["until"] = (end - timedelta(minutes=1)).strftime("%A %Y-%m-%d %H:%M")
