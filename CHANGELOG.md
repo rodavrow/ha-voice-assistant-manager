@@ -201,6 +201,12 @@ From a review of the whole integration on 2026-11-27. None of these was found in
 
 ### Fixed
 
+- **A chat started right after a wake word got a new assistant did not keep that avatar
+  connected.** Avatar mode for a wake word is switched on by the check that runs every
+  minute. A chat show started before that check waited 15 seconds for an avatar that could
+  not connect, and then that assistant opened a new LiveTalking session for every line,
+  which made the picture and sound of the others stutter. The chat now runs the check
+  itself before it connects its assistants.
 - **A reply to the avatar that could not go on left ffmpeg running.** When a satellite's
   avatar session changed during a reply, or LiveTalking stopped reading, the reply waited
   for its decoder for ever: one ffmpeg process, one connection and up to 10 MB of audio
