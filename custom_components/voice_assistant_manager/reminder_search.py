@@ -27,7 +27,10 @@ _FILLER: Final = frozenset(
 )
 _CODES: Final = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 _UNITS: Final = {"DAILY": "day", "WEEKLY": "week", "MONTHLY": "month", "YEARLY": "year"}
-_ASSISTANT_LINE: Final = re.compile(r"^\s*assistant:\s*(.*?)\s*$", re.IGNORECASE)
+# How much of a reminder's notes is read. A calendar lets anyone who can write it store far
+# more, and every look-up reads every reminder's notes.
+MAX_NOTES: Final = 2000
+_ASSISTANT_LABEL: Final = "assistant:"
 
 
 class SearchError(ValueError):
@@ -151,12 +154,12 @@ def describe_repeat(rrule: str | None) -> tuple[str, str]:
 def _split_description(description: str) -> tuple[str, str]:
     """The assistant that took the reminder, and the notes that are left."""
     assistant, notes = "", []
-    for line in str(description or "").splitlines():
-        found = _ASSISTANT_LINE.match(line)
-        if found is not None and not assistant:
-            assistant = found.group(1)
-        elif line.strip():
-            notes.append(line.strip())
+    for line in str(description or "")[:MAX_NOTES].splitlines():
+        line = line.strip()
+        if line[: len(_ASSISTANT_LABEL)].lower() == _ASSISTANT_LABEL and not assistant:
+            assistant = line[len(_ASSISTANT_LABEL) :].strip()
+        elif line:
+            notes.append(line)
     return assistant, "\n".join(notes)
 
 

@@ -224,20 +224,42 @@ def find(lists: Sequence[Sequence[Favorite]], name: str) -> Favorite | None:
 
 # Reading a play request.
 
-_TRAILING_PUNCTUATION = re.compile(r"[\s.!?,;:]+$")
+_TRAILING_PUNCTUATION = ".!?,;:"
 _POLITE_START = re.compile(
     r"^(?:please|can you|could you|would you|will you)\b[\s,]*", re.IGNORECASE
 )
-_POLITE_END = re.compile(r"[\s,]*\bplease$", re.IGNORECASE)
+_POLITE_END = "please"
 _PLAY = re.compile(r"play\s+(.+)", re.IGNORECASE)
 # Greedy, so the split is on the last " on " or " in ".
 _ON_PLAYER = re.compile(r"(.+)\s(?:on|in)\s(.+)", re.IGNORECASE)
 
 
+def _without_end(text: str, characters: str) -> str:
+    """`text` without the spaces and `characters` at its end.
+
+    Written out, not a pattern: "[...]+$" is tried from every place in a long run that
+    is not at the end, which takes time that grows with the square of the run's length.
+    """
+    end = len(text)
+    while end and (text[end - 1].isspace() or text[end - 1] in characters):
+        end -= 1
+    return text[:end]
+
+
+def _without_polite_end(text: str) -> str:
+    """`text` without a last word "please" and the spaces and commas before it."""
+    start = len(text) - len(_POLITE_END)
+    if start < 0 or text[start:].lower() != _POLITE_END:
+        return text
+    if start and (text[start - 1].isalnum() or text[start - 1] == "_"):
+        return text  # the end of a longer word
+    return _without_end(text[:start], ",")
+
+
 def _without_politeness(text: str) -> str:
     # A trailing "please" goes only once, so a name ending in "please" can still be asked for.
-    text = _TRAILING_PUNCTUATION.sub("", text)
-    text = _TRAILING_PUNCTUATION.sub("", _POLITE_END.sub("", text))
+    text = _without_end(text, _TRAILING_PUNCTUATION)
+    text = _without_end(_without_polite_end(text), _TRAILING_PUNCTUATION)
     previous = None
     while text != previous:
         previous = text
