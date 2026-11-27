@@ -202,7 +202,8 @@
               "face_for_tags": "Face for audio tags",
               "agent_down_line": "When the main agent fails, say",
               "emotion_tags": "Emotion tags",
-              "match_within": "The voice match arrives within"
+              "match_within": "The voice match arrives within",
+              "follow_up_window": "A question may be answered within"
             },
             "data_description": {
               "rule": "Added to the main agent's prompt after the persona. Explains the name labels in the shared history.",
@@ -213,7 +214,8 @@
               "avatar_stream": "For satellites in avatar mode whose firmware has the switch \"Avatar fed by Home Assistant\". On: a reply goes to the satellite's avatar while it is still being made, so the avatar starts speaking sooner, and that switch is turned on. The satellite keeps the normal audio as a backup. Off: the satellite waits for the whole reply and sends it to the avatar itself, as before. Other satellites are not affected.",
               "agent_down_line": "Spoken when the main agent cannot answer, for example because its AI provider is down, instead of ending the turn in silence. When empty: Sorry, I can't think right now. Please try again in a moment.",
               "emotion_tags": "The tags this assistant's avatar is told about, separated by commas, such as happy, sad, excited. A reply that starts with one, such as [excited], tells LiveTalking that emotion. Any other tag of letters is still never spoken and counts as neutral. Each tag is one word of letters, at most 18. LiveTalking needs talking frames for a tag, or it shows neutral. When empty: neutral, happy, sad, angry, sarcastic.",
-              "match_within": "Seconds after the satellite starts listening. Until then, a turn whose helper still says pending waits for the voice match; after a longer request it has already arrived. A turn without a match by then counts as an unknown voice, or as the same person in a follow-up. LANovo and EchoLocal displays match 4.6 to 5.5 seconds after the wake word."
+              "match_within": "Seconds after the satellite starts listening. Until then, a turn whose helper still says pending waits for the voice match; after a longer request it has already arrived. A turn without a match of its own by then is refused with \"Sorry, I can't tell who is speaking right now\", unless it answers a question the assistant asked. A match counts as the turn's own when it was written after the satellite started listening for it. LANovo and EchoLocal displays match 4.6 to 5.5 seconds after the wake word.",
+              "follow_up_window": "Seconds after a turn whose reply asked a question. Within that time, the answer on the same satellite counts as the same person's, also without a voice match: a satellite listens for an answer without a wake word and often makes no match for it. A new voice match still decides. Every other turn needs a voice match of its own. 0: never, so an answer is refused unless the satellite matches it."
             }
           }
         }
