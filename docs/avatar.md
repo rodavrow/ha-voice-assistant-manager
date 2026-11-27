@@ -109,7 +109,7 @@ An administrator can talk to an assistant's avatar without a satellite. In the a
 
 Otherwise the page says which of these is missing.
 
-**How a turn goes:** the microphone listens after a tap and stops by itself when you stop speaking. The page shows what was heard and the answer as text. While the avatar speaks the microphone is closed; when the assistant asked you something, it opens again by itself once the avatar is quiet.
+**How a turn goes:** the microphone listens after a tap and stops by itself when you stop speaking. The page shows what was heard and the answer as text; the **CC** button at the top switches that text off and on, and the choice is remembered on the device. Held upright, the picture is cropped around its middle to fill the screen; turned sideways, the whole picture is shown. While the avatar speaks the microphone is closed; when the assistant asked you something, it opens again by itself once the avatar is quiet.
 
 **From a shortcut:** opening the Voice Manager page with `?talk=` and an assistant's name, title or entry id starts the talk with that assistant at once, for example `/voice-assistant-manager?talk=jeeves`. In the Home Assistant app the same page is reached with the link `homeassistant://navigate/voice-assistant-manager?talk=jeeves`, which a phone shortcut can open (on an iPhone: a Shortcut with **Open URLs**, which can be put on the Action button). The microphone then opens by itself where the app lets a page do that without a tap; where it does not, one tap on the microphone starts it.
 

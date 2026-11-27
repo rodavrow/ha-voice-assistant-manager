@@ -19,6 +19,8 @@ const QUIET_LEVEL = 0.01;
 const QUIET_MS = 1200;
 const FIRST_SOUND_MS = 15000;
 const LEVEL_POLL_MS = 100;
+// Where the choice to show the text is kept, on this device.
+const CAPTIONS_KEY = "voice_assistant_manager.talk.captions";
 
 // Hands the microphone's samples to the page, a block at a time.
 const RECORDER = `
@@ -36,11 +38,16 @@ const STYLE = `
 :host { position: fixed; inset: 0; z-index: 1000; display: block; background: #000; color: #fff;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* Held upright, the wide picture is cropped around its middle, where the character is, to fill the screen. */
+@media (orientation: portrait) { video { object-fit: cover; object-position: center; } }
 .top { position: absolute; z-index: 2; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
   display: flex; align-items: center; gap: 12px; }
 .name { flex: 1; font-size: 20px; text-shadow: 0 1px 4px #000; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button { font: inherit; border: 0; cursor: pointer; }
-.close { padding: 10px 18px; border-radius: 999px; background: rgba(255, 255, 255, 0.9); color: #000; font-size: 16px; }
+.close, .captions { padding: 10px 18px; border-radius: 999px; background: rgba(255, 255, 255, 0.9); color: #000; font-size: 16px; }
+.captions { padding: 10px 14px; font-weight: 600; letter-spacing: 0.04em; }
+.captions[aria-pressed="false"] { background: rgba(0, 0, 0, 0.55); color: #fff; outline: 1px solid rgba(255, 255, 255, 0.6); text-decoration: line-through; }
+.said[hidden] { display: none; }
 .bottom { position: absolute; z-index: 2; left: 0; right: 0; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   display: grid; justify-items: center; gap: 12px; padding: 0 16px; }
 .said { max-width: 60ch; padding: 8px 14px; border-radius: 12px; background: rgba(0, 0, 0, 0.6); font-size: 16px; line-height: 1.35; text-align: center; }
@@ -60,6 +67,8 @@ const MIC_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 
 
 const TEXTS = {
   close: "Close",
+  captions: "CC",
+  captions_label: "Show what was said as text",
   speak: "Speak to the assistant",
   connecting: "Connecting to the avatar…",
   ready: "Tap the microphone and speak.",
@@ -96,7 +105,7 @@ class VamTalk extends HTMLElement {
     this._levels = null; // { context, analyser, data } listening to the avatar's own sound
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
       <video autoplay playsinline></video>
-      <div class="top"><div class="name"></div><button class="close" type="button"></button></div>
+      <div class="top"><div class="name"></div><button class="captions" type="button"></button><button class="close" type="button"></button></div>
       <div class="bottom">
         <div class="said" aria-live="polite"></div>
         <div class="status" role="status"></div>
@@ -111,12 +120,39 @@ class VamTalk extends HTMLElement {
     this._closeButton = root.querySelector(".close");
     this._closeButton.textContent = TEXTS.close;
     this._closeButton.addEventListener("click", () => this.close());
+    this._captionsButton = root.querySelector(".captions");
+    this._captionsButton.textContent = TEXTS.captions;
+    this._captionsButton.setAttribute("aria-label", TEXTS.captions_label);
+    this._captionsButton.addEventListener("click", () => this._setCaptions(!this._captions, true));
+    this._setCaptions(this._savedCaptions(), false);
     this._micButton.setAttribute("aria-label", TEXTS.speak);
     this._micButton.addEventListener("click", () => this._listen(false));
   }
 
   set hass(hass) {
     this._hass = hass;
+  }
+
+  /** Whether the text was last left on, on this device. On when nothing was kept. */
+  _savedCaptions() {
+    try {
+      return window.localStorage.getItem(CAPTIONS_KEY) !== "off";
+    } catch (err) {
+      return true;
+    }
+  }
+
+  /** Show or hide what was heard and answered as text; the status line always stays. */
+  _setCaptions(on, keep) {
+    this._captions = on;
+    this._said.hidden = !on;
+    this._captionsButton.setAttribute("aria-pressed", String(on));
+    if (!keep) return;
+    try {
+      window.localStorage.setItem(CAPTIONS_KEY, on ? "on" : "off");
+    } catch (err) {
+      // A browser that keeps nothing: the choice holds for this talk only.
+    }
   }
 
   disconnectedCallback() {
