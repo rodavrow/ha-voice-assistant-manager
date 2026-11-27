@@ -53,6 +53,7 @@ from .mine import (
 from .panel import panel_state
 from .panel_api import (
     LINE_PREVIEW_LENGTH,
+    chat_default_limits,
     chat_speakers,
     chat_start_refusal,
     favorites_change,
@@ -544,8 +545,9 @@ async def ws_favorites_search(
 
 
 # The chat show. A person starts one between assistants they are in, on any speaker a chat
-# can play on or on their own page, with the limits an administrator saved: the page sends
-# none. Anyone in an assistant may stop a chat and read its lines, which were spoken aloud.
+# can play on or on their own page, with limits of their own, held to the same ranges as an
+# administrator's; the saved ones stay an administrator's to change. Anyone in an assistant
+# may stop a chat and read its lines, which were spoken aloud.
 
 
 async def _may_chat(
@@ -573,6 +575,7 @@ async def ws_chat_state(
         {
             "ok": True,
             "chat": shown_chat(hass),
+            "defaults": chat_default_limits(hass),
             "routers": [r for r in routers_for_chat(hass) if r["entry_id"] in mine],
             "speakers": chat_speakers(hass),
             # The stage card, which the page shows for a chat on "This device".
@@ -588,6 +591,7 @@ async def ws_chat_state(
         vol.Required("b"): _ID,
         vol.Required("speaker"): _NAME,
         vol.Optional("topic", default=""): _LONG_TEXT,
+        vol.Optional("limits", default=dict): vol.All(dict, vol.Length(max=16)),
     }
 )
 @websocket_api.async_response
@@ -601,7 +605,7 @@ async def ws_chat_start(
     if msg["a"] not in mine or msg["b"] not in mine:
         connection.send_result(msg["id"], _refused(await _error_text(hass, "mine_not_yours")))
         return
-    text = await chat_start_refusal(hass, msg, {})
+    text = await chat_start_refusal(hass, msg, msg["limits"])
     connection.send_result(msg["id"], {"ok": True} if text is None else _refused(text))
 
 

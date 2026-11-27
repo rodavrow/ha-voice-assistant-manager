@@ -9,8 +9,8 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 - **The chat show is on My assistant too.** People who are not administrators get a
   **Chat show** section: they choose two assistants they are linked to, a speaker or
-  **This device**, and a topic, start and stop a chat, and read its lines. The limits of a
-  chat stay with an administrator: such a chat always runs with the saved ones. See
+  **This device**, a topic and the limits of that chat, start and stop a chat, and read its
+  lines. The saved limits a chat starts with stay with an administrator. See
   [For people who are not administrators](docs/chat-show.md#for-people-who-are-not-administrators).
 - **A chat show can play on the device you start it from.** The Speaker list of the chat
   show has a new first choice, **This device**: the Voice Manager page itself shows the

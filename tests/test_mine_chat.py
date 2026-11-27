@@ -47,7 +47,7 @@ async def linked(hass: HomeAssistant, show: Any, hass_read_only_user: MockUser) 
 
 @pytest.fixture(autouse=True)
 def short_chats() -> Iterator[None]:
-    """The saved limits, which a chat started here always runs with."""
+    """The saved limits, which a chat starts with unless the person changes them."""
     with patch.object(panel_api, "chat_defaults", return_value=ChatLimits(max_lines=2, pause=0)):
         yield
 
@@ -69,7 +69,7 @@ async def test_a_person_is_offered_their_own_assistants_and_the_speakers(
     assert state["stage_script"].startswith(stage.SCRIPT_URL)
 
 
-async def test_a_person_starts_a_chat_with_the_saved_limits(
+async def test_a_person_starts_a_chat_which_runs_with_the_saved_limits(
     hass: HomeAssistant, mine: Mine, show: Any, linked: None
 ) -> None:
     assert await mine.ok("chat/start", **start(show)) == {"ok": True}
@@ -79,13 +79,40 @@ async def test_a_person_starts_a_chat_with_the_saved_limits(
     assert (await mine.ok("chat/state"))["chat"]["ended"] == "chat_done"
 
 
-async def test_a_person_cannot_send_their_own_limits(
+async def test_a_person_sets_the_limits_of_their_chat(
     hass: HomeAssistant, mine: Mine, show: Any, linked: None
 ) -> None:
-    answer = await mine.call("chat/start", **start(show), limits={"max_lines": 500})
+    state = await mine.ok("chat/state")
+    assert state["defaults"]["max_lines"] == 2
 
-    assert answer["success"] is False
-    assert show.manager.state()["running"] is False
+    await mine.ok("chat/start", **start(show), limits={"max_lines": 3})
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert len(show.speakers.announced) == 3
+
+
+async def test_limits_out_of_range_are_brought_into_it(
+    hass: HomeAssistant, mine: Mine, show: Any, linked: None
+) -> None:
+    playing, release = gate(show)
+    await mine.ok("chat/start", **start(show), limits={"max_lines": 5000, "minutes": 5000})
+    await playing.wait()
+
+    limits = show.manager._chat.limits
+    await mine.ok("chat/stop")
+    release.set()
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert (limits.max_lines, limits.minutes) == (50, 30)
+
+
+async def test_limits_that_are_no_limits_are_refused(
+    hass: HomeAssistant, mine: Mine, show: Any, linked: None
+) -> None:
+    text = await mine.refused("chat/start", **start(show), limits={"volume": 11})
+
+    assert text.startswith("The chat limits are not valid")
+    assert show.manager.state()["assistants"] == []
 
 
 async def test_a_chat_with_someone_elses_assistant_is_refused(

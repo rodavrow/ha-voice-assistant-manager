@@ -98,11 +98,12 @@ Nobody can join in by voice on this device. The `start_chat` action cannot start
 
 **My assistant** has a **Chat show** section for every person of an assistant. There a person can:
 
-- choose two assistants they are Person 1 or Person 2 in, a speaker or **This device**, and an optional topic
+- choose two assistants they are Person 1 or Person 2 in, any speaker a chat can play on (a cast device shows the avatars as usual) or **This device**, and an optional topic
+- change the limits for that chat, within the same ranges as on the Voice Manager page
 - start the chat, and stop any running chat
 - read the lines of the current or last chat, whoever started it
 
-The limits (lines, words, pause, minutes, joining in by voice) are the ones saved on the Voice Manager page; the person's page cannot send its own. Setting up the stage for cast devices also stays there. Someone who is in no assistant is offered nothing.
+The limits start at the ones saved on the Voice Manager page. Saving limits, and setting up the stage for cast devices, stay there. Someone who is in no assistant is offered nothing.
 
 ## Showing who speaks
 

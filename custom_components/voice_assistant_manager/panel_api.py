@@ -725,6 +725,11 @@ async def chat_start_refusal(
     return None
 
 
+def chat_default_limits(hass: HomeAssistant) -> dict[str, Any]:
+    """The limits a chat starts with, as saved on the Voice Manager page."""
+    return asdict(chat_defaults(hass))
+
+
 def shown_chat(hass: HomeAssistant) -> ChatState:
     """The chat as a page is told of it.
 
@@ -864,7 +869,7 @@ async def ws_chat_state(
         msg["id"],
         {
             "chat": shown_chat(hass),
-            "defaults": asdict(chat_defaults(hass)),
+            "defaults": chat_default_limits(hass),
             "routers": routers_for_chat(hass),
             "speakers": chat_speakers(hass),
             "stage": _stage_state(hass),

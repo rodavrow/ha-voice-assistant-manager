@@ -58,6 +58,13 @@ const SECTIONS = [
 // that are no failure (chat_show.py).
 const CHAT_POLL_MS = 2000;
 const CHAT_ENDED_FINE = ["chat_done", "chat_time_up", "chat_stopped"];
+// The chat limits the card edits (chat_show.LIMIT_RANGES); "listen" is a checkbox, only for a speaker that can listen.
+const CHAT_LIMITS = [
+  { key: "max_lines", min: 2, max: 50, step: 1 },
+  { key: "words", min: 5, max: 80, step: 1 },
+  { key: "pause", min: 0, max: 10, step: 0.5 },
+  { key: "minutes", min: 1, max: 30, step: 1 },
+];
 // The stage card (stage.js) as the page shows it for a chat on "This device": over everything.
 const STAGE_CARD = "vam-chat-stage-card";
 const STAGE_BOX_STYLE = "position:fixed;inset:0;z-index:1000;background:#000;";
@@ -66,9 +73,14 @@ const STAGE_STOP_STYLE =
   "border:0;border-radius:999px;background:rgba(255,255,255,0.9);color:#000;font:inherit;font-size:16px;";
 
 const STYLE = `
-.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-bottom: 14px; }
-.pair .field { border-top: 0; padding: 0; align-content: start; }
-@media (max-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+.pair, .limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-bottom: 14px; }
+.pair .field, .limits .field { border-top: 0; padding: 0; align-content: start; }
+.limits { grid-template-columns: repeat(4, minmax(0, 1fr)); padding-top: 14px; border-top: 1px solid var(--vpr-line); }
+.limits-head { padding: 14px 0 0; border-top: 1px solid var(--vpr-line); }
+.limits-head h3 { margin: 0 0 4px; }
+.limits-head + .limits { border-top: 0; }
+.listen { display: flex; align-items: flex-start; gap: 10px; padding-bottom: 14px; }
+@media (max-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr); } .limits { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .chat-head { display: flex; align-items: center; gap: 12px; }
 .chat-head h3 { flex: 1; margin: 0; }
 .live { color: var(--vpr-primary); font-size: 13.5px; font-weight: 500; }
@@ -1452,6 +1464,8 @@ class VoicePersonaRouterMine extends HTMLElement {
       // "This device" unless the last chat was on a speaker that is still offered.
       speaker: offered ? last.speaker : this._here,
       topic: "",
+      // The saved limits, which the person may change for their chat.
+      limits: { ...state.defaults },
     };
   }
 
@@ -1516,6 +1530,42 @@ class VoicePersonaRouterMine extends HTMLElement {
       },
     });
     topic.dataset.key = "chat-topic";
+    const limit = ({ key, min, max, step }) => {
+      const control = h("input", {
+        id: `chat-${key}`,
+        type: "number",
+        min,
+        max,
+        step,
+        value: form.limits[key] === undefined ? "" : form.limits[key],
+        disabled: locked,
+        // Left empty, the saved limit is used.
+        oninput: (ev) => {
+          if (ev.target.value === "") delete form.limits[key];
+          else form.limits[key] = Number(ev.target.value);
+        },
+      });
+      control.dataset.key = `chat-${key}`;
+      return h("div", { class: "field" }, h("label", { for: `chat-${key}` }, this._t(`chat.${key}`)), control);
+    };
+    const chosen = state.speakers.find((item) => item.entity_id === form.speaker);
+    const listen =
+      chosen &&
+      chosen.listen &&
+      h(
+        "div",
+        { class: "listen" },
+        h("input", {
+          id: "chat-listen",
+          type: "checkbox",
+          checked: !!form.limits.listen,
+          disabled: locked,
+          onchange: (ev) => {
+            form.limits.listen = ev.target.checked;
+          },
+        }),
+        h("div", {}, h("label", { for: "chat-listen" }, this._t("chat.listen")), h("div", { class: "help" }, this._t("chat.listen_help")))
+      );
     const noWriter = [a, b].filter((item) => item && !item.has_writer);
     const label = (key) => (chat.busy === key ? this._t("chat.working") : this._t(`chat.${key}`));
     return h(
@@ -1531,7 +1581,7 @@ class VoicePersonaRouterMine extends HTMLElement {
         { class: "field" },
         h("label", { for: "chat-speaker" }, this._t("chat.speaker")),
         speaker,
-        h("div", { class: "help" }, this._t(here ? "chat.here_help" : "chat.speaker_help"))
+        h("div", { class: "help" }, this._t(here ? "chat.here_help" : chosen && chosen.cast ? "chat.cast_help" : "chat.speaker_help"))
       ),
       h(
         "div",
@@ -1540,6 +1590,9 @@ class VoicePersonaRouterMine extends HTMLElement {
         topic,
         h("div", { class: "help" }, this._t("chat.topic_help"))
       ),
+      h("div", { class: "limits-head" }, h("h3", {}, this._t("chat.limits")), h("div", { class: "help" }, this._t("chat.limits_help"))),
+      h("div", { class: "limits" }, CHAT_LIMITS.map(limit)),
+      listen,
       chat.error && h("div", { class: "notice error", role: "alert" }, chat.error),
       h(
         "div",
@@ -1547,8 +1600,7 @@ class VoicePersonaRouterMine extends HTMLElement {
         h("button", { class: "btn primary", disabled: locked || !ready, onclick: () => this._startChat() }, label("start")),
         // Stopped already: the last line is finishing, so there is nothing left to stop.
         h("button", { class: "btn danger", disabled: !running || !!state.chat.ended || !!chat.busy, onclick: () => this._stopChat() }, label("stop"))
-      ),
-      h("div", { class: "help" }, this._t("chat.limits_note"))
+      )
     );
   }
 
@@ -1610,7 +1662,13 @@ class VoicePersonaRouterMine extends HTMLElement {
     return this._chatAct("start", async () => {
       // The page must be watching the stage before the chat is let start on it.
       if (form.speaker === this._here) await this._openStage();
-      return this._call("chat/start", { a: form.a, b: form.b, speaker: form.speaker, topic: form.topic.trim() });
+      return this._call("chat/start", {
+        a: form.a,
+        b: form.b,
+        speaker: form.speaker,
+        topic: form.topic.trim(),
+        limits: { ...form.limits },
+      });
     });
   }
 
