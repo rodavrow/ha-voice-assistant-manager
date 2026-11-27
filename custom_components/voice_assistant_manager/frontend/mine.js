@@ -50,10 +50,34 @@ const SECTIONS = [
   { id: "reminders", icon: "mdi:bell-outline" },
   { id: "memory", icon: "mdi:head-lightbulb-outline" },
   { id: "favorites", icon: "mdi:star-outline" },
+  { id: "chat", icon: "mdi:forum-outline" },
   { id: "shared", icon: "mdi:home-account" },
 ];
 
+// The chat show: asked for again this often while a chat runs, and the reasons a chat ends
+// that are no failure (chat_show.py).
+const CHAT_POLL_MS = 2000;
+const CHAT_ENDED_FINE = ["chat_done", "chat_time_up", "chat_stopped"];
+// The stage card (stage.js) as the page shows it for a chat on "This device": over everything.
+const STAGE_CARD = "vam-chat-stage-card";
+const STAGE_BOX_STYLE = "position:fixed;inset:0;z-index:1000;background:#000;";
+const STAGE_STOP_STYLE =
+  "position:absolute;z-index:5;top:calc(12px + env(safe-area-inset-top, 0px));right:12px;padding:10px 18px;" +
+  "border:0;border-radius:999px;background:rgba(255,255,255,0.9);color:#000;font:inherit;font-size:16px;";
+
 const STYLE = `
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-bottom: 14px; }
+.pair .field { border-top: 0; padding: 0; align-content: start; }
+@media (max-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+.chat-head { display: flex; align-items: center; gap: 12px; }
+.chat-head h3 { flex: 1; margin: 0; }
+.live { color: var(--vpr-primary); font-size: 13.5px; font-weight: 500; }
+.transcript { list-style: none; margin: 12px 0 0; padding: 0; }
+.transcript li { padding: 9px 0 9px 14px; border-left: 3px solid var(--tone); margin-top: 6px; }
+.transcript li.one { --tone: var(--vpr-primary); }
+.transcript li.two { --tone: var(--vpr-text); }
+.transcript li.person { --tone: var(--vpr-muted); }
+.transcript .by { font-weight: 500; }
 :host {
   --vpr-bg: var(--primary-background-color, #f3f4f6);
   --vpr-card: var(--card-background-color, #ffffff);
@@ -310,6 +334,14 @@ class VoicePersonaRouterMine extends HTMLElement {
     this._favBusy = false;
     this._favForm = null; // the one open form: { list, mode: "edit" | "search" | "stream", ... }
     this._favError = null; // { list, text } after a refused remove
+    // The chat show: the last chat/state answer, the choices on the card, and the poll.
+    // busy names the command under way ("start" or "stop").
+    this._chat = { state: null, form: null, loading: false, busy: "", error: "", loadError: "", timer: null };
+    // A chat on "This device": the id this page watches the stage under, the speaker that
+    // stands for it (stage.py), and the stage card over the page while such a chat runs.
+    this._viewer = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    this._here = `page:${this._viewer}`;
+    this._stage = null; // { box, card, lock }
   }
 
   set hass(hass) {
@@ -317,6 +349,7 @@ class VoicePersonaRouterMine extends HTMLElement {
     this._hass = hass;
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) menu.hass = hass;
+    if (this._stage) this._stage.card.hass = hass;
     if (first) this._load();
   }
 
@@ -328,6 +361,12 @@ class VoicePersonaRouterMine extends HTMLElement {
 
   connectedCallback() {
     if (!this.shadowRoot.firstChild) this._render();
+    else if (this._section === "chat") this._loadChat();
+  }
+
+  disconnectedCallback() {
+    this._stopChatPoll();
+    this._closeStage();
   }
 
   // Data.
@@ -349,6 +388,7 @@ class VoicePersonaRouterMine extends HTMLElement {
     this._render();
     if (this._router) this._loadReminders();
     if (this._router && this._section === "favorites") this._loadFavorites();
+    if (this._router && this._section === "chat") this._loadChat();
   }
 
   get _router() {
@@ -532,6 +572,8 @@ class VoicePersonaRouterMine extends HTMLElement {
     // Favorites may have been added by voice too.
     else if (section === "favorites") this._loadFavorites();
     else this._render();
+    if (section === "chat") this._loadChat();
+    else this._stopChatPoll();
   }
 
   _toast(text) {
@@ -660,6 +702,7 @@ class VoicePersonaRouterMine extends HTMLElement {
       reminders: () => this._remindersView(),
       memory: () => this._memory(),
       favorites: () => this._favorites(),
+      chat: () => this._chatShow(),
       shared: () => this._shared(),
     }[this._section];
     return h("main", {}, draw());
@@ -1358,6 +1401,272 @@ class VoicePersonaRouterMine extends HTMLElement {
       ),
       this._favoriteFormEnd(form, this._t("favorites.add"), save)
     );
+  }
+
+  // The chat show: two of this person's assistants talk to each other.
+
+  get _chatShowing() {
+    return !!this._router && this._section === "chat" && this.isConnected;
+  }
+
+  _stopChatPoll() {
+    clearTimeout(this._chat.timer);
+    this._chat.timer = null;
+  }
+
+  /** Fetch the chat, and again every 2 s while one runs and its section is open. */
+  async _loadChat() {
+    const chat = this._chat;
+    if (chat.loading) return;
+    this._stopChatPoll();
+    chat.loading = true;
+    let changed;
+    try {
+      const state = await this._call("chat/state");
+      if (state.ok === false) throw new Error(refusal(state));
+      changed = JSON.stringify(state) !== JSON.stringify(chat.state) || !!chat.loadError;
+      chat.state = state;
+      chat.loadError = "";
+      if (!chat.form) chat.form = this._chatForm(state);
+    } catch (err) {
+      const text = reason(err) || "?";
+      changed = chat.loadError !== text;
+      chat.loadError = text;
+    }
+    chat.loading = false;
+    if (!this._chatShowing) return;
+    // Drawn again only for news, so a list someone is choosing from stays open.
+    if (changed) this._render();
+    if (chat.state && chat.state.chat.running) chat.timer = setTimeout(() => this._loadChat(), CHAT_POLL_MS);
+  }
+
+  /** The first choices: those of the last chat where still offered, else the first two assistants. */
+  _chatForm(state) {
+    const last = state.chat;
+    const ids = state.routers.map((router) => router.entry_id);
+    const id = (index) => (ids.includes(last.assistant_ids[index]) ? last.assistant_ids[index] : "");
+    const offered = state.speakers.some((item) => item.entity_id === last.speaker);
+    return {
+      a: id(0) || ids[0] || "",
+      b: id(1) || ids[1] || "",
+      // "This device" unless the last chat was on a speaker that is still offered.
+      speaker: offered ? last.speaker : this._here,
+      topic: "",
+    };
+  }
+
+  _chatShow() {
+    const chat = this._chat;
+    const head = this._head("chat", this._t("chat.lede"));
+    const failed = chat.loadError && h("div", { class: "notice error", role: "alert" }, this._t("failed", { reason: chat.loadError }));
+    if (!chat.state) return [head, failed || h("div", { class: "empty" }, this._t("chat.loading"))];
+    return [head, failed, this._chatSetup(), this._chatTranscript()];
+  }
+
+  _chatSetup() {
+    const chat = this._chat;
+    const { state, form } = chat;
+    const running = state.chat.running;
+    const locked = running || !!chat.busy;
+    const router = (id) => state.routers.find((item) => item.entry_id === id);
+    const a = router(form.a);
+    const b = router(form.b);
+    const here = form.speaker === this._here;
+    const speakerKnown = here || state.speakers.some((item) => item.entity_id === form.speaker);
+    const ready = !!a && !!b && a !== b && a.has_writer && b.has_writer && speakerKnown;
+    const changed = (key) => (ev) => {
+      form[key] = ev.target.value;
+      chat.error = "";
+      this._render();
+    };
+    const assistant = (key) =>
+      h(
+        "div",
+        { class: "field" },
+        h("label", { for: `chat-${key}` }, this._t(`chat.assistant_${key}`)),
+        h(
+          "select",
+          { id: `chat-${key}`, class: "input", disabled: locked, onchange: changed(key) },
+          h("option", { value: "", selected: !form[key] }, this._t("chat.choose_assistant")),
+          state.routers.map((item) => h("option", { value: item.entry_id, selected: item.entry_id === form[key] }, item.title))
+        )
+      );
+    const group = (domain, label) => {
+      const list = state.speakers.filter((item) => item.domain === domain);
+      return (
+        list.length > 0 &&
+        h("optgroup", { label }, list.map((item) => h("option", { value: item.entity_id, selected: item.entity_id === form.speaker }, item.name)))
+      );
+    };
+    const speaker = h(
+      "select",
+      { id: "chat-speaker", class: "input", disabled: locked, onchange: changed("speaker") },
+      h("option", { value: this._here, selected: here }, this._t("chat.this_device")),
+      group("assist_satellite", this._t("chat.satellites")),
+      group("media_player", this._t("chat.media_players"))
+    );
+    const topic = h("input", {
+      id: "chat-topic",
+      type: "text",
+      maxLength: 200,
+      value: form.topic,
+      disabled: locked,
+      oninput: (ev) => {
+        form.topic = ev.target.value;
+      },
+    });
+    topic.dataset.key = "chat-topic";
+    const noWriter = [a, b].filter((item) => item && !item.has_writer);
+    const label = (key) => (chat.busy === key ? this._t("chat.working") : this._t(`chat.${key}`));
+    return h(
+      "div",
+      { class: "card" },
+      h("h3", {}, this._t("chat.setup")),
+      state.routers.length < 2 && h("div", { class: "notice" }, this._t("chat.one_router")),
+      h("div", { class: "pair" }, assistant("a"), assistant("b")),
+      form.a && form.a === form.b && h("div", { class: "notice" }, this._text("error.chat_same_assistant")),
+      noWriter.map((item) => h("div", { class: "notice" }, this._t("chat.no_writer", { title: item.title }))),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { for: "chat-speaker" }, this._t("chat.speaker")),
+        speaker,
+        h("div", { class: "help" }, this._t(here ? "chat.here_help" : "chat.speaker_help"))
+      ),
+      h(
+        "div",
+        { class: "field" },
+        h("label", { for: "chat-topic" }, this._t("chat.topic")),
+        topic,
+        h("div", { class: "help" }, this._t("chat.topic_help"))
+      ),
+      chat.error && h("div", { class: "notice error", role: "alert" }, chat.error),
+      h(
+        "div",
+        { class: "row-actions" },
+        h("button", { class: "btn primary", disabled: locked || !ready, onclick: () => this._startChat() }, label("start")),
+        // Stopped already: the last line is finishing, so there is nothing left to stop.
+        h("button", { class: "btn danger", disabled: !running || !!state.chat.ended || !!chat.busy, onclick: () => this._stopChat() }, label("stop"))
+      ),
+      h("div", { class: "help" }, this._t("chat.limits_note"))
+    );
+  }
+
+  _chatTranscript() {
+    const { state } = this._chat;
+    const chat = state.chat;
+    if (!chat.assistants.length) return null;
+    const [a, b] = chat.assistants;
+    const found = state.speakers.find((item) => item.entity_id === chat.speaker);
+    const speaker = found ? found.name : chat.speaker.startsWith("page:") ? this._t("chat.this_device") : chat.speaker;
+    const tone = (who) => ["one", "two"][chat.assistants.indexOf(who)] || "person";
+    // Ended but still running: a stopped chat lets the line being spoken finish.
+    const finishing = chat.running && !!chat.ended;
+    return h(
+      "div",
+      { class: "card" },
+      h(
+        "div",
+        { class: "chat-head" },
+        h("h3", {}, this._t("chat.transcript")),
+        chat.running && !finishing && h("span", { class: "live" }, this._t("chat.live"))
+      ),
+      h("p", { class: "intro" }, this._t(chat.running ? "chat.running" : "chat.ended", { a, b, speaker })),
+      chat.lines.length > 0 &&
+        h(
+          "ol",
+          { class: "transcript" },
+          chat.lines.map((line) => h("li", { class: tone(line.who) }, h("span", { class: "by" }, `${line.who}:`), " ", line.text))
+        ),
+      chat.running && !finishing && !chat.lines.length && h("div", { class: "empty" }, this._t("chat.waiting")),
+      finishing && h("div", { class: "notice info" }, this._t("chat.finishing")),
+      chat.ended &&
+        !finishing &&
+        h("div", { class: `notice${CHAT_ENDED_FINE.includes(chat.ended) ? " info" : " error"}` }, this._text(`error.${chat.ended}`, chat.ended))
+    );
+  }
+
+  /** One chat command at a time; a refusal or failure is shown on the card. */
+  async _chatAct(busy, work) {
+    const chat = this._chat;
+    if (chat.busy) return;
+    chat.busy = busy;
+    chat.error = "";
+    this._render();
+    try {
+      const result = await work();
+      if (result && result.ok === false) chat.error = refusal(result);
+    } catch (err) {
+      chat.error = this._t("failed", { reason: reason(err) });
+    }
+    chat.busy = "";
+    this._render();
+    // Ask for the chat again now rather than at the next poll.
+    this._loadChat();
+  }
+
+  _startChat() {
+    const form = this._chat.form;
+    return this._chatAct("start", async () => {
+      // The page must be watching the stage before the chat is let start on it.
+      if (form.speaker === this._here) await this._openStage();
+      return this._call("chat/start", { a: form.a, b: form.b, speaker: form.speaker, topic: form.topic.trim() });
+    });
+  }
+
+  _stopChat() {
+    return this._chatAct("stop", () => this._call("chat/stop"));
+  }
+
+  /** Put the stage card over the page, hidden until a chat is on it, and wait until it watches. */
+  async _openStage() {
+    if (!this._stage) {
+      if (!customElements.get(STAGE_CARD)) await import(this._chat.state.stage_script);
+      const card = document.createElement(STAGE_CARD);
+      card.setConfig({ viewer: this._viewer, sound_text: this._t("chat.tap_for_sound") });
+      card.hass = this._hass;
+      card.addEventListener("vam-stage", (ev) => this._stageActive(ev.detail.active));
+      const stop = h("button", { type: "button", onclick: () => this._stopChat() }, this._t("chat.stop"));
+      stop.style.cssText = STAGE_STOP_STYLE;
+      const box = h("div", {}, card, stop);
+      box.style.cssText = STAGE_BOX_STYLE;
+      box.hidden = true;
+      // On the document, not in this page: drawing the page again would take the card off
+      // it for a moment, which closes its streams.
+      document.body.append(box);
+      this._stage = { box, card, lock: null };
+    }
+    if (!(await this._stage.card.watching())) throw new Error(this._t("chat.here_failed"));
+  }
+
+  /** Show the stage while a chat is on it, and keep the screen on meanwhile where that can be asked. */
+  _stageActive(active) {
+    const stage = this._stage;
+    if (!stage) return;
+    stage.box.hidden = !active;
+    if (active && !stage.lock && navigator.wakeLock) {
+      navigator.wakeLock
+        .request("screen")
+        .then((lock) => {
+          if (this._stage === stage && !stage.box.hidden) stage.lock = lock;
+          else lock.release();
+        })
+        .catch(() => {});
+    } else if (!active && stage.lock) {
+      stage.lock.release();
+      stage.lock = null;
+    }
+    // The chat ended, or started: show its lines now rather than at the next poll.
+    if (this._chatShowing) this._loadChat();
+  }
+
+  /** Leaving the page ends its stage: the chat on it ends a moment later (stage.py). */
+  _closeStage() {
+    const stage = this._stage;
+    if (!stage) return;
+    this._stage = null;
+    if (stage.lock) stage.lock.release();
+    stage.box.remove();
   }
 
   // Shared settings, read-only.

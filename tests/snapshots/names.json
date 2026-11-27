@@ -10,6 +10,9 @@
   ],
   "websocket_commands": [
     "voice_assistant_manager/me/add_reminder",
+    "voice_assistant_manager/me/chat/start",
+    "voice_assistant_manager/me/chat/state",
+    "voice_assistant_manager/me/chat/stop",
     "voice_assistant_manager/me/delete_reminder",
     "voice_assistant_manager/me/favorites/add",
     "voice_assistant_manager/me/favorites/get",

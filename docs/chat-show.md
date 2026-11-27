@@ -94,6 +94,16 @@ It does not need the stage set up for cast devices, and the **Avatars on cast de
 
 Nobody can join in by voice on this device. The `start_chat` action cannot start a chat here; only the page can.
 
+## For people who are not administrators
+
+**My assistant** has a **Chat show** section for every person of an assistant. There a person can:
+
+- choose two assistants they are Person 1 or Person 2 in, a speaker or **This device**, and an optional topic
+- start the chat, and stop any running chat
+- read the lines of the current or last chat, whoever started it
+
+The limits (lines, words, pause, minutes, joining in by voice) are the ones saved on the Voice Manager page; the person's page cannot send its own. Setting up the stage for cast devices also stays there. Someone who is in no assistant is offered nothing.
+
 ## Showing who speaks
 
 Some satellites can show which assistant is talking: those whose firmware offers a select whose entity id ends in `_next_announcement_assistant`, with the options **Default**, **Assistant 1** and **Assistant 2**. Before every line, that select is set to the assistant about to speak:

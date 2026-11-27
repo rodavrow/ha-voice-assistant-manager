@@ -708,7 +708,7 @@ def _chat_limits(hass: HomeAssistant, sent: Mapping[str, Any]) -> ChatLimits:
     return ChatLimits.from_dict({**asdict(chat_defaults(hass)), **sent})
 
 
-async def _chat_start_refusal(
+async def chat_start_refusal(
     hass: HomeAssistant, msg: Mapping[str, Any], sent: Mapping[str, Any]
 ) -> str | None:
     """Start the chat. Returns the refusal in plain words, or None when it started."""
@@ -725,7 +725,19 @@ async def _chat_start_refusal(
     return None
 
 
-def _routers_for_chat(hass: HomeAssistant) -> list[dict[str, Any]]:
+def shown_chat(hass: HomeAssistant) -> ChatState:
+    """The chat as a page is told of it.
+
+    A chat on "This device" is named without the page showing it: that page's id is what
+    lets a card watch the chat (stage.py), so no other page is given it.
+    """
+    chat = get_manager(hass).state()
+    if stage.viewer_of(chat["speaker"]):
+        chat["speaker"] = stage.page_speaker("")
+    return chat
+
+
+def routers_for_chat(hass: HomeAssistant) -> list[dict[str, Any]]:
     """Each loaded router, and whether it can write chat lines and has a character."""
     return [
         {
@@ -768,7 +780,7 @@ def _plays_chat_lines(hass: HomeAssistant, state: State, satellite_devices: set[
     return entry.device_id is None or entry.device_id not in satellite_devices
 
 
-def _chat_speakers(hass: HomeAssistant) -> list[dict[str, Any]]:
+def chat_speakers(hass: HomeAssistant) -> list[dict[str, Any]]:
     """Every satellite that can announce and media player a chat can play on, by name.
 
     Two speakers with one name get their entity id behind it, so they can be told apart.
@@ -826,7 +838,7 @@ async def ws_chat_start(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Start a chat between two routers on a speaker, or say in plain words why not."""
-    text = await _chat_start_refusal(hass, msg, msg["limits"])
+    text = await chat_start_refusal(hass, msg, msg["limits"])
     connection.send_result(msg["id"], {"ok": True} if text is None else _refused(text))
 
 
@@ -848,14 +860,13 @@ async def ws_chat_state(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """The chat, the saved defaults, and what the card may choose from."""
-    chat: ChatState = get_manager(hass).state()
     connection.send_result(
         msg["id"],
         {
-            "chat": chat,
+            "chat": shown_chat(hass),
             "defaults": asdict(chat_defaults(hass)),
-            "routers": _routers_for_chat(hass),
-            "speakers": _chat_speakers(hass),
+            "routers": routers_for_chat(hass),
+            "speakers": chat_speakers(hass),
             "stage": _stage_state(hass),
         },
     )
@@ -998,7 +1009,7 @@ def async_register_chat_services(hass: HomeAssistant) -> None:
 
     async def start_chat(call: ServiceCall) -> None:
         sent = {key: call.data[key] for key in CHAT_LIMIT_FIELDS if key in call.data}
-        text = await _chat_start_refusal(hass, call.data, sent)
+        text = await chat_start_refusal(hass, call.data, sent)
         if text is not None:
             raise ServiceValidationError(text)
 
