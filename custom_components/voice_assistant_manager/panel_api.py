@@ -72,8 +72,6 @@ from .favorites_play import (
     default_player,
 )
 from .memory import (
-    MAX_LINE_SCHEMA_LENGTH,
-    MAX_MAX_ITEMS,
     PERSON_LABELS,
     LineTooLongError,
     Person,
@@ -112,6 +110,10 @@ from .setup_guide import (
     tracking_automation,
 )
 from .status import favorites_tools_on, main_agent, router_status
+from .ws_helpers import MEMORY_LINES
+from .ws_helpers import error_text as _error_text
+from .ws_helpers import refused as _refused
+from .ws_helpers import strings as _strings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -133,26 +135,6 @@ ERROR_SECTIONS: dict[str, str] = {
     "refusal_agent_invalid": "strangers",
     "chat_character_too_long": "assistant",
 }
-
-
-async def _strings(hass: HomeAssistant) -> dict[str, str]:
-    """The texts of the Configure dialog, which the page shows next to the same fields."""
-    prefix = f"component.{DOMAIN}.options."
-    translations = await async_get_translations(hass, hass.config.language, "options", [DOMAIN])
-    return {
-        key.removeprefix(prefix): text
-        for key, text in translations.items()
-        if key.startswith(prefix)
-    }
-
-
-async def _error_text(hass: HomeAssistant, key: str, **placeholders: str) -> str:
-    text = (await _strings(hass)).get(f"error.{key}") or (await _strings(hass)).get(
-        f"abort.{key}", key
-    )
-    for name, value in placeholders.items():
-        text = text.replace(f"{{{name}}}", value)
-    return text
 
 
 def _settings(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
@@ -232,10 +214,6 @@ def _without_empty(values: Any) -> Any:
         for key, value in values.items()
         if value is not None and value != ""
     }
-
-
-def _refused(text: str) -> dict[str, Any]:
-    return {"ok": False, "errors": {"base": text}}
 
 
 @websocket_api.require_admin
@@ -400,12 +378,8 @@ async def ws_save_calendar(
         vol.Required("type"): f"{PREFIX}/save_memory",
         vol.Required("entry_id"): str,
         vol.Required("key"): str,
-        vol.Required("shown"): vol.All(
-            [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
-        ),
-        vol.Required("lines"): vol.All(
-            [vol.All(str, vol.Length(max=MAX_LINE_SCHEMA_LENGTH))], vol.Length(max=MAX_MAX_ITEMS)
-        ),
+        vol.Required("shown"): MEMORY_LINES,
+        vol.Required("lines"): MEMORY_LINES,
     }
 )
 @websocket_api.async_response
