@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import voluptuous as vol
 from homeassistant.auth.permissions.const import POLICY_CONTROL, POLICY_READ
@@ -122,13 +122,16 @@ LIST_SCHEMA = vol.Schema(
 class _Asker:
     name: str  # as create_reminder's for_whom: the person's name, lower case
     at: datetime
+    user_id: str | None = None  # the person's Home Assistant user, if the assistant has one
 
 
-def note_asker(hass: HomeAssistant, context: Context | None, name: str | None) -> None:
+def note_asker(
+    hass: HomeAssistant, context: Context | None, name: str | None, user_id: str | None = None
+) -> None:
     """Note who is speaking in the turn with this context, or that nobody known is.
 
     Called for every turn, so a context a satellite uses again never keeps an earlier
-    person.
+    person. `user_id` is the Home Assistant user the assistant's settings give the person.
     """
     if context is None:
         return
@@ -138,19 +141,109 @@ def note_asker(hass: HomeAssistant, context: Context | None, name: str | None) -
         del askers[context_id]
     shown = " ".join(str(name or "").split()).casefold()
     if shown and shown != HOUSEHOLD:
-        askers[context.id] = _Asker(shown, now)
+        askers[context.id] = _Asker(shown, now, user_id or None)
     else:
         askers.pop(context.id, None)
 
 
-def asker(hass: HomeAssistant, context: Context | None) -> str | None:
-    """Who is asking in the turn with this context, or None when that is not known."""
+def forget_asker(hass: HomeAssistant, context: Context | None) -> None:
+    """The turn with this context is over: its note no longer says who is asking."""
+    if context is not None:
+        hass.data.get(DOMAIN, {}).get(ASKERS, {}).pop(context.id, None)
+
+
+def _noted(hass: HomeAssistant, context: Context | None) -> _Asker | None:
     if context is None:
         return None
-    seen = hass.data.get(DOMAIN, {}).get(ASKERS, {}).get(context.id)
+    seen: _Asker | None = hass.data.get(DOMAIN, {}).get(ASKERS, {}).get(context.id)
     if seen is None or dt_util.utcnow() - seen.at > ASKER_LIFETIME:
         return None
-    return str(seen.name)
+    return seen
+
+
+def asker(hass: HomeAssistant, context: Context | None) -> str | None:
+    """Who is asking in the turn with this context, or None when that is not known."""
+    seen = _noted(hass, context)
+    return seen.name if seen is not None else None
+
+
+# Whose a calendar is. The caller's for_whom label is not proof: any Home Assistant user
+# can call an action with any label. The assistants' settings list each person's reminder
+# calendars and the household's, so those decide wherever they say something.
+
+
+@dataclass(frozen=True)
+class _Owners:
+    """Whose reminders a calendar holds, by the settings of every assistant."""
+
+    users: frozenset[str]
+    names: frozenset[str]
+    household: bool
+
+
+def _listed(hass: HomeAssistant) -> dict[str, _Owners]:
+    """Every calendar an assistant lists as a reminder calendar, with whose it is."""
+    users: dict[str, set[str]] = {}
+    names: dict[str, set[str]] = {}
+    household: set[str] = set()
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        reminders = entry.options.get("reminders") or {}
+        for role in ("owner", "partner"):
+            person = entry.options.get(role) or {}
+            name = " ".join(str(person.get("name") or "").split()).casefold()
+            for calendar in reminders.get(f"{role}_calendars") or []:
+                users.setdefault(calendar, set())
+                names.setdefault(calendar, set())
+                if person.get("user"):
+                    users[calendar].add(str(person["user"]))
+                if name:
+                    names[calendar].add(name)
+        household.update(reminders.get("household_calendars") or [])
+    return {
+        calendar: _Owners(
+            frozenset(users.get(calendar, ())),
+            frozenset(names.get(calendar, ())),
+            calendar in household,
+        )
+        for calendar in {*users, *household}
+    }
+
+
+@dataclass(frozen=True)
+class _Caller:
+    """Who calls an action: a person's turn, a user calling it directly, or an automation."""
+
+    kind: Literal["turn", "user", "automation"]
+    name: str | None = None
+    user_id: str | None = None
+
+
+def _caller(hass: HomeAssistant, call: ServiceCall) -> _Caller:
+    seen = _noted(hass, call.context)
+    if seen is not None:
+        return _Caller("turn", seen.name, seen.user_id)
+    if call.context.user_id:
+        return _Caller("user", None, call.context.user_id)
+    return _Caller("automation")
+
+
+def _may_use(caller: _Caller, owners: _Owners | None) -> bool | None:
+    """Whether the settings let this caller at a calendar; None when they do not say.
+
+    They do not say for a calendar no assistant lists, and for an automation, which is
+    trusted as before; then the for_whom label decides, as it always did. A user calling
+    directly has no turn that vouches for a label, so for them an unlisted calendar is
+    refused.
+    """
+    if caller.kind == "automation":
+        return None
+    if owners is None:
+        return False if caller.kind == "user" else None
+    if owners.household:
+        return True
+    if caller.user_id is not None:
+        return caller.user_id in owners.users
+    return caller.name in owners.names
 
 
 def _error(message: str) -> ServiceResponse:
@@ -228,36 +321,44 @@ def _may_not_cancel(hass: HomeAssistant, call: ServiceCall) -> str | None:
     """Why this call may not cancel in these calendars, or None when it may.
 
     A person cancels their own reminders and the household's, never the other person's.
-    Whose calendars these are is `for_whom`, which the script passes; who is asking is
-    the assistant's note for the turn. A call from a turn that does not say whose
-    calendars they are is refused, so an older script cannot get round this. A call that
-    is no turn of a known person (an automation) may cancel the household's, or, as
-    before, anything when it names nobody.
+    Who is asking is the assistant's note for the turn, or the user who calls the action.
+    Whose a calendar is comes from the assistants' settings (_may_use); for a calendar
+    they do not list it is `for_whom`, which the script passes. A call that does not say
+    whose calendars they are is refused, so an older script cannot get round this, unless
+    it has no user and is no turn (an automation): that may cancel the household's, or,
+    as before, anything when it names nobody.
     """
-    who = asker(hass, call.context)
+    caller = _caller(hass, call)
     for_whom = " ".join(str(call.data.get("for_whom") or "").split()).casefold()
-    if not for_whom:
-        if who is None:
-            return None
+    if not for_whom and caller.kind != "automation":
         return (
             "Reminder not cancelled. The cancel_reminder script must pass for_whom to "
             "cancel_reminder_event: it needs updating. Tell the person you cannot cancel "
             "reminders right now."
         )
-    if for_whom in {HOUSEHOLD, who}:
-        return None
-    return (
-        "Reminder not cancelled. A person can only cancel their own reminders and the "
-        f"household's, and this one is for {for_whom}. Tell them so."
-    )
+    listed = _listed(hass)
+    for calendar in call.data["calendar"]:
+        allowed = _may_use(caller, listed.get(calendar))
+        if allowed is None:
+            allowed = not for_whom or for_whom in {HOUSEHOLD, caller.name}
+        if not allowed:
+            whose = f"this one is for {for_whom}" if caller.kind != "user" else (
+                f"{calendar} holds neither"
+            )
+            return (
+                "Reminder not cancelled. A person can only cancel their own reminders and "
+                f"the household's, and {whose}. Tell them so."
+            )
+    return None
 
 
 async def _async_cancel(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     calendars: list[str] = call.data["calendar"]
     title = call.data["title"].strip()
+    # Home Assistant's own permission first, so a user without it is refused as before.
+    await _check_user(hass, call, calendars)
     if (refusal := _may_not_cancel(hass, call)) is not None:
         return _error(refusal)
-    await _check_user(hass, call, calendars)
     now = dt_util.now()
     # (calendar entity, uid) -> title, for each reminder still to come.
     found: dict[tuple[Any, str], str] = {}
@@ -297,13 +398,23 @@ def _as_local(when: datetime | date) -> tuple[datetime, bool]:
 
 
 async def _async_list(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    who = asker(hass, call.context)
-    allowed = {HOUSEHOLD} | ({who} if who else set())
-    mine = [
-        entry
-        for entry in call.data["reminders"]
-        if " ".join(entry["for_whom"].split()).casefold() in allowed
-    ]
+    caller = _caller(hass, call)
+    by_label = {HOUSEHOLD} | ({caller.name} if caller.name else set())
+    listed = _listed(hass)
+    mine: list[dict[str, Any]] = []
+    for entry in call.data["reminders"]:
+        labelled = " ".join(entry["for_whom"].split()).casefold() in by_label
+        allowed = [
+            (labelled if (may := _may_use(caller, listed.get(calendar))) is None else may)
+            for calendar in entry["calendar"]
+        ]
+        calendars = [
+            calendar
+            for calendar, usable in zip(entry["calendar"], allowed, strict=True)
+            if usable
+        ]
+        if calendars:
+            mine.append({**entry, "calendar": calendars})
     if not mine:
         return _error("No reminder calendar is set up for the person asking.")
     await _check_user(
@@ -356,7 +467,7 @@ async def _async_list(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse
     if ranged:
         answer["until"] = (end - timedelta(minutes=1)).strftime("%A %Y-%m-%d %H:%M")
     notes = []
-    if who is None:
+    if caller.kind == "automation":
         notes.append("Who is asking is not known, so only the household's reminders are shown.")
     if more:
         notes.append("There are more reminders than these. Ask for a day or a keyword.")
