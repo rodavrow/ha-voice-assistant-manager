@@ -15,7 +15,8 @@ from typing import Any, Literal
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant, ServiceCall, State, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -738,13 +739,63 @@ def _routers_for_chat(hass: HomeAssistant) -> list[dict[str, Any]]:
     ]
 
 
+# Integrations whose media players take a play_media call but cannot play a sound file:
+# Sony's own TV integration starts apps and channels only.
+_NO_SOUND_FILES = frozenset({"braviatv"})
+
+
+def _plays_chat_lines(hass: HomeAssistant, state: State, satellite_devices: set[str]) -> bool:
+    """Whether a chat can be offered on this speaker.
+
+    A satellite always. A media player unless it is away, cannot play a sound file (a TV's
+    own integration, a Music Assistant dashboard display), or belongs to a satellite that
+    is offered itself: the chat speaks through the satellite, which shows the avatars.
+    """
+    if state.domain != MEDIA_PLAYER_DOMAIN:
+        return True
+    if state.state == STATE_UNAVAILABLE:
+        return False
+    entry = er.async_get(hass).async_get(state.entity_id)
+    if entry is None:
+        return True
+    device_class = (
+        state.attributes.get("device_class") or entry.device_class or entry.original_device_class
+    )
+    if entry.platform in _NO_SOUND_FILES:
+        return False
+    if entry.platform == "music_assistant" and device_class == "tv":
+        return False
+    return entry.device_id is None or entry.device_id not in satellite_devices
+
+
 def _chat_speakers(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Every satellite that can announce and media player that can play media, by name."""
+    """Every satellite that can announce and media player a chat can play on, by name.
+
+    Two speakers with one name get their entity id behind it, so they can be told apart.
+    """
     voice = voice_satellites(hass)
+    registry = er.async_get(hass)
+    able = [
+        state
+        for domain in (SATELLITE_DOMAIN, MEDIA_PLAYER_DOMAIN)
+        for state in hass.states.async_all(domain)
+        if can_speak(hass, state.entity_id)
+    ]
+    satellite_devices = {
+        entry.device_id
+        for state in able
+        if state.domain == SATELLITE_DOMAIN
+        and (entry := registry.async_get(state.entity_id)) is not None
+        and entry.device_id
+    }
+    offered = [state for state in able if _plays_chat_lines(hass, state, satellite_devices)]
+    names = [str(state.attributes.get("friendly_name") or state.entity_id) for state in offered]
+    folded = [name.casefold() for name in names]
+    shared = {name for name in folded if folded.count(name) > 1}
     speakers = [
         {
             "entity_id": state.entity_id,
-            "name": str(state.attributes.get("friendly_name") or state.entity_id),
+            "name": f"{name} ({state.entity_id})" if name.casefold() in shared else name,
             "domain": state.domain,
             # A media player cannot hear anyone, so nobody can join in by voice there.
             "voice": state.entity_id in voice,
@@ -754,9 +805,7 @@ def _chat_speakers(hass: HomeAssistant) -> list[dict[str, Any]]:
             # A Google Cast device can show the avatars (stage.py).
             "cast": stage.is_cast_player(hass, state.entity_id),
         }
-        for domain in (SATELLITE_DOMAIN, MEDIA_PLAYER_DOMAIN)
-        for state in hass.states.async_all(domain)
-        if can_speak(hass, state.entity_id)
+        for state, name in zip(offered, names, strict=True)
     ]
     return sorted(speakers, key=lambda speaker: (speaker["name"].casefold(), speaker["entity_id"]))
 

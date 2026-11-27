@@ -499,3 +499,69 @@ async def test_the_actions_work_for_an_admin_user(hass, show, hass_admin_user):
     await finish(hass)
 
     assert show.manager.state()["ended"] == "chat_done"
+
+
+# Only speakers a chat can play on are offered
+
+
+def registered_player(
+    hass: HomeAssistant, platform: str, object_id: str, *, state: str = "idle",
+    device_class: str | None = None, device_id: str | None = None,
+) -> str:
+    """A media player of an integration, as the entity registry knows it."""
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    entry = er.async_get(hass).async_get_or_create(
+        "media_player", platform, object_id, suggested_object_id=object_id,
+        original_device_class=device_class, device_id=device_id,
+    )
+    hass.states.async_set(
+        entry.entity_id, state, {"supported_features": PLAY_MEDIA, "friendly_name": "Hall TV"}
+    )
+    return entry.entity_id
+
+
+async def test_regression_players_that_cannot_play_a_chat_line_are_not_offered(hass, page, show):
+    """Seen in the house: the list offered a TV's own integration (it takes apps and
+    channels only), a dashboard display and a player that was away, all under the same name
+    as the cast device that works. A chat sent to one of them ended at its first line."""
+    cast = registered_player(hass, "cast", "hall_tv_cast")
+    bravia = registered_player(hass, "braviatv", "hall_tv_bravia")
+    dashboard = registered_player(hass, "music_assistant", "hall_tv_dash", device_class="tv")
+    music = registered_player(hass, "music_assistant", "hall_speaker", device_class="speaker")
+    away = registered_player(hass, "cast", "hall_tv_away", state="unavailable")
+
+    offered = await speakers_now(page)
+
+    assert cast in offered and music in offered
+    assert bravia not in offered
+    assert dashboard not in offered
+    assert away not in offered
+
+
+async def test_two_speakers_with_one_name_are_told_apart(hass, page, show):
+    first = registered_player(hass, "cast", "hall_tv_one")
+    second = registered_player(hass, "music_assistant", "hall_tv_two", device_class="speaker")
+    add_speaker(hass, PLAYER, "idle", PLAY_MEDIA)
+
+    offered = await speakers_now(page)
+
+    assert offered[first]["name"] == f"Hall TV ({first})"
+    assert offered[second]["name"] == f"Hall TV ({second})"
+    assert "(" not in offered[PLAYER]["name"]
+
+
+async def test_a_satellites_own_media_players_are_not_offered_beside_it(hass, page, show):
+    """A display is a satellite and several media players. The chat speaks through the
+    satellite, which shows the avatars; its players only repeated its name in the list."""
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    satellite_device = er.async_get(hass).async_get(SATELLITE).device_id
+    assert satellite_device
+    own = registered_player(hass, "esphome", "kitchen_media", device_id=satellite_device)
+    other = registered_player(hass, "esphome", "hall_media")
+
+    offered = await speakers_now(page)
+
+    assert SATELLITE in offered and other in offered
+    assert own not in offered

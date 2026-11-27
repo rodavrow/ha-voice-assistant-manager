@@ -201,6 +201,12 @@ From a review of the whole integration on 2026-11-27. None of these was found in
 
 ### Fixed
 
+- **The chat show's speaker list only offers speakers a chat can play on.** It listed
+  every media player that accepts a play command, among them a TV's own integration
+  (apps and channels only), Music Assistant's dashboard displays, players that were away
+  and each display's own media players next to the display itself. A chat sent to one of
+  them ended at its first line. Those are no longer listed, and two speakers with the same
+  name now show their entity id behind it.
 - **A display that was unplugged no longer keeps the avatars off the TV.** A chat on a
   cast device needs room for two LiveTalking sessions. The last session of a display that
   had gone away kept counting, so with two other displays connected every chat on the TV
