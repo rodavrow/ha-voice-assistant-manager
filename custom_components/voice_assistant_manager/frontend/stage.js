@@ -5,6 +5,9 @@
 // one LiveTalking stream per assistant of the chat, through Home Assistant (the cast page is
 // on https, LiveTalking on http), shows the speaking one across the screen and the other in
 // an inset, and plays their voices from the same streams as their lips.
+//
+// The Voice Manager page uses the same card for a chat on "This device": with a `viewer` in
+// its config the card is told only of the chat that page started.
 
 const STAGE_WS = "voice_assistant_manager/stage";
 // A stream that is "disconnected" this long is reported lost; it often comes back sooner.
@@ -30,6 +33,9 @@ const STYLE = `
 .caption { position: absolute; left: 8%; right: 30%; bottom: 6%; z-index: 3; text-align: left; font-size: 30px; line-height: 1.3;
   padding: 10px 18px; border-radius: 12px; background: rgba(0, 0, 0, 0.65); }
 .caption:empty { display: none; }
+.sound { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4; font: inherit; font-size: 20px;
+  padding: 14px 24px; border: 0; border-radius: 999px; background: #fff; color: #000; }
+.sound[hidden] { display: none; }
 .idle { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 22px; color: rgba(255, 255, 255, 0.45); }
 `;
@@ -43,7 +49,7 @@ class VamChatStageCard extends HTMLElement {
     this._actors = new Map(); // key -> { name, pc, wrap, video, lostTimer, up }
     this._speaking = "";
     this._unsubscribe = null;
-    this._subscribing = false;
+    this._pending = null;
     this._render();
   }
 
@@ -71,24 +77,41 @@ class VamChatStageCard extends HTMLElement {
   }
 
   _render() {
-    this.shadowRoot.innerHTML = `<style>${STYLE}</style><div class="stage"><div class="idle"></div><div class="caption"></div></div>`;
+    this.shadowRoot.innerHTML = `<style>${STYLE}</style><div class="stage"><div class="idle"></div><div class="caption"></div><button class="sound" hidden></button></div>`;
     this._stage = this.shadowRoot.querySelector(".stage");
     this._idle = this.shadowRoot.querySelector(".idle");
     this._caption = this.shadowRoot.querySelector(".caption");
+    this._sound = this.shadowRoot.querySelector(".sound");
+    this._sound.addEventListener("click", () => this._unmute());
   }
 
-  async _subscribe() {
-    if (!this._hass || this._unsubscribe || this._subscribing) return;
-    this._subscribing = true;
-    try {
-      this._unsubscribe = await this._hass.connection.subscribeMessage((msg) => this._on(msg), {
-        type: `${STAGE_WS}/subscribe`,
-      });
-    } catch (err) {
-      console.warn("Chat stage: could not subscribe", err);
-    } finally {
-      this._subscribing = false;
+  _subscribe() {
+    if (!this._hass || this._unsubscribe) return Promise.resolve();
+    if (!this._pending) {
+      const viewer = this._config.viewer;
+      this._pending = this._hass.connection
+        .subscribeMessage((msg) => this._on(msg), { type: `${STAGE_WS}/subscribe`, ...(viewer ? { viewer } : {}) })
+        .then((unsubscribe) => {
+          // Taken off the page while it subscribed: nobody is left to hear it.
+          if (this.isConnected) this._unsubscribe = unsubscribe;
+          else unsubscribe();
+        })
+        .catch((err) => console.warn("Chat stage: could not subscribe", err))
+        .finally(() => {
+          this._pending = null;
+        });
     }
+    return this._pending;
+  }
+
+  /** Whether the card is watching the stage, once it has tried: a chat on this page waits for it. */
+  watching() {
+    return this._subscribe().then(() => !!this._unsubscribe);
+  }
+
+  /** Tells the page around the card whether a chat is on it, so it can show and hide the card. */
+  _active(on) {
+    this.dispatchEvent(new CustomEvent("vam-stage", { detail: { active: on } }));
   }
 
   _on(msg) {
@@ -96,6 +119,7 @@ class VamChatStageCard extends HTMLElement {
       if (msg.token !== this._token) {
         this._closeAll();
         this._token = msg.token;
+        this._active(true);
         this._captions = !!msg.captions;
         for (const actor of msg.actors) this._open(actor);
       }
@@ -181,6 +205,19 @@ class VamChatStageCard extends HTMLElement {
       console.warn("Chat stage: playing muted", err);
       video.muted = true;
       video.play().catch(() => {});
+      // On a page a person can tap for the sound; nobody can on a cast device.
+      if (this._config.viewer) {
+        this._sound.textContent = this._config.sound_text || "Tap for sound";
+        this._sound.hidden = false;
+      }
+    }
+  }
+
+  _unmute() {
+    this._sound.hidden = true;
+    for (const actor of this._actors.values()) {
+      actor.video.muted = false;
+      actor.video.play().catch((err) => console.warn("Chat stage: still no sound", err));
     }
   }
 
@@ -216,7 +253,9 @@ class VamChatStageCard extends HTMLElement {
   }
 
   _closeAll() {
+    if (this._token) this._active(false);
     this._token = "";
+    if (this._sound) this._sound.hidden = true;
     for (const actor of this._actors.values()) {
       clearTimeout(actor.lostTimer);
       actor.pc.onconnectionstatechange = null;

@@ -7,6 +7,13 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
+- **A chat show can play on the device you start it from.** The Speaker list of the chat
+  show has a new first choice, **This device**: the Voice Manager page itself shows the
+  two avatars talking, in a browser or in the Home Assistant app, with a Stop button.
+  Nothing is cast and no satellite or media player is used. Both assistants need an avatar
+  that is on and LiveTalking needs room for two sessions; otherwise the chat is refused
+  with the reason. The chat ends a few seconds after the page is closed or loses its
+  connection. See [On this device](docs/chat-show.md#on-this-device).
 - **Assistants can look reminders up.** "What reminders are there on Wednesday?" or "do
   we have a reminder for charging the car?" now gets an answer from the reminder
   calendars: each matching reminder with when it is next due, how it repeats, when that

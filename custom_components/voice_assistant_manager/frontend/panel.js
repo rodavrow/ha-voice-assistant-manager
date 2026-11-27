@@ -27,6 +27,13 @@ function h(tag, props, ...children) {
   return node;
 }
 
+// The stage card (stage.js) as the page shows it for a chat on "This device": over everything.
+const STAGE_CARD = "vam-chat-stage-card";
+const STAGE_BOX_STYLE = "position:fixed;inset:0;z-index:1000;background:#000;";
+const STAGE_STOP_STYLE =
+  "position:absolute;z-index:5;top:calc(12px + env(safe-area-inset-top, 0px));right:12px;padding:10px 18px;" +
+  "border:0;border-radius:999px;background:rgba(255,255,255,0.9);color:#000;font:inherit;font-size:16px;";
+
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -472,6 +479,11 @@ class VoicePersonaRouterPanel extends HTMLElement {
     // The chat show: the last chat/state answer, the choices on the card, and the poll.
     // busy names the command under way ("start", "stop", "defaults"); loadError is chat/state's.
     this._chat = { state: null, form: null, stale: true, loading: false, busy: "", error: "", loadError: "", timer: null };
+    // A chat on "This device": the id this page watches the stage under, the speaker that
+    // stands for it (stage.py), and the stage card over the page while such a chat runs.
+    this._viewer = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    this._here = `page:${this._viewer}`;
+    this._stage = null; // { box, card, lock }
     // Favorites: favorites/get's answer, fetched whenever the section opens. One change at a
     // time, as for memory: each answer replaces a whole list.
     this._fav = { data: null, stale: true, loading: false, error: "" };
@@ -487,6 +499,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     this._hass = hass;
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) menu.hass = hass;
+    if (this._stage) this._stage.card.hass = hass;
     if (first) this._load();
   }
 
@@ -503,6 +516,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
 
   disconnectedCallback() {
     this._stopChatPoll();
+    this._closeStage();
   }
 
   // Data.
@@ -2297,7 +2311,8 @@ class VoicePersonaRouterPanel extends HTMLElement {
     return {
       a: id(0) || ids[0] || "",
       b: id(1) || ids[1] || "",
-      speaker: last.speaker,
+      // A chat on a page was on "This device", whichever page that was.
+      speaker: last.speaker.startsWith("page:") ? this._here : last.speaker,
       topic: last.topic,
       limits: this._chatLimits(state.defaults),
     };
@@ -2315,7 +2330,10 @@ class VoicePersonaRouterPanel extends HTMLElement {
     const router = (id) => state.routers.find((item) => item.entry_id === id);
     const a = router(form.a);
     const b = router(form.b);
-    const speaker = state.speakers.find((item) => item.entity_id === form.speaker);
+    const speaker =
+      form.speaker === this._here
+        ? { entity_id: this._here, name: this._c("this_device"), here: true }
+        : state.speakers.find((item) => item.entity_id === form.speaker);
     const ready = !!a && !!b && a !== b && !!speaker && a.has_writer && b.has_writer;
     return { a, b, speaker, ready };
   }
@@ -2369,10 +2387,12 @@ class VoicePersonaRouterPanel extends HTMLElement {
       this._chatWarnings([choice.a, choice.b]),
       this._field("chatshow", "speaker", speaker, {
         label: this._c("speaker"),
-        help: state.speakers.length ? this._c("speaker_help") : this._c("no_speakers"),
+        help: this._c("speaker_help"),
       }),
+      choice.speaker && choice.speaker.here && h("div", { class: "help below" }, this._c("here_help")),
       choice.speaker && choice.speaker.cast && state.stage && state.stage.enabled && h("div", { class: "help below" }, this._c("cast")),
       choice.speaker &&
+        !choice.speaker.here &&
         (choice.speaker.voice
           ? h("div", { class: "help below" }, this._c("voice"))
           : h("div", { class: "notice below" }, this._c("no_voice"))),
@@ -2396,7 +2416,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
 
   /** Satellites and media players in two groups. A speaker no longer offered is not kept. */
   _speakerSelect(speakers, current, onchange) {
-    const known = speakers.some((item) => item.entity_id === current);
+    const known = current === this._here || speakers.some((item) => item.entity_id === current);
     const group = (domain, label) => {
       const list = speakers.filter((item) => item.domain === domain);
       return (
@@ -2412,6 +2432,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       "select",
       { class: "input", onchange: (ev) => onchange(ev.target.value) },
       h("option", { value: "", selected: !known }, this._c("choose_speaker")),
+      h("option", { value: this._here, selected: current === this._here }, this._c("this_device")),
       group("assist_satellite", this._c("satellites")),
       group("media_player", this._c("media_players"))
     );
@@ -2604,7 +2625,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     if (!chat.assistants.length) return null;
     const [a, b] = chat.assistants;
     const found = state.speakers.find((item) => item.entity_id === chat.speaker);
-    const speaker = found ? found.name : chat.speaker;
+    const speaker = found ? found.name : chat.speaker.startsWith("page:") ? this._c("this_device") : chat.speaker;
     const tone = (who) => ["one", "two"][chat.assistants.indexOf(who)] || "person";
     const fine = CHAT_ENDED_FINE.includes(chat.ended);
     // Ended but still running: a stopped chat lets the line being spoken finish.
@@ -2656,15 +2677,66 @@ class VoicePersonaRouterPanel extends HTMLElement {
 
   _startChat() {
     const form = this._chat.form;
-    return this._chatAct("start", () =>
-      this._call("chat/start", {
+    return this._chatAct("start", async () => {
+      // The page must be watching the stage before the chat is let start on it.
+      if (form.speaker === this._here) await this._openStage();
+      return this._call("chat/start", {
         a: form.a,
         b: form.b,
         speaker: form.speaker,
         topic: form.topic.trim(),
         limits: { ...form.limits },
-      })
-    );
+      });
+    });
+  }
+
+  /** Put the stage card over the page, hidden until a chat is on it, and wait until it watches. */
+  async _openStage() {
+    if (!this._stage) {
+      if (!customElements.get(STAGE_CARD)) await import(this._chat.state.stage.resource);
+      const card = document.createElement(STAGE_CARD);
+      card.setConfig({ viewer: this._viewer, sound_text: this._c("tap_for_sound") });
+      card.hass = this._hass;
+      card.addEventListener("vam-stage", (ev) => this._stageActive(ev.detail.active));
+      const stop = h("button", { type: "button", onclick: () => this._stopChat() }, this._c("stop"));
+      stop.style.cssText = STAGE_STOP_STYLE;
+      const box = h("div", {}, card, stop);
+      box.style.cssText = STAGE_BOX_STYLE;
+      box.hidden = true;
+      // On the document, not in this page: drawing the page again would take the card off
+      // it for a moment, which closes its streams.
+      document.body.append(box);
+      this._stage = { box, card, lock: null };
+    }
+    if (!(await this._stage.card.watching())) throw new Error(this._c("here_failed"));
+  }
+
+  /** Show the stage while a chat is on it, and keep the screen on meanwhile where that can be asked. */
+  _stageActive(active) {
+    const stage = this._stage;
+    if (!stage) return;
+    stage.box.hidden = !active;
+    if (active && !stage.lock && navigator.wakeLock) {
+      navigator.wakeLock
+        .request("screen")
+        .then((lock) => {
+          if (this._stage === stage && !stage.box.hidden) stage.lock = lock;
+          else lock.release();
+        })
+        .catch(() => {});
+    } else if (!active && stage.lock) {
+      stage.lock.release();
+      stage.lock = null;
+    }
+  }
+
+  /** Leaving the page ends its stage: the chat on it ends a moment later (stage.py). */
+  _closeStage() {
+    const stage = this._stage;
+    if (!stage) return;
+    this._stage = null;
+    if (stage.lock) stage.lock.release();
+    stage.box.remove();
   }
 
   _stopChat() {
