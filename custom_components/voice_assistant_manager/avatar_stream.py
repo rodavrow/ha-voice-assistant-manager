@@ -26,7 +26,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
@@ -48,7 +48,9 @@ CONF_STREAM: Final = avatar_devices.CONF_STREAM
 TURN_GRACE: Final = 2.0
 # LiveTalking gets this long to say "ready"; the speech is never held up longer.
 OPEN_TIMEOUT: Final = 0.3
-# No first audio from the engine for this long ends the reply on the avatar.
+# No first audio from the engine for this long ends the reply on the avatar, counted from
+# the end of the assistant's turn: while it still answers (the main agent calls a tool
+# before it says anything the engine can speak), the reply is held open as in a pause.
 STALL_TIMEOUT: Final = 5.0
 # Once it has spoken, a reply may pause: the main agent calls a tool (a web search) and
 # the engine gets no text meanwhile. After HOLD_AFTER without audio LiveTalking is told
@@ -119,6 +121,11 @@ def forget_turns(hass: HomeAssistant, entry_id: str) -> None:
 def turn_ended(turn: _Turn | None) -> None:
     if turn is not None:
         turn.ended = _now()
+
+
+def answering(hass: HomeAssistant, entry_id: str) -> bool:
+    """Whether a turn with this assistant is still running: more of its reply may come."""
+    return any(turn.ended is None for turn in _turns(hass).get(entry_id, []))
 
 
 def asking_satellite(hass: HomeAssistant, entry_id: str) -> str | None:
@@ -292,9 +299,16 @@ class ReplyFeed:
     """
 
     def __init__(
-        self, hass: HomeAssistant, target: FeedTarget, extension: str, options: Mapping[str, Any]
+        self,
+        hass: HomeAssistant,
+        target: FeedTarget,
+        extension: str,
+        options: Mapping[str, Any],
+        answering: Callable[[], bool] | None = None,
     ) -> None:
         self._hass = hass
+        # Whether the assistant's turn still runs; None for a clip that is already whole.
+        self._answering = answering
         self._target = target
         self._extension = extension
         self._options = dict(options)
@@ -426,10 +440,11 @@ class ReplyFeed:
         A pause after the first audio holds the reply open (see HOLD_AFTER).
         """
         last_audio: float | None = None  # None until the engine gave any
+        answered = self._opened  # When the assistant was last seen still answering
         holding = False
         while True:
             if last_audio is None:
-                wait = STALL_TIMEOUT
+                wait = min(HOLD_EVERY, STALL_TIMEOUT)
             else:
                 wait = HOLD_EVERY if holding else HOLD_AFTER
             try:
@@ -438,15 +453,24 @@ class ReplyFeed:
             except TimeoutError:
                 if self._stopped or self._session_changed():
                     break
-                paused = wait if last_audio is None else _now() - last_audio
-                if last_audio is None or paused >= HOLD_LIMIT:
+                now = _now()
+                if last_audio is not None:
+                    paused, over = now - last_audio, now - last_audio >= HOLD_LIMIT
+                else:
+                    if self._answering is not None and self._answering():
+                        answered = now
+                    paused = now - self._opened
+                    over = now - answered >= STALL_TIMEOUT or paused >= HOLD_LIMIT
+                if over:
                     _LOGGER.debug(
                         "Avatar stream: no audio for %.1f s, ending the reply", paused
                     )
                     break
                 if not holding:
                     _LOGGER.debug(
-                        "Avatar stream: reply %s paused, holding it open", self.reply_id
+                        "Avatar stream: reply %s %s, holding it open",
+                        self.reply_id,
+                        "paused" if last_audio is not None else "has no audio yet",
                     )
                 holding = True
                 await self._async_hold()

@@ -201,6 +201,16 @@ From a review of the whole integration on 2026-11-27. None of these was found in
 
 ### Fixed
 
+- **An assistant with an avatar says its opening sentence before it looks something up.**
+  When the main agent said "let me see what I can find" and then called a tool such as a
+  web search, the speech engine kept that sentence until the answer came, so nothing was
+  heard until the end. The avatar's voice now gives the engine a finished sentence as soon
+  as the text pauses for 0.4 seconds. This applies to assistants whose pipeline uses the
+  avatar entity; other pipelines go straight to the engine.
+- **A web search before the first sound no longer puts the reply back to a whole clip.**
+  The avatar's reply was closed when no audio came within 5 seconds, and the satellite
+  then waited for the complete clip, which added several seconds. The reply now stays
+  open while the assistant is still answering, for up to 90 seconds.
 - **A chat started right after a wake word got a new assistant did not keep that avatar
   connected.** Avatar mode for a wake word is switched on by the check that runs every
   minute. A chat show started before that check waited 15 seconds for an avatar that could

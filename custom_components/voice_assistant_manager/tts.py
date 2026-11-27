@@ -12,9 +12,11 @@ no reload.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import re
 from collections.abc import AsyncGenerator, Mapping
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.components import tts
 from homeassistant.config_entries import ConfigEntry
@@ -36,6 +38,12 @@ from .avatar import (
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Text that stops this long after a finished sentence is given to the engine as it is.
+SENTENCE_PAUSE: Final = 0.4
+_SENTENCE_END: Final = re.compile(r"[.!?…][\"')\]]*\s*$")
+# A blank line: what engines that speak sentence by sentence take as the end of one.
+_RELEASE: Final = "\n\n"
 
 
 async def async_setup_entry(
@@ -130,7 +138,9 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
     async def async_stream_tts_audio(self, request: tts.TTSAudioRequest) -> tts.TTSAudioResponse:
         engine = self._required_engine()
         request = tts.TTSAudioRequest(
-            request.language, request.options, self._voiced(request.message_gen)
+            request.language,
+            request.options,
+            released_on_pause(self._voiced(request.message_gen)),
         )
         response = await engine.internal_async_stream_tts_audio(request)
         return tts.TTSAudioResponse(
@@ -203,7 +213,11 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
             target = avatar_stream.feed_target(self.hass, self._entry, url)
             if target is None:
                 return None
-            feed = avatar_stream.ReplyFeed(self.hass, target, extension, options)
+            entry_id = self._entry.entry_id
+            feed = avatar_stream.ReplyFeed(
+                self.hass, target, extension, options,
+                answering=lambda: avatar_stream.answering(self.hass, entry_id),
+            )
             if not await feed.async_open():
                 return None
             # Cancelled with the assistant when it unloads.
@@ -256,6 +270,39 @@ class AvatarTTSEntity(tts.TextToSpeechEntity):
                 translation_placeholders={"engine": str(self._settings().get(CONF_ENGINE))},
             )
         return engine
+
+
+async def released_on_pause(
+    pieces: AsyncGenerator[str], pause: float = SENTENCE_PAUSE
+) -> AsyncGenerator[str]:
+    """The same text, with a blank line added when it pauses after a finished sentence.
+
+    An engine that speaks sentence by sentence keeps the last sentence until the next one
+    starts. When the main agent says "let me look that up" and then calls a tool, that
+    sentence would wait for the tool. The blank line makes the engine speak it at once.
+    """
+    tail = ""
+    coming: asyncio.Future[str] | None = None
+    try:
+        while True:
+            coming = asyncio.ensure_future(anext(pieces))
+            if _SENTENCE_END.search(tail):
+                done, _ = await asyncio.wait({coming}, timeout=pause)
+                if not done:
+                    tail = ""
+                    yield _RELEASE
+            try:
+                piece = await coming
+            except StopAsyncIteration:
+                return
+            tail = (tail + piece)[-8:]
+            yield piece
+    finally:
+        if coming is not None and not coming.done():
+            coming.cancel()
+            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                await coming
+        await pieces.aclose()
 
 
 async def _single(message: str) -> AsyncGenerator[str]:
