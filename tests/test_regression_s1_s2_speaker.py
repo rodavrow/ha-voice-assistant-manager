@@ -17,6 +17,7 @@ import asyncio
 import dataclasses
 import time
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from homeassistant.components import conversation
@@ -311,3 +312,46 @@ async def test_a_match_from_a_long_request_is_still_believed(hass):
     helper_since(hass, kitchen, "owner", 20)
 
     assert await said(hass, entry, kitchen, FakeAgents()) == "Noted."
+
+
+# Found by the review of these fixes
+
+
+async def test_regression_s1_the_time_to_answer_runs_from_the_reply_not_from_the_request(
+    hass, freezer
+):
+    """A slow agent and a long spoken question used up the time the person had to answer."""
+    router = await add_router(hass)
+    kitchen = add_satellite(hass)
+    entity = hass.data[conversation.DATA_COMPONENT].get_entity(router_entity_id(hass, router))
+    match(hass, kitchen, "owner")
+    turn = voice_turn(kitchen)
+    await speaker(hass, router, turn)
+    freezer.tick(40)
+    entity._note_reply(turn, SimpleNamespace(continue_conversation=True))
+
+    freezer.tick(40)
+    match(hass, kitchen, "pending")
+
+    assert await speaker(hass, router, voice_turn(kitchen)) == "owner"
+
+
+async def test_regression_s1_a_pending_left_by_an_earlier_turn_does_not_end_the_wait(hass):
+    """The earlier turn got no match, so the helper still says pending from then. The
+    automation writes no new pending for a wake word that follows closely, and this turn's
+    match was not waited for: the person was refused a moment before it arrived."""
+    router = await add_router(hass, options_with(advanced=WAITING))
+    kitchen = add_satellite(hass)
+    satellite = add_satellite_entity(hass, kitchen)
+    helper_since(hass, kitchen, "pending", 5)
+    await listens(hass, satellite)
+
+    async def late_match() -> None:
+        await asyncio.sleep(LATE)
+        match(hass, kitchen, "owner")
+
+    task = hass.async_create_task(late_match())
+    role = await speaker(hass, router, voice_turn(kitchen))
+    await task
+
+    assert role == "owner"

@@ -115,7 +115,7 @@ def follow_up_role(
                 then this is a new turn. Anything else proves nothing, because Home
                 Assistant drops a report with an unchanged value, so a second wake word
                 with the same phrase never shows.
-    window      how long after the previous turn the answer may come; zero keeps nobody.
+    window      how long after the reply the answer may come; zero keeps nobody.
     """
     if remembered is None or device_id != remembered.device_id:
         return None
