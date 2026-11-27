@@ -16,6 +16,9 @@ from custom_components.voice_assistant_manager.speaker import FOLLOW_UP_WINDOW
 from .router_helpers import MAIN_AGENT, FakeAgents, add_router, router_entity_id
 
 CONVERSATION = "01CONVERSATIONKITCHEN0000"
+# How long after the turn started a "late" voice match lands: longer than the router's
+# 0.1 s between looks at the helper, far inside the 6 s it waits.
+LATE = 0.25
 
 
 def add_satellite(hass: HomeAssistant, name: str = "Kitchen satellite") -> str:
@@ -188,7 +191,7 @@ async def test_a_late_stranger_match_on_a_follow_up_is_still_caught(hass):
     match(hass, kitchen, "pending")
 
     async def late_match() -> None:
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(LATE)
         match(hass, kitchen, "stranger")
 
     task = hass.async_create_task(late_match())
@@ -279,7 +282,7 @@ async def test_regression_a_repeated_wake_word_still_waits_for_the_match(hass):
     match(hass, kitchen, "pending")  # someone woke it again with the same phrase
 
     async def late_match() -> None:
-        await asyncio.sleep(1.3)
+        await asyncio.sleep(LATE)
         match(hass, kitchen, "stranger")
 
     task = hass.async_create_task(late_match())
@@ -350,7 +353,7 @@ async def test_a_match_landing_before_the_deadline_still_decides(hass):
     match_since(hass, kitchen, "pending", 3.5)  # a short request, 3.5 s after the wake word
 
     async def late_match() -> None:
-        await asyncio.sleep(1.3)
+        await asyncio.sleep(LATE)
         match(hass, kitchen, "stranger")
 
     task = hass.async_create_task(late_match())
@@ -376,7 +379,7 @@ async def test_regression_a_helper_left_pending_still_waits_at_the_next_wake_wor
     match(hass, kitchen, "pending")  # the new wake word: the same value written again
 
     async def the_match() -> None:
-        await asyncio.sleep(1.3)
+        await asyncio.sleep(LATE)
         match(hass, kitchen, "owner")
 
     task = hass.async_create_task(the_match())
