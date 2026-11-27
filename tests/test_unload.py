@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.voice_assistant_manager import async_unload_entry
+from custom_components.voice_assistant_manager import async_unload_entry, emotion
 from custom_components.voice_assistant_manager.const import DOMAIN
 from custom_components.voice_assistant_manager.memory import async_get_memory, entry_key
 
@@ -60,3 +60,14 @@ async def test_removing_an_assistant_forgets_what_only_it_remembered(hass: HomeA
 
     assert memory.items(entry_key(entry.entry_id, "owner")) == []
     assert er.async_get(hass).async_get_entity_id("conversation", DOMAIN, entry.entry_id) is None
+
+
+async def test_an_unloaded_assistant_leaves_no_reply_kept_for_its_voice(hass: HomeAssistant):
+    entry = await add_router(hass)
+    emotion.remember_spoken(hass, entry.entry_id, "Hello.", "[warm] Hello.")
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert emotion.take_spoken(hass, entry.entry_id, "Hello.") == "Hello."
+    assert entry.entry_id not in hass.data[DOMAIN].get("voice_tags_spoken", {})

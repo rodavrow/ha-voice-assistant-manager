@@ -315,6 +315,11 @@ def remember_spoken(hass: HomeAssistant, entry_id: str, shown: str, spoken: str)
         )
 
 
+def forget_spoken(hass: HomeAssistant, entry_id: str) -> None:
+    """Drop what was kept for an assistant that was unloaded."""
+    hass.data.get(DOMAIN, {}).get(_SPOKEN, {}).pop(entry_id, None)
+
+
 def take_spoken(hass: HomeAssistant, entry_id: str, shown: str) -> str:
     """The text to speak for `shown`: with its audio tags when it is the reply just given
     by this assistant, otherwise `shown` itself."""
