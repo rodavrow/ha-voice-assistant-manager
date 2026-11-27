@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import wave
 from collections.abc import Mapping
@@ -38,6 +39,8 @@ CONF_AVATAR_ID = "avatar_id"
 
 # A clip bigger than this is not copied or sent: a few minutes of speech at most.
 MAX_CLIP_BYTES = 10 * 1024 * 1024
+# LiveTalking's answers are a few hundred bytes; an SDP answer is a few kilobytes.
+MAX_REPLY_BYTES = 256 * 1024
 # LiveTalking makes a session per viewer, and refuses one past its --max_session (4 on the
 # household server). Satellites' own sessions count toward it too.
 MAX_SESSIONS = 4
@@ -293,33 +296,38 @@ class LiveTalkingClient:
 
     async def _async_post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         async with self._session.post(
-            f"{self._base_url}{path}", json=body, timeout=self._timeout
+            f"{self._base_url}{path}", json=body, timeout=self._timeout, allow_redirects=False
         ) as response:
             response.raise_for_status()
-            try:
-                payload = await response.json(content_type=None)
-            except ValueError as err:
-                raise LiveTalkingError(f"{path} reply is not JSON") from err
+            payload = await _async_json(response, path)
         if not isinstance(payload, dict):
             raise LiveTalkingError(f"{path} reply is not an object")
         return payload
 
     async def _async_sessions(self) -> list[tuple[str, str]]:
         async with self._session.get(
-            f"{self._base_url}/api/admin/sessions", timeout=self._timeout
+            f"{self._base_url}/api/admin/sessions", timeout=self._timeout, allow_redirects=False
         ) as response:
             response.raise_for_status()
-            try:
-                payload = await response.json(content_type=None)
-            except ValueError as err:
-                raise LiveTalkingError("sessions reply is not JSON") from err
+            payload = await _async_json(response, "sessions")
         return _sessions(payload)
 
     async def _async_post(self, path: str, **kwargs: Any) -> None:
         async with self._session.post(
-            f"{self._base_url}{path}", timeout=self._timeout, **kwargs
+            f"{self._base_url}{path}", timeout=self._timeout, allow_redirects=False, **kwargs
         ) as response:
             response.raise_for_status()
+
+
+async def _async_json(response: aiohttp.ClientResponse, what: str) -> Any:
+    """The JSON of an answer, read up to MAX_REPLY_BYTES. Raises LiveTalkingError."""
+    body = await response.content.read(MAX_REPLY_BYTES + 1)
+    if len(body) > MAX_REPLY_BYTES:
+        raise LiveTalkingError(f"{what} reply is larger than {MAX_REPLY_BYTES} bytes")
+    try:
+        return json.loads(body)
+    except ValueError as err:
+        raise LiveTalkingError(f"{what} reply is not JSON") from err
 
 
 def choose_viewers(

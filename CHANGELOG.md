@@ -151,7 +151,68 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   The wait counts from when `pending` was last written, also when the helper already
   said `pending` (left by a follow-up), so the next wake word is still waited for.
 
+### Security
+
+From a review of the whole integration on 2026-11-27. None of these was found in use.
+
+- **A voice match is only believed for the turn it was made for.** The helper that says
+  who spoke keeps its value until something writes over it, and the assistant believed
+  whatever it held. Someone who woke a satellite right after another person could be taken
+  for that person, and with the tracking automation off, or not knowing a satellite, every
+  voice was the last person matched. A match now counts only when it was written after the
+  satellite started listening for the turn, and not long ago; otherwise the request is
+  refused with "Sorry, I can't tell who is speaking right now."
+  **Check after updating:** a satellite that answered without its tracking automation
+  running will now refuse until the automation writes a match on every turn.
+- **A turn without a voice match keeps the earlier person only after a question.** Before,
+  any turn within a minute of a person's turn was taken for that person. Now only the
+  answer to a question the assistant asked is, within the new **A question may be answered
+  within** setting under Advanced (default 60 seconds, 0 for never).
+- **A new assistant assumes nobody for a device without a helper.** "A device without
+  speaker recognition is" was proposed as Person 1 and is now proposed as an unknown voice.
+  Assistants whose settings are saved keep their choice. A satellite that has speaker
+  sensors but no helper (one that was paired again, say) is refused whatever is set, and
+  the log names the missing helper.
+- **The next speaker starts afresh.** When another person speaks on a satellite than the
+  one before, the conversation's history is emptied first, so the main agent no longer
+  gets the first person's words and tool results, such as their reminders.
+- **The settings decide whose a reminder calendar is.** `list_reminder_events` and
+  `cancel_reminder_event` went by the `for_whom` label the caller passed, so a Home
+  Assistant user calling them directly could label the other person's calendar
+  "household". A calendar listed under Settings > Reminders now belongs to whom that list
+  says; a user calling directly gets only the calendars listed for them and the household.
+  See [Reminders](docs/reminders.md#asking-which-reminders-there-are).
+- **My assistant no longer shows Home Assistant's error text.** A failed action said why in
+  Home Assistant's own words, which can name entities or the other person's calendar. It
+  now says the reason is in the log. A new reminder's answer carries only the script's
+  status and message, and the page's text fields have length limits.
+- **An older "who is speaking" script that says the speaker is nobody known is refused in
+  code**, not only by the persona text it gave. A script that does not say who is speaking
+  is trusted as before; see [Limits](docs/limits.md).
+- **Long text no longer stalls every assistant.** A request over 2,000 characters is
+  refused with a spoken line; two patterns that took time growing with the square of the
+  text's length are gone.
+- **What people say stays out of the log**: a request's words (at debug level), a
+  reminder's title, a favourite's name and a search term were written there.
+- **Reminder titles and notes reach the main agent as data, cut to size**, and the decoder
+  for avatar replies may only read what it is piped; calls to LiveTalking follow no
+  redirects.
+
+
 ### Fixed
+
+- **A reply to the avatar that could not go on left ffmpeg running.** When a satellite's
+  avatar session changed during a reply, or LiveTalking stopped reading, the reply waited
+  for its decoder for ever: one ffmpeg process, one connection and up to 10 MB of audio
+  stayed until the assistant was reloaded. A reply now ends when it cannot go on, at the
+  latest after ten minutes, and what went wrong is logged.
+- **Memory by voice has the same limit as the editors.** "Remember ..." could grow a list
+  past 200 facts, and every prompt with it. When a list is full of facts you asked it to
+  remember, a new one is not saved and the log says the list is full.
+- **Removing the last assistant deletes the lists shared by all assistants**: the "all
+  assistants" memory lists and every favourites list.
+- The list of satellite turns kept for the avatar stream no longer grows until a restart.
+
 
 - **The avatar keeps its lips through a pause in a reply.** When the main agent calls a
   tool mid-reply (a web search, say), the voice gets no text for a few seconds. The

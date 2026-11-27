@@ -309,7 +309,7 @@ async def test_the_call_gives_up_after_300_ms(hass, entry):
             return None
 
     class Session:
-        def post(self, url, *, json, timeout):
+        def post(self, url, *, json, timeout, **kwargs):
             timeouts.append(timeout)
             return Response()
 
