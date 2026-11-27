@@ -252,7 +252,10 @@ async def async_open(
     if not is_cast_player(hass, speaker):
         return None
     if why := _refusal(hass, speaker, actors):
-        _LOGGER.info("Chat stage: not shown on %s, %s; the chat plays as audio", speaker, why)
+        # A warning: the person sees a chat without the avatars and needs to know why.
+        _LOGGER.warning(
+            "Chat stage: not shown on %s, %s; the chat plays as audio", speaker, why
+        )
         return None
     cast = [actor for actor in actors if actor is not None]
     show = Show(
