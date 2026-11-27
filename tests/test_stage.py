@@ -286,6 +286,20 @@ async def test_no_room_on_livetalking_plays_the_lines(hass, show, cast, caplog):
     assert any("room" in r.getMessage() for r in caplog.records)
 
 
+async def test_regression_a_stage_that_is_not_shown_is_a_warning_with_the_reason(
+    hass, show, cast, caplog
+):
+    """Seen in the house: with the displays holding three of LiveTalking's four sessions, a
+    chat on the TV played as sound without the avatars, and nothing in the log said why."""
+    taken = frozenset(f"s{n}" for n in range(stage.MAX_SESSIONS - 1))
+    with patch.object(stage, "device_sessions", return_value=taken):
+        await chat_on_tv(hass, show)
+
+    refused = [r for r in caplog.records if "plays as audio" in r.getMessage()]
+    assert [r.levelno for r in refused] == [logging.WARNING]
+    assert "1 are free" in refused[0].getMessage()
+
+
 async def test_a_card_that_never_connects_plays_the_lines(hass, show, cast, caplog):
     cast.device.connects = False
 

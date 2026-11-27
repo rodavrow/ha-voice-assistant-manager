@@ -201,6 +201,10 @@ From a review of the whole integration on 2026-11-27. None of these was found in
 
 ### Fixed
 
+- **A chat on a TV that plays without the avatars now says why in the log.** When the
+  stage could not be shown (LiveTalking had no room for two more sessions, an avatar was
+  off, the stage was not set up or was switched off), the chat played as sound and the
+  reason was only logged at a level Home Assistant does not show. It is now a warning.
 - **An assistant with an avatar says its opening sentence before it looks something up.**
   When the main agent said "let me see what I can find" and then called a tool such as a
   web search, the speech engine kept that sentence until the answer came, so nothing was
