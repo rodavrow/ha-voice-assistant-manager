@@ -372,6 +372,9 @@ class PersonaRouter(conversation.ConversationEntity):
                 break
             if state.state == "pending":
                 started = state.last_reported
+                if wait_when_old and since is not None:
+                    # A pending an earlier turn left behind says nothing about this one.
+                    started = max(started, since)
             elif wait_when_old and since is not None:
                 started = since
             else:
@@ -584,8 +587,9 @@ class PersonaRouter(conversation.ConversationEntity):
         key = user_input.conversation_id or ""
         seen = self._spoken_by.get(key)
         if seen is not None and seen.device_id == user_input.device_id:
+            # The time to answer runs from here, not from when the request came in.
             self._spoken_by[key] = dataclasses.replace(
-                seen, asked=bool(result.continue_conversation)
+                seen, asked=bool(result.continue_conversation), at=dt_util.utcnow()
             )
 
     async def _is_system_user(self, user_id: str) -> bool:
