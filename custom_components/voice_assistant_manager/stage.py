@@ -46,6 +46,7 @@ from .avatar import (
     device_sessions,
     enabled_avatar,
     normalize_url,
+    present_device_sessions,
 )
 from .const import DOMAIN
 
@@ -233,7 +234,8 @@ def _refusal(hass: HomeAssistant, speaker: str, actors: list[Actor | None]) -> s
         return "both assistants need an avatar that is on"
     if problem := setup_problem(hass):
         return f"the stage is not set up ({problem}); set it up under Chat show"
-    room = MAX_SESSIONS - len(device_sessions(hass))
+    # The displays that are there now: one that was unplugged holds nothing on LiveTalking.
+    room = MAX_SESSIONS - len(present_device_sessions(hass))
     if room < len(actors):
         return f"LiveTalking has room for {MAX_SESSIONS} sessions and {room} are free"
     return ""

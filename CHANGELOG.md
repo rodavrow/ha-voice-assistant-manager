@@ -201,6 +201,10 @@ From a review of the whole integration on 2026-11-27. None of these was found in
 
 ### Fixed
 
+- **A display that was unplugged no longer keeps the avatars off the TV.** A chat on a
+  cast device needs room for two LiveTalking sessions. The last session of a display that
+  had gone away kept counting, so with two other displays connected every chat on the TV
+  played as sound only. Room is now judged by the displays that are there.
 - **A chat on a TV that plays without the avatars now says why in the log.** When the
   stage could not be shown (LiveTalking had no room for two more sessions, an avatar was
   off, the stage was not set up or was switched off), the chat played as sound and the
