@@ -40,19 +40,6 @@ from .chat_show import (
     get_manager,
     voice_satellites,
 )
-from .config_flow import (
-    calendar_row_schema,
-    changed_calendar_rows,
-    current_settings,
-    login_users,
-    memory_list_choices,
-    person_names,
-    settings_error,
-    settings_error_placeholders,
-    settings_schema,
-    settings_to_save,
-    without_retired,
-)
 from .const import DOMAIN, PERSON_SECTION
 from .favorites import (
     HOUSEHOLD,
@@ -99,6 +86,19 @@ from .panel import (
     talk_zoom,
 )
 from .reminders import assistant_name
+from .settings import (
+    calendar_row_schema,
+    changed_calendar_rows,
+    current_settings,
+    login_users,
+    memory_list_choices,
+    person_names,
+    settings_error,
+    settings_error_placeholders,
+    settings_schema,
+    settings_to_save,
+    without_retired,
+)
 from .setup_guide import (
     STYLES,
     Satellite,

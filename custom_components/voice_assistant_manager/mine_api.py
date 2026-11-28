@@ -19,12 +19,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from .chat_show import get_manager
-from .config_flow import (
-    current_settings,
-    memory_list_choices,
-    settings_error,
-    settings_to_save,
-)
 from .favorites import (
     HOUSEHOLD,
     MAX_NAME_LENGTH,
@@ -62,6 +56,12 @@ from .panel_api import (
     shown_chat,
 )
 from .reminders import assistant_name
+from .settings import (
+    current_settings,
+    memory_list_choices,
+    settings_error,
+    settings_to_save,
+)
 from .ws_helpers import MEMORY_LINES
 from .ws_helpers import error_text as _error_text
 from .ws_helpers import refused as _refused
