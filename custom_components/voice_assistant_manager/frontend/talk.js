@@ -36,10 +36,16 @@ registerProcessor("vam-talk-recorder", VamTalkRecorder);
 
 const STYLE = `
 :host { position: fixed; inset: 0; z-index: 1000; display: block; background: #000; color: #fff;
+  --zoom: 0.5; --shape: 1.7778;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-/* Held upright, the wide picture is cropped around its middle, where the character is, to fill the screen. */
-@media (orientation: portrait) { video { object-fit: cover; object-position: center; } }
+/* Held upright, the wide picture is cropped around its middle, where the character is. How far
+   is the assistant's zoom: at 0 the whole picture shows between black bars (--shape is its
+   width over its height), at 1 it fills the screen, and in between it grows from one to the other. */
+@media (orientation: portrait) {
+  video { object-fit: cover; object-position: center; inset: 50% 0 auto 0; transform: translateY(-50%);
+    height: min(100%, calc(100vw / var(--shape) + (100% - 100vw / var(--shape)) * var(--zoom))); }
+}
 .top { position: absolute; z-index: 2; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top, 0px));
   display: flex; align-items: center; gap: 12px; }
 .name { flex: 1; font-size: 20px; text-shadow: 0 1px 4px #000; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -113,6 +119,11 @@ class VamTalk extends HTMLElement {
       </div>`;
     const root = this.shadowRoot;
     this._video = root.querySelector("video");
+    // The picture's own shape, for the upright zoom, once the stream tells it.
+    this._video.addEventListener("resize", () => {
+      const { videoWidth, videoHeight } = this._video;
+      if (videoWidth && videoHeight) this.style.setProperty("--shape", String(videoWidth / videoHeight));
+    });
     this._name = root.querySelector(".name");
     this._said = root.querySelector(".said");
     this._status = root.querySelector(".status");
@@ -162,10 +173,12 @@ class VamTalk extends HTMLElement {
   /**
    * Open the avatar of this assistant and wait for its stream. Shows why not when it cannot.
    * With `listen` the microphone opens by itself once the avatar is there, where the browser
-   * lets a page do that without a tap; elsewhere it waits for the tap as usual.
+   * lets a page do that without a tap; elsewhere it waits for the tap as usual. `zoom` is how
+   * far the picture is zoomed in on an upright screen, in percent.
    */
-  async open({ hass, entryId, title, listen }) {
+  async open({ hass, entryId, title, listen, zoom }) {
     this._autoListen = !!listen;
+    if (Number.isFinite(zoom)) this.style.setProperty("--zoom", String(Math.min(100, Math.max(0, zoom)) / 100));
     this._hass = hass;
     this._entryId = entryId;
     this._name.textContent = title;

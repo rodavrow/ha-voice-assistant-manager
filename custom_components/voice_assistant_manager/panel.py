@@ -47,6 +47,10 @@ GUIDE_STATES: tuple[GuideState, ...] = ("done", "dismissed", "started")
 _FINAL_STATES = ("done", "dismissed")
 STARTED = "started"
 GUIDE_STEPS = 7
+# How far the avatar is zoomed in on an upright screen: 0 shows the whole picture between
+# black bars, 100 fills the screen and cuts off the sides.
+MAX_TALK_ZOOM = 100
+DEFAULT_TALK_ZOOM = 50
 _PLAYER_PREFIX = "media_player."
 # "done", "dismissed" or {"state": "started", "step": n}, as kept in the Store.
 StoredGuide = str | dict[str, Any]
@@ -71,6 +75,9 @@ class PanelState:
     chat_stage: StageSettings = field(default_factory=StageSettings)
     # Where the stage card is served, with the version so an update is fetched again.
     stage_url: str = STAGE_SCRIPT_URL
+    # How far each assistant's avatar is zoomed in on an upright screen (talk.js), by config
+    # entry id; only those that differ from the usual zoom.
+    talk_zoom: dict[str, int] = field(default_factory=dict)
 
 
 def _register(hass: HomeAssistant, state: PanelState, *, update: bool) -> None:
@@ -189,6 +196,24 @@ def _stored_speaker_overrides(stored: Any) -> dict[str, str]:
     }
 
 
+def is_talk_zoom(zoom: Any) -> bool:
+    """Whether this is a zoom the talk page can show: a whole percentage."""
+    # bool is an int in Python, and never a percentage.
+    return isinstance(zoom, int) and not isinstance(zoom, bool) and 0 <= zoom <= MAX_TALK_ZOOM
+
+
+def stored_talk_zoom(stored: Any) -> dict[str, int]:
+    """The saved zooms; a store from before them has none, and a damaged one is dropped."""
+    saved = stored.get("talk_zoom") if isinstance(stored, dict) else None
+    if not isinstance(saved, dict):
+        return {}
+    return {
+        entry_id: zoom
+        for entry_id, zoom in saved.items()
+        if isinstance(entry_id, str) and is_talk_zoom(zoom)
+    }
+
+
 def _data(state: PanelState) -> dict[str, Any]:
     data: dict[str, Any] = {"sidebar": state.sidebar, "guide": state.guide}
     if state.speaker_overrides:
@@ -199,7 +224,25 @@ def _data(state: PanelState) -> dict[str, Any]:
         data["chat_defaults"] = asdict(state.chat_defaults)
     if state.chat_stage != StageSettings():
         data["chat_stage"] = asdict(state.chat_stage)
+    if state.talk_zoom:
+        data["talk_zoom"] = state.talk_zoom
     return data
+
+
+def talk_zoom(hass: HomeAssistant, entry_id: str) -> int:
+    """How far this assistant's avatar is zoomed in on an upright screen, in percent."""
+    return panel_state(hass).talk_zoom.get(entry_id, DEFAULT_TALK_ZOOM)
+
+
+async def async_set_talk_zoom(hass: HomeAssistant, entry_id: str, zoom: int) -> int:
+    """Remember the zoom of one assistant's avatar. The usual zoom is not kept."""
+    panel = panel_state(hass)
+    if zoom == DEFAULT_TALK_ZOOM:
+        panel.talk_zoom.pop(entry_id, None)
+    else:
+        panel.talk_zoom[entry_id] = zoom
+    await panel.store.async_save(_data(panel))
+    return zoom
 
 
 def chat_defaults(hass: HomeAssistant) -> ChatLimits:
@@ -292,6 +335,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             stored.get("chat_stage") if isinstance(stored, dict) else None
         ),
         stage_url=f"{STAGE_SCRIPT_URL}?v={integration.version}",
+        talk_zoom=stored_talk_zoom(stored),
     )
     announcement_look.set_enabled(hass, state.announcement_look)
     data_keys.domain_data(hass)[data_keys.PANEL] = state

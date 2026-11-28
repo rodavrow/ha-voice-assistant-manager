@@ -89,11 +89,14 @@ from .panel import (
     async_set_guide,
     async_set_sidebar,
     async_set_speaker_overrides,
+    async_set_talk_zoom,
     chat_defaults,
     guide_state,
     guide_step,
+    is_talk_zoom,
     panel_state,
     speaker_overrides,
+    talk_zoom,
 )
 from .reminders import assistant_name
 from .setup_guide import (
@@ -170,6 +173,7 @@ async def _router(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
         ],
         "last_announced": watcher.last_announced if watcher else None,
         "avatars": _avatars(hass, entry),
+        "talk_zoom": talk_zoom(hass, entry.entry_id),
     }
 
 
@@ -768,6 +772,39 @@ async def ws_talk_open(
     connection.send_result(msg["id"], {"ok": True, "sdp": answer, "pipeline": pipeline})
 
 
+def _zoom(value: Any) -> int:
+    """A whole percentage, as the slider next to the Talk button gives it."""
+    if not is_talk_zoom(value):
+        raise vol.Invalid("The zoom is a whole number from 0 to 100.")
+    zoom: int = value
+    return zoom
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{PREFIX}/talk/set_zoom",
+        vol.Required("entry_id"): str,
+        vol.Required("zoom"): _zoom,
+    }
+)
+@websocket_api.async_response
+async def ws_talk_set_zoom(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Save how far this assistant's avatar is zoomed in on an upright screen.
+
+    Kept with the page and not with the assistant's settings, so saving it does not reload
+    the assistant and end a talk that is open.
+    """
+    entry = _entry(hass, msg["entry_id"])
+    if entry is None:
+        connection.send_error(msg["id"], NOT_FOUND, "That assistant does not exist.")
+        return
+    zoom = await async_set_talk_zoom(hass, entry.entry_id, msg["zoom"])
+    connection.send_result(msg["id"], {"ok": True, "zoom": zoom})
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {vol.Required("type"): f"{PREFIX}/talk/close", vol.Required("entry_id"): str}
@@ -1317,6 +1354,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
         ws_chat_state,
         ws_talk_open,
         ws_talk_close,
+        ws_talk_set_zoom,
         ws_chat_save_defaults,
         ws_chat_save_stage,
         ws_favorites_get,

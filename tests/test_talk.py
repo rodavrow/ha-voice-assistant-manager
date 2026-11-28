@@ -11,7 +11,13 @@ from homeassistant.components import conversation
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.voice_assistant_manager import avatar, avatar_stream, stage, talk
+from custom_components.voice_assistant_manager import (
+    avatar,
+    avatar_stream,
+    panel,
+    stage,
+    talk,
+)
 from custom_components.voice_assistant_manager.avatar_stream import (
     ReplyFeed,
     feed_target,
@@ -345,3 +351,86 @@ async def test_the_talk_script_is_served(hass, hass_client, jeeves):
 
     assert response.status == 200
     assert 'customElements.define("vam-talk"' in await response.text()
+
+
+# How far the upright picture is zoomed in, per assistant
+
+PANEL = "voice_assistant_manager/panel"
+STORE = "voice_assistant_manager.panel"
+
+
+async def zoom_shown(client: Any, entry_id: str) -> Any:
+    await client.send_json_auto_id({"type": f"{PANEL}/get"})
+    routers = (await client.receive_json())["result"]["routers"]
+    return next(r for r in routers if r["entry_id"] == entry_id)["talk_zoom"]
+
+
+async def test_an_assistant_starts_halfway_zoomed_in(hass, page, jeeves):
+    assert await zoom_shown(page, jeeves.entry.entry_id) == panel.DEFAULT_TALK_ZOOM == 50
+
+
+async def test_the_zoom_is_saved_for_that_assistant_only(hass, page, jeeves, hass_storage):
+    answer = await call(page, "set_zoom", entry_id=jeeves.entry.entry_id, zoom=20)
+
+    assert answer["result"] == {"ok": True, "zoom": 20}
+    assert await zoom_shown(page, jeeves.entry.entry_id) == 20
+    assert await zoom_shown(page, jeeves.ada.entry_id) == 50
+    assert hass_storage[STORE]["data"]["talk_zoom"] == {jeeves.entry.entry_id: 20}
+
+
+async def test_saving_the_zoom_leaves_an_open_talk_alone(hass, page, jeeves):
+    await call(page, "open", entry_id=jeeves.entry.entry_id, sdp="offer-sdp")
+
+    await call(page, "set_zoom", entry_id=jeeves.entry.entry_id, zoom=0)
+    await hass.async_block_till_done()
+
+    assert talk.sessions(hass) == frozenset({"session-jeeves"})
+
+
+async def test_back_at_the_usual_zoom_nothing_is_kept(hass, page, jeeves, hass_storage):
+    await call(page, "set_zoom", entry_id=jeeves.entry.entry_id, zoom=80)
+
+    await call(page, "set_zoom", entry_id=jeeves.entry.entry_id, zoom=50)
+
+    assert "talk_zoom" not in hass_storage[STORE]["data"]
+
+
+@pytest.mark.parametrize("zoom", [-1, 101, 12.5, "wide", True])
+async def test_a_zoom_that_is_no_percentage_is_refused(hass, page, jeeves, zoom):
+    answer = await call(page, "set_zoom", entry_id=jeeves.entry.entry_id, zoom=zoom)
+
+    assert answer["success"] is False
+    assert await zoom_shown(page, jeeves.entry.entry_id) == 50
+
+
+async def test_the_zoom_of_an_assistant_that_is_not_there_is_refused(hass, page, jeeves):
+    answer = await call(page, "set_zoom", entry_id="nobody", zoom=10)
+
+    assert answer["success"] is False
+    assert answer["error"]["code"] == "not_found"
+
+
+async def test_setting_the_zoom_is_for_administrators(
+    hass, hass_ws_client, hass_read_only_access_token, jeeves
+):
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    answer = await call(client, "set_zoom", entry_id=jeeves.entry.entry_id, zoom=10)
+
+    assert answer["success"] is False
+    assert answer["error"]["code"] == "unauthorized"
+
+
+def test_only_whole_percentages_are_read_back_from_the_store():
+    stored = {"talk_zoom": {"a": 0, "b": 100, "c": 101, "d": "30", "e": True, "f": 12.5}}
+
+    assert panel.stored_talk_zoom(stored) == {"a": 0, "b": 100}
+    assert panel.stored_talk_zoom({"talk_zoom": [1, 2]}) == {}
+    assert panel.stored_talk_zoom(None) == {}
+
+
+def test_the_talk_page_sizes_the_upright_picture_by_the_zoom():
+    script = (panel.TALK_SCRIPT_FILE).read_text(encoding="utf-8")
+
+    assert "--zoom" in script
+    assert "object-fit: cover" in script
