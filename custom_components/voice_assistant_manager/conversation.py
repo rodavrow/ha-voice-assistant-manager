@@ -1216,12 +1216,48 @@ class PersonaRouter(conversation.ConversationEntity):
         return result
 
     async def _async_answer(self, user_input: Input) -> Result:
+        """One turn, in stages: who is asking, the chat show, a scripted reply, a shortcut
+        for a known person, the main agent, and the checks on what it answered."""
         if len(user_input.text) > MAX_REQUEST_CHARS:
             _LOGGER.warning(
                 "A request of %d characters is longer than an assistant takes, refusing it",
                 len(user_input.text),
             )
             return self._speak(user_input, TOO_LONG_LINE)
+        resp = await self._lookup(user_input)
+        self._note_asker(user_input, resp)
+        chat_reply = await self._chat_show_answer(user_input, resp)
+        if chat_reply is not None:
+            return chat_reply
+        if not resp:
+            # Nobody could be identified: fail closed, the main agent stays out of reach.
+            return self._speak(user_input, LAST_RESORT_REPLY)
+
+        main_agent = self._main_agent()
+        scripted = await self._scripted_reply(user_input, resp)
+        if scripted is not None:
+            return scripted
+        person = _known_person(resp)
+        emptied = self._start_afresh_for_another_speaker(user_input, str(resp.get("who")))
+        log = self._turn_log(user_input) or current_chat_log.get()
+        text = self._labelled_text(user_input, resp.get("label"))
+        if person is not None:
+            shortcut = await self._shortcut_reply(user_input, person, log, text)
+            if shortcut is not None:
+                return shortcut
+
+        conversation_id = self._main_conversation_id(user_input) if emptied else None
+        log_start = len(log.content) if log is not None else None
+        ask = self._main_agent_asker(user_input, resp, person, main_agent)
+        result = await self._first_answer(ask, text, conversation_id, main_agent)
+        if result is None:
+            return self._speak(user_input, self._agent_down_line())
+        return await self._checked_answer(
+            user_input, resp, result, log, log_start, conversation_id, ask
+        )
+
+    async def _lookup(self, user_input: Input) -> Lookup | None:
+        """Who is speaking and what to do with them, or None when that cannot be told."""
         resp = None
         try:
             settings = self._entry.options
@@ -1234,8 +1270,10 @@ class PersonaRouter(conversation.ConversationEntity):
         except Exception:  # noqa: BLE001 - a failed lookup is refused below
             resp = None
             _LOGGER.exception("Could not work out who is speaking, refusing")
-        self._note_asker(user_input, resp)
+        return resp
 
+    async def _chat_show_answer(self, user_input: Input, resp: Lookup | None) -> Result | None:
+        """The answer when the turn belongs to a chat show, else None."""
         try:
             chat_reply = await self._chat_show_reply(user_input, resp)
         except Exception:  # noqa: BLE001 - a chat show bug must not block every request
@@ -1245,11 +1283,10 @@ class PersonaRouter(conversation.ConversationEntity):
             return chat_reply
         if self._heard_a_chat(user_input, resp):
             return self._chat_turn(user_input, "unrecognised voice elsewhere, no answer", "")
-        if not resp:
-            # Nobody could be identified: fail closed, the main agent stays out of reach.
-            return self._speak(user_input, LAST_RESORT_REPLY)
+        return None
 
-        main_agent = self._main_agent()
+    async def _scripted_reply(self, user_input: Input, resp: Lookup) -> Result | None:
+        """A fixed or reply-agent answer that keeps the main agent out of reach, or None."""
         replies = resp.get("fixed_replies")
         if isinstance(replies, str):
             replies = [replies]
@@ -1272,9 +1309,7 @@ class PersonaRouter(conversation.ConversationEntity):
 
         if replies:
             return self._fixed_reply(user_input, replies)
-        who = resp.get("who")
-        person = _known_person(resp)
-        if "who" in resp and person is None:
+        if "who" in resp and _known_person(resp) is None:
             # Only an older "who is speaking" script gets here: the settings always give
             # someone who is no person a line to speak. Its persona asking the main agent
             # to refuse is no guarantee, so the main agent, and its tools, is not asked.
@@ -1284,22 +1319,27 @@ class PersonaRouter(conversation.ConversationEntity):
                 "but gave no fixed reply and no reply agent, so the request is refused"
             )
             return self._speak(user_input, LAST_RESORT_REPLY)
-        emptied = self._start_afresh_for_another_speaker(user_input, str(who))
-        log = self._turn_log(user_input) or current_chat_log.get()
-        text = self._labelled_text(user_input, resp.get("label"))
-        if person is not None:
-            played = await self._favorite_reply(user_input, person, log, text)
-            if played is not None and played is not NO_PLAYER:
-                return played
-            if played is None and not self._voices.answers_a_question(user_input):
-                handled = await self._local_command(
-                    user_input, log, self._entry.options.get("local") or {}, text
-                )
-                if handled is not None:
-                    return handled
+        return None
 
-        conversation_id = self._main_conversation_id(user_input) if emptied else None
-        log_start = len(log.content) if log is not None else None
+    async def _shortcut_reply(
+        self, user_input: Input, person: Person, log: ChatLog | None, text: str
+    ) -> Result | None:
+        """A favorite played or a local command done for a known person, or None."""
+        played = await self._favorite_reply(user_input, person, log, text)
+        if played is not None and played is not NO_PLAYER:
+            return played
+        if played is None and not self._voices.answers_a_question(user_input):
+            handled = await self._local_command(
+                user_input, log, self._entry.options.get("local") or {}, text
+            )
+            if handled is not None:
+                return handled
+        return None
+
+    def _main_agent_asker(
+        self, user_input: Input, resp: Lookup, person: Person | None, main_agent: str
+    ) -> Callable[[str, str | None], Awaitable[Result]]:
+        """What puts words to the main agent, as this person on this satellite."""
         context_id = user_input.context.id if user_input.context else None
         # Only this request's own record is forgotten: a router whose main agent is this
         # one may have remembered its asker under the same context.
@@ -1334,18 +1374,42 @@ class PersonaRouter(conversation.ConversationEntity):
                 if remembered:
                     forget(self.hass, remembered)
 
+        return ask
+
+    @staticmethod
+    async def _first_answer(
+        ask: Callable[[str, str | None], Awaitable[Result]],
+        text: str,
+        conversation_id: str | None,
+        main_agent: str,
+    ) -> Result | None:
+        """The main agent's answer, or None when it failed or gave an error without words."""
         try:
             result = await ask(text, conversation_id)
         except Exception:  # noqa: BLE001 - the person hears a line, not a failed turn
             _LOGGER.exception("The main agent %s failed, answering with a short line", main_agent)
-            return self._speak(user_input, self._agent_down_line())
+            return None
         if _silent_error(result):
             _LOGGER.error(
                 "The main agent %s answered with an error and no words, answering with a "
                 "short line",
                 main_agent,
             )
-            return self._speak(user_input, self._agent_down_line())
+            return None
+        return result
+
+    async def _checked_answer(
+        self,
+        user_input: Input,
+        resp: Lookup,
+        result: Result,
+        log: ChatLog | None,
+        log_start: int | None,
+        conversation_id: str | None,
+        ask: Callable[[str, str | None], Awaitable[Result]],
+    ) -> Result:
+        """The answer once claims without a tool call and reminder trouble are put right,
+        with the memory pass started unless the turn was about a reminder."""
         asked_in = conversation_id
         if conversation_id != user_input.conversation_id:
             asked_in = result.conversation_id
