@@ -1055,6 +1055,62 @@ class ChatShowManager:
         if left > 0:
             await asyncio.sleep(left)
 
+    async def _after_failed_line(
+        self,
+        chat: _Chat,
+        line: str,
+        err: HomeAssistantError,
+        listen: bool,
+        called: datetime,
+        attempt: int,
+    ) -> str | None:
+        """What a chat line whose announcement raised comes to.
+
+        "" when it counts as spoken and the chat goes on, the reason the chat must end
+        (or _LISTEN_UNAVAILABLE), or None when the line is to be tried again: the
+        satellite was busy, or dropped its connection before the line played and is back.
+        """
+        if chat.line_woken and not _is_busy_error(err):
+            # The announcement failed after the satellite woke on it: the line
+            # counts as spoken and the chat goes on.
+            _LOGGER.debug("%s failed a chat line it woke on: %s", chat.speaker, err)
+            return ""
+        if chat.line_dropped and not _is_busy_error(err):
+            if not await self._async_wait_back(chat.speaker):
+                _LOGGER.warning(
+                    "%s dropped its connection during a chat line and did not come "
+                    "back in %s s: %s",
+                    chat.speaker, RETURN_WAIT, err,
+                )
+                return "chat_speaker_failed"
+            if chat.line_audible:
+                # It goes on playing the line it had started.
+                _LOGGER.warning(
+                    "%s dropped its connection while a chat line played and is "
+                    "back; the chat goes on: %s",
+                    chat.speaker, err,
+                )
+                await self._async_let_finish(line, called)
+                return ""
+            _LOGGER.warning(
+                "%s dropped its connection before a chat line played and is back; "
+                "the line is tried again: %s",
+                chat.speaker, err,
+            )
+            return None
+        if not _is_busy_error(err):
+            if listen:
+                _LOGGER.warning(
+                    "%s could not start a conversation, announcing instead: %s",
+                    chat.speaker,
+                    err,
+                )
+                return _LISTEN_UNAVAILABLE
+            _LOGGER.warning("Could not announce a chat line on %s: %s", chat.speaker, err)
+            return "chat_speaker_failed"
+        _LOGGER.debug("%s is busy (attempt %s)", chat.speaker, attempt)
+        return None
+
     async def _async_announce(
         self, chat: _Chat, entry: ConfigEntry, line: str, listen: bool = False
     ) -> str:
@@ -1113,45 +1169,9 @@ class ChatShowManager:
                     await self._async_wait_listened(chat.speaker, watch)
                 return ""
             except HomeAssistantError as err:
-                if chat.line_woken and not _is_busy_error(err):
-                    # The announcement failed after the satellite woke on it: the line
-                    # counts as spoken and the chat goes on.
-                    _LOGGER.debug("%s failed a chat line it woke on: %s", chat.speaker, err)
-                    return ""
-                if chat.line_dropped and not _is_busy_error(err):
-                    if not await self._async_wait_back(chat.speaker):
-                        _LOGGER.warning(
-                            "%s dropped its connection during a chat line and did not come "
-                            "back in %s s: %s",
-                            chat.speaker, RETURN_WAIT, err,
-                        )
-                        return "chat_speaker_failed"
-                    if chat.line_audible:
-                        # It goes on playing the line it had started.
-                        _LOGGER.warning(
-                            "%s dropped its connection while a chat line played and is "
-                            "back; the chat goes on: %s",
-                            chat.speaker, err,
-                        )
-                        await self._async_let_finish(line, called)
-                        return ""
-                    _LOGGER.warning(
-                        "%s dropped its connection before a chat line played and is back; "
-                        "the line is tried again: %s",
-                        chat.speaker, err,
-                    )
-                    continue
-                if not _is_busy_error(err):
-                    if listen:
-                        _LOGGER.warning(
-                            "%s could not start a conversation, announcing instead: %s",
-                            chat.speaker,
-                            err,
-                        )
-                        return _LISTEN_UNAVAILABLE
-                    _LOGGER.warning("Could not announce a chat line on %s: %s", chat.speaker, err)
-                    return "chat_speaker_failed"
-                _LOGGER.debug("%s is busy (attempt %s)", chat.speaker, attempt)
+                outcome = await self._after_failed_line(chat, line, err, listen, called, attempt)
+                if outcome is not None:
+                    return outcome
             except TimeoutError:
                 if chat.line_woken:
                     _LOGGER.debug("%s woke and never finished a chat line", chat.speaker)
