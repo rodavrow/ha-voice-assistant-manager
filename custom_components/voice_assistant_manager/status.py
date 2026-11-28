@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """What the settings page says about a router: what works, and what needs attention."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import SimpleNamespace
 from typing import Any, Literal, NotRequired, TypedDict
 
@@ -222,57 +222,59 @@ def _exists(hass: HomeAssistant, entity_id: str) -> bool:
     return hass.states.get(entity_id) is not None
 
 
-def router_status(
-    hass: HomeAssistant, entry: ConfigEntry, settings: Mapping[str, Any]
-) -> list[StatusLine]:
-    """One line per thing worth knowing about a router, most serious first."""
-    lines: list[StatusLine] = []
+def _section(settings: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+    found = settings.get(name)
+    return found if isinstance(found, Mapping) else {}
 
-    def section(name: str) -> Mapping[str, Any]:
-        found = settings.get(name)
-        return found if isinstance(found, Mapping) else {}
 
-    main = main_agent(entry, settings)
+# Whether an agent may not be given text from someone unknown (announce.safe_toolless_agent).
+# Agent ids come straight from the settings, hence Any.
+type Unsafe = Callable[[Any], bool]
 
-    def unsafe(agent: Any) -> bool:
-        return safe_toolless_agent(hass, entry, agent, main_agent=main) is None
 
+def _main_agent_lines(hass: HomeAssistant, main: Any) -> list[StatusLine]:
     if not main:
-        lines.append(_line("error", "assistant", "No main agent is chosen."))
-    elif not _exists(hass, main):
-        lines.append(_line("error", "assistant", f"The main agent {main} does not exist."))
-    else:
-        lines.append(_line("ok", "assistant", f"Answers come from {main}."))
+        return [_line("error", "assistant", "No main agent is chosen.")]
+    if not _exists(hass, main):
+        return [_line("error", "assistant", f"The main agent {main} does not exist.")]
+    return [_line("ok", "assistant", f"Answers come from {main}.")]
 
-    for key, label in (("owner", "Person 1"), ("partner", "Person 2")):
-        if not str(section(key).get("name") or "").strip():
-            lines.append(_line("warn", "people", f"{label} has no name."))
-    lines.extend(_typed_request_lines(settings))
 
-    strangers = section("strangers")
+def _people_lines(settings: Mapping[str, Any]) -> list[StatusLine]:
+    return [
+        _line("warn", "people", f"{label} has no name.")
+        for key, label in (("owner", "Person 1"), ("partner", "Person 2"))
+        if not str(_section(settings, key).get("name") or "").strip()
+    ]
+
+
+def _stranger_lines(strangers: Mapping[str, Any], unsafe: Unsafe) -> list[StatusLine]:
     if strangers.get("mode") == "fixed":
-        lines.append(_line("info", "strangers", "Unknown voices get a fixed line."))
-    elif not strangers.get("reply_agent"):
-        lines.append(
+        return [_line("info", "strangers", "Unknown voices get a fixed line.")]
+    if not strangers.get("reply_agent"):
+        return [
             _line(
                 "warn",
                 "strangers",
                 "No agent is chosen to write refusals, so unknown voices get a fixed line.",
             )
-        )
-    elif unsafe(strangers.get("reply_agent")):
-        lines.append(
+        ]
+    if unsafe(strangers.get("reply_agent")):
+        return [
             _line(
                 "error",
                 "strangers",
                 "Unknown voices get fixed lines: the agent that writes refusals is missing, "
                 "is another assistant or can control the home.",
             )
-        )
-    else:
-        lines.append(_line("ok", "strangers", "Unknown voices are refused in character."))
+        ]
+    return [_line("ok", "strangers", "Unknown voices are refused in character.")]
 
-    memory = section("memory")
+
+def _memory_lines(
+    hass: HomeAssistant, memory: Mapping[str, Any], unsafe: Unsafe
+) -> list[StatusLine]:
+    lines: list[StatusLine] = []
     if not memory.get("enabled"):
         lines.append(_line("info", "memory", "Memory is off."))
     elif not memory.get("agent"):
@@ -290,68 +292,98 @@ def router_status(
         lines.append(_line("ok", "memory", "Memory is on."))
     if memory.get("use_global", True):
         lines.extend(_shared_list_lines(hass))
+    return lines
 
+
+def _face_lines(settings: Mapping[str, Any]) -> list[StatusLine]:
     # Checked against the settings as given, which may not be saved yet.
     unknown = emotion.unknown_faces(SimpleNamespace(options=settings))
-    if unknown:
+    if not unknown:
+        return []
+    return [
+        _line(
+            "warn",
+            "assistant",
+            f"Face for audio tags names {', '.join(unknown)}, which "
+            f"{'is' if len(unknown) == 1 else 'are'} not on the Emotion tags list, so "
+            f"{'that line is' if len(unknown) == 1 else 'those lines are'} ignored.",
+        )
+    ]
+
+
+def _calendar_lines(
+    hass: HomeAssistant, settings: Mapping[str, Any], rows: list[Mapping[str, Any]]
+) -> list[StatusLine]:
+    if not rows:
+        return [_line("info", "calendars", "No calendars are watched.")]
+    count = f"{len(rows)} calendar{'s' if len(rows) != 1 else ''}"
+    lines = [_line("ok", "calendars", f"{count} watched.")]
+    if not _section(settings, "calendars").get("script"):
         lines.append(
             _line(
                 "warn",
-                "assistant",
-                f"Face for audio tags names {', '.join(unknown)}, which "
-                f"{'is' if len(unknown) == 1 else 'are'} not on the Emotion tags list, so "
-                f"{'that line is' if len(unknown) == 1 else 'those lines are'} ignored.",
+                "calendars",
+                "Calendars are watched, but no script is chosen to speak their events.",
             )
         )
-
-    reminders = bool(section("reminders").get("enabled"))
-    lines.append(
-        _line("ok", "reminders", "The main agent can set reminders.")
-        if reminders
-        else _line("info", "reminders", "Reminders are off.")
+    lines.extend(
+        _line("warn", "calendars", f"The calendar {row['calendar']} does not exist.")
+        for row in rows
+        if not _exists(hass, str(row["calendar"]))
     )
+    return lines
 
-    rows = calendar_rows(entry.options)
-    if rows:
-        count = f"{len(rows)} calendar{'s' if len(rows) != 1 else ''}"
-        lines.append(_line("ok", "calendars", f"{count} watched."))
-        if not section("calendars").get("script"):
-            lines.append(
-                _line(
-                    "warn",
-                    "calendars",
-                    "Calendars are watched, but no script is chosen to speak their events.",
-                )
-            )
-        lines.extend(
-            _line("warn", "calendars", f"The calendar {row['calendar']} does not exist.")
-            for row in rows
-            if not _exists(hass, str(row["calendar"]))
-        )
-    else:
-        lines.append(_line("info", "calendars", "No calendars are watched."))
 
+def _announcement_lines(
+    hass: HomeAssistant, entry: ConfigEntry, settings: Mapping[str, Any], unsafe: Unsafe
+) -> list[StatusLine]:
+    """Lines about the agent that writes spoken reminders and calendar events."""
     writer = chosen_writer(settings)
-    if (reminders or rows) and writer and unsafe(writer):
-        lines.append(
+    if writer and unsafe(writer):
+        return [
             _line(
                 "error",
                 "reminders",
                 "Spoken lines fall back to plain text: the announcement agent is missing, is "
                 "another assistant or can control the home.",
             )
-        )
-    elif (reminders or rows) and writer_agent(hass, entry, quiet=True) is None:
-        lines.append(
+        ]
+    if writer_agent(hass, entry, quiet=True) is None:
+        return [
             _line(
                 "warn",
                 "reminders",
                 "No announcement agent is chosen. Spoken lines fall back to plain text.",
             )
-        )
+        ]
+    return []
 
-    lines.extend(_favorites_lines(hass, entry, main))
-    lines.extend(_satellite_lines(hass, entry))
 
+def router_status(
+    hass: HomeAssistant, entry: ConfigEntry, settings: Mapping[str, Any]
+) -> list[StatusLine]:
+    """One line per thing worth knowing about a router, most serious first."""
+    main = main_agent(entry, settings)
+
+    def unsafe(agent: Any) -> bool:
+        return safe_toolless_agent(hass, entry, agent, main_agent=main) is None
+
+    reminders = bool(_section(settings, "reminders").get("enabled"))
+    rows = calendar_rows(entry.options)
+    lines = [
+        *_main_agent_lines(hass, main),
+        *_people_lines(settings),
+        *_typed_request_lines(settings),
+        *_stranger_lines(_section(settings, "strangers"), unsafe),
+        *_memory_lines(hass, _section(settings, "memory"), unsafe),
+        *_face_lines(settings),
+        _line("ok", "reminders", "The main agent can set reminders.")
+        if reminders
+        else _line("info", "reminders", "Reminders are off."),
+        *_calendar_lines(hass, settings, rows),
+        *(_announcement_lines(hass, entry, settings, unsafe) if reminders or rows else []),
+        *_favorites_lines(hass, entry, main),
+        *_satellite_lines(hass, entry),
+    ]
     order = {"error": 0, "warn": 1, "ok": 2, "info": 3}
     return sorted(lines, key=lambda line: order[line["level"]])

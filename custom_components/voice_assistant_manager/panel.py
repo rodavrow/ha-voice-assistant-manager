@@ -19,7 +19,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 
 from . import announcement_look, data_keys
-from .chat_show import ChatLimits
+from .chat_text import ChatLimits
 from .const import DOMAIN
 from .stage import SCRIPT_URL as STAGE_SCRIPT_URL
 from .stage import StageSettings

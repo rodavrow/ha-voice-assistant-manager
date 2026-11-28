@@ -17,10 +17,10 @@ from homeassistant.components.calendar.const import DATA_COMPONENT, CalendarEnti
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .config_flow import current_settings, person_names
 from .const import DOMAIN
 from .memory import Person, shared_list_user
 from .reminders import assistant_name, for_whom
+from .settings import current_settings, person_names
 
 _LOGGER = logging.getLogger(__name__)
 

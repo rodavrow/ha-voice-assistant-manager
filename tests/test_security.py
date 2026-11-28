@@ -30,6 +30,7 @@ from custom_components.voice_assistant_manager.memory import (
     entry_key,
 )
 from custom_components.voice_assistant_manager.status import router_status
+from custom_components.voice_assistant_manager.voice_identity import VoiceIdentity
 
 from .router_helpers import (
     MAIN_AGENT,
@@ -184,7 +185,7 @@ async def test_regression_security_request_with_a_user_never_waits_for_a_pending
 
     with (
         agents.patched(),
-        patch.object(PersonaRouter, "_await_match", autospec=True) as helper_state,
+        patch.object(VoiceIdentity, "_await_match", autospec=True) as helper_state,
     ):
         await ask(hass, entry, "Hello", device_id=device_id, user_id=ALEX_USER)
 

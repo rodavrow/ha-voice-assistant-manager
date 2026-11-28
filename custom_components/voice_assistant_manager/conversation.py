@@ -26,11 +26,12 @@ Either source produces the same lookup result:
 import asyncio
 import dataclasses
 import enum
+import functools
 import logging
 import random
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Literal, TypedDict
 
 from homeassistant.components import conversation
@@ -41,22 +42,20 @@ from homeassistant.components.conversation.chat_log import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
-from homeassistant.core import HomeAssistant, State
-from homeassistant.helpers import entity_registry as er
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
-from . import avatar_stream, const, emotion, talk
+from . import avatar_stream, const, emotion, reply_checks, talk
 from .announce import safe_toolless_agent
-from .avatar import esphome_entity
-from .chat_show import GUEST, get_manager, is_stop_phrase
+from .chat_show import get_manager
+from .chat_text import GUEST, is_stop_phrase
 from .const import (
     DEFAULT_MIN_SCORE,
     PERSON_SECTION,
     REPLY_AGENT_TIMEOUT,
-    WAKE_WORD_SENSOR,
 )
 from .favorites import (
     Favorite,
@@ -77,7 +76,6 @@ from .favorites_play import (
     resolve_player,
 )
 from .helpers import speech_text
-from .listening import listening_since
 from .memory import (
     MEMORY_FULL_RULE,
     REMEMBER_RULE,
@@ -91,7 +89,6 @@ from .memory import (
     entry_key,
     get_loaded_memory,
     global_key,
-    has_memory_keyword,
     memory_block,
     router_agent_ids,
     shared_list_ok,
@@ -107,35 +104,16 @@ from .reminders import (
     DEFAULT_LIST_FAILURE_LINE,
     LIST_TOOL,
     PUT_RIGHT,
-    REMINDER_TOOL,
     RETRY_NOTES,
     SPOKE_TOO_SOON,
     a_tool_worked,
     assistant_name,
-    is_cancel_turn,
-    is_list_turn,
-    is_reminder_exchange,
-    is_reminder_turn,
     looks_like_action_claim,
-    looks_like_cancellation,
-    looks_like_confirmation,
-    looks_like_listing,
-    needs_honest_cancel_failure,
-    needs_honest_failure,
     reminder_guidance,
     reminder_tool_outcome,
-    used_a_tool,
 )
-from .speaker import (
-    CONVERSATION_LIFETIME,
-    FOLLOW_UP_WINDOW,
-    UTTERANCE_ALLOWANCE,
-    Remembered,
-    Role,
-    follow_up_role,
-    resolve_speaker,
-    verdict_is_current,
-)
+from .speaker import CONVERSATION_LIFETIME
+from .voice_identity import VoiceIdentity
 from .wake_handoff import async_hand_off
 
 _LOGGER = logging.getLogger(__name__)
@@ -287,20 +265,18 @@ class PersonaRouter(conversation.ConversationEntity):
         self._last_fixed: str | None = None
         # The unsafe agent last logged for each use ("refusal", "memory"), to log it once.
         self._unsafe_logged: dict[str, str] = {}
-        # conversation_id -> the person of its last voice turn (speaker.follow_up_role).
-        self._spoken_by: dict[str, Remembered] = {}
-        # Satellites whose last voice turn got no voice match, to warn once per outage.
-        self._no_match: set[str] = set()
         # conversation_id -> the person whose turn last reached the history, and when.
         self._last_in_history: dict[str, tuple[str, datetime]] = {}
-        # Satellites that recognise speakers but have no helper, to warn once each.
-        self._no_helper: set[str] = set()
-        # conversation_id -> when its last reply asked the person a question.
-        self._asked: dict[str, datetime] = {}
 
     @property
     def supported_languages(self) -> list[str] | Literal["*"]:
         return MATCH_ALL
+
+    @functools.cached_property
+    def _voices(self) -> VoiceIdentity:
+        """Who is speaking. Made on first use: Home Assistant sets hass once the entity
+        is added, and no turn reaches the router before that."""
+        return VoiceIdentity(self.hass, self._entry)
 
     def _main_agent(self) -> str:
         saved = self._entry.options.get("agents")
@@ -389,279 +365,6 @@ class PersonaRouter(conversation.ConversationEntity):
             _LOGGER.exception("Could not label the user message")
             return text
         return labelled
-
-    async def _await_match(
-        self, helper: str, within: float, since: datetime | None, wait_when_old: bool
-    ) -> State | None:
-        """The voice_speaker helper's state once this turn's voice match is in, or the
-        time for it is over. None if the helper is gone.
-
-        A satellite matches on a fixed stretch of audio after the wake word, so the match
-        lands a fixed time after it however long the person speaks: after a long request
-        it is already there, and nothing is waited for. It is waited for until "the match
-        arrives within" seconds after the turn started:
-
-        - while the helper says pending, after pending was last written, which the
-          tracking automation does when the satellite starts listening. The last report
-          counts, not the last change: a helper a follow-up left on pending is written
-          pending again at the next wake word, which changes nothing but the report time;
-        - with `wait_when_old`, while the helper still holds a match from before `since`,
-          when this turn started. The automation writes no pending for a wake word that
-          follows a reply closely, and none at all when it is off.
-        """
-        state = self.hass.states.get(helper)
-        # A cap on the steps too, so a clock that stands still can never keep it waiting.
-        for _ in range(max(int(within * 10) + 1, 0)):
-            if state is None or self._is_current(state, since):
-                break
-            if state.state == "pending":
-                started = state.last_reported
-                if wait_when_old and since is not None:
-                    # A pending an earlier turn left behind says nothing about this one.
-                    started = max(started, since)
-            elif wait_when_old and since is not None:
-                started = since
-            else:
-                break
-            remaining = (started + timedelta(seconds=within) - dt_util.utcnow()).total_seconds()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(0.1, remaining))
-            state = self.hass.states.get(helper)
-        return state
-
-    def _is_current(self, state: State, since: datetime | None) -> bool:
-        """Whether the helper holds a voice match made for the turn that started at `since`."""
-        return verdict_is_current(
-            state.state, state.last_reported, since, dt_util.utcnow(), self._match_lifetime()
-        )
-
-    def _match_within(self) -> float:
-        advanced = self._entry.options.get("advanced") or {}
-        try:
-            return float(advanced.get("match_within", DEFAULT_MATCH_WITHIN))
-        except (TypeError, ValueError):
-            return DEFAULT_MATCH_WITHIN
-
-    def _match_lifetime(self) -> timedelta:
-        """How long ago a voice match may have been written and still be this turn's."""
-        return timedelta(seconds=self._match_within()) + UTTERANCE_ALLOWANCE
-
-    def _follow_up_window(self) -> timedelta:
-        advanced = self._entry.options.get("advanced") or {}
-        try:
-            seconds = float(advanced.get("follow_up_window", FOLLOW_UP_WINDOW.total_seconds()))
-        except (TypeError, ValueError):
-            return FOLLOW_UP_WINDOW
-        return timedelta(seconds=max(seconds, 0))
-
-    async def _who_is_speaking(self, user_input: Input, settings: Settings) -> tuple[Role, bool]:
-        """Return the role and whether a voice match decided it."""
-        advanced = settings.get("advanced") or {}
-        user_id = user_input.context.user_id if user_input.context else None
-        user_map: list[tuple[Role, str | None]] = [
-            (role, (settings.get(SETTINGS_KEY[role]) or {}).get("user"))
-            for role in ("owner", "wife")
-        ]
-        no_helper_role = advanced.get("no_helper_role")
-        if user_id and await self._is_system_user(user_id):
-            # Home Assistant's own hidden users (the Voice over IP phone, add-ons) cannot be
-            # chosen for a person, so they count as a device without speaker recognition.
-            # A helper is not trusted for them either: an add-on can name any device.
-            return resolve_speaker(None, None, user_map, no_helper_role)
-        # A request with a user goes by that user alone (see resolve_speaker), so the
-        # helper of a device it names is neither read nor waited for.
-        if user_id:
-            return resolve_speaker(None, user_id, user_map, no_helper_role)
-        return await self._voice_speaker(user_input, advanced, user_map, no_helper_role)
-
-    async def _voice_speaker(
-        self,
-        user_input: Input,
-        advanced: Settings,
-        user_map: list[tuple[Role, str | None]],
-        no_helper_role: str | None,
-    ) -> tuple[Role, bool]:
-        """The role for a request without a user, by the satellite's voice match.
-
-        Only a match made for this turn counts (speaker.verdict_is_current): one written
-        after the satellite started listening or reported its wake word, and not long ago.
-        The helper keeps the last match until something writes over it, so without that an
-        earlier person's match would be taken for whoever speaks next. A turn without a
-        match of its own is refused as not told apart.
-
-        The answer to a question the assistant asked keeps its person unless a new voice
-        match says otherwise (speaker.follow_up_role): a satellite listens for it without
-        a wake word and often makes no match. Every other turn waits for its match until
-        the deadline (_await_match), so an unknown voice's match still decides.
-        """
-        now = dt_util.utcnow()
-        conversation_id = user_input.conversation_id
-        device_id = user_input.device_id
-        self._spoken_by = {
-            key: seen
-            for key, seen in self._spoken_by.items()
-            if now - seen.at <= CONVERSATION_LIFETIME
-        }
-        remembered = self._spoken_by.get(conversation_id or "")
-        if remembered is not None and remembered.device_id != device_id:
-            remembered = None
-        helper = f"input_text.voice_speaker_{device_id or ''}"
-        if self.hass.states.get(helper) is None:
-            return self._without_helper(device_id, helper, user_map, no_helper_role)
-        woke = self._wake_reported(device_id)
-        woke_since = True if remembered is not None and woke and woke > remembered.at else None
-        window = self._follow_up_window()
-        # This turn started when the satellite began to listen, or reported its wake word.
-        started = [
-            when
-            for when in (listening_since(self.hass, device_id, user_input.satellite_id), woke)
-            if when is not None
-        ]
-        since = max(started) if started else None
-        # An answer to the assistant's question brings no match: it is not waited for.
-        answering = (
-            follow_up_role(remembered, device_id, None, None, now, woke_since, window)
-            is not None
-        )
-        # Not even while the helper says pending: the automation writes that whenever the
-        # satellite starts to listen, and for an answer nothing follows it.
-        within = 0.0 if answering else self._match_within()
-        state = await self._await_match(helper, within, since, not answering)
-        if state is None:
-            return resolve_speaker(None, None, user_map, no_helper_role)
-        now = dt_util.utcnow()
-        current = self._is_current(state, since)
-        kept = follow_up_role(
-            remembered, device_id, state.state, state.last_changed, now, woke_since, window
-        )
-        if kept is not None and remembered is not None:
-            role, matched, decided_by = kept, True, remembered.decided_by
-        elif current:
-            role, matched = resolve_speaker(state.state, None, user_map, no_helper_role)
-            decided_by = state.last_changed
-            self._note_match(device_id, True)
-        else:
-            # Pending, no role at all, or a match from an earlier turn: nobody was told
-            # apart, so nobody is taken for a person.
-            role, matched, decided_by = "stranger", False, None
-            self._note_match(device_id, False)
-        if conversation_id and device_id:
-            if role in ("owner", "wife"):
-                self._spoken_by[conversation_id] = Remembered(role, device_id, decided_by, now)
-            else:
-                # An unknown voice ends it: a later turn needs a voice match of its own.
-                self._spoken_by.pop(conversation_id, None)
-        return role, matched
-
-    def _without_helper(
-        self,
-        device_id: str | None,
-        helper: str,
-        user_map: list[tuple[Role, str | None]],
-        no_helper_role: str | None,
-    ) -> tuple[Role, bool]:
-        """The role for a voice request from a device that has no voice_speaker helper.
-
-        "A device without speaker recognition is" decides, but not for a satellite that
-        does recognise speakers: its helper is missing (the satellite was paired again and
-        has a new device id, or the helper was never made), and assuming a person for it
-        would give that person's access to everyone who speaks to it.
-        """
-        if not device_id or not self._recognises_speakers(device_id):
-            return resolve_speaker(None, None, user_map, no_helper_role)
-        if device_id not in self._no_helper:
-            self._no_helper.add(device_id)
-            _LOGGER.warning(
-                "The satellite on device %s recognises speakers but has no helper %s, so "
-                "its requests are refused. Make the helper, or run the setup guide again "
-                "if the satellite was paired again",
-                device_id, helper,
-            )
-        self._no_match.add(device_id)
-        return "stranger", False
-
-    def _recognises_speakers(self, device_id: str) -> bool:
-        """Whether the device has the sensors a tracking automation reads."""
-        registry = er.async_get(self.hass)
-        return any(
-            entity.entity_id.endswith(("_last_speaker", "_last_speaker_score"))
-            for entity in er.async_entries_for_device(registry, device_id)
-        )
-
-    def _note_match(self, device_id: str | None, arrived: bool) -> None:
-        """Keep which satellites gave no voice match on their last turn; warn once each."""
-        if not device_id:
-            return
-        if arrived:
-            self._no_match.discard(device_id)
-        elif device_id not in self._no_match:
-            self._no_match.add(device_id)
-            _LOGGER.warning(
-                "No voice match arrived from the satellite on device %s, so its requests "
-                "are refused. Check that its speaker recognition sensors are available "
-                "and that the automation that copies them into its helper runs",
-                device_id,
-            )
-
-    def _wake_reported(self, device_id: str | None) -> datetime | None:
-        """When the satellite last reported a wake word, or None when it does not.
-
-        A report proves a new turn (wake word, Wake button, a listen after an announcement).
-        No report proves nothing: Home Assistant drops an update with an unchanged value,
-        so a second wake word with the same phrase never shows.
-        """
-        if not device_id:
-            return None
-        registry = er.async_get(self.hass)
-        for entity in er.async_entries_for_device(registry, device_id):
-            if entity.domain != "sensor":
-                continue
-            named = esphome_entity(entity.unique_id)
-            if (named is None or named[1] != WAKE_WORD_SENSOR) and not entity.entity_id.endswith(
-                "_last_wake_word"
-            ):
-                continue
-            state = self.hass.states.get(entity.entity_id)
-            if state is None or state.state in ("unavailable", "unknown"):
-                return None
-            return state.last_reported
-        return None
-
-    def _note_reply(self, user_input: Input, result: Result) -> None:
-        """Keep whether the reply asked a question: the next turn is then its answer, not
-        a built-in command (_answers_a_question), and on a voice turn without a voice
-        match it is that person's (speaker.follow_up_role)."""
-        key = user_input.conversation_id or ""
-        now = dt_util.utcnow()
-        self._asked = {
-            asked: when
-            for asked, when in self._asked.items()
-            if asked != key and now - when <= CONVERSATION_LIFETIME
-        }
-        if key and result.continue_conversation:
-            self._asked[key] = now
-        seen = self._spoken_by.get(key)
-        if seen is not None and seen.device_id == user_input.device_id:
-            # The time to answer runs from here, not from when the request came in.
-            self._spoken_by[key] = dataclasses.replace(
-                seen, asked=bool(result.continue_conversation), at=dt_util.utcnow()
-            )
-
-    def _answers_a_question(self, user_input: Input) -> bool:
-        """Whether this turn answers a question the last reply in its conversation asked.
-
-        Such an answer belongs to whoever asked. Read as a request of its own it can match
-        a built-in command: "in five minutes to drink some water", the answer to "when,
-        and what for?", is Home Assistant's "in <time> <command>" and set a timer.
-        """
-        asked = self._asked.get(user_input.conversation_id or "")
-        return asked is not None and dt_util.utcnow() - asked <= CONVERSATION_LIFETIME
-
-    async def _is_system_user(self, user_id: str) -> bool:
-        """True for a user Home Assistant created for itself, which no one logs in as."""
-        user = await self.hass.auth.async_get_user(user_id)
-        return user is not None and user.system_generated
 
     def _safe_agent(self, use: str, agent: str) -> str | None:
         """The agent if it is safe to give text from someone unknown, else None.
@@ -788,61 +491,35 @@ class PersonaRouter(conversation.ConversationEntity):
                 log is not None and log_start is not None and len(log.content) > log_start
             )
             turn = log.content[log_start:] if log is not None and visible else []
-            outcome = reminder_tool_outcome(turn)
-            cancelled = reminder_tool_outcome(turn, CANCEL_TOOL)
-            listed = reminder_tool_outcome(turn, LIST_TOOL)
-            looking_up = (
-                outcome == "none"
-                and cancelled == "none"
-                and (listed != "none" or is_list_turn(user_input.text))
+
+            def earlier() -> list[str]:
+                if log is None or log_start is None:
+                    return []
+                return _earlier_user_texts(log, log_start, EARLIER_TURNS)
+
+            fix, about_reminder = reply_checks.reminder_trouble(
+                user_input.text, result.response, turn, visible, earlier
             )
-            about_reminder = (
-                outcome != "none"
-                or cancelled != "none"
-                or looking_up
-                or is_reminder_turn(user_input.text)
-            )
-            if log is None or log_start is None or not visible:
+            if fix is None or log is None or log_start is None:
                 return result, about_reminder
-            reply = speech_text(result.response)
-            if looking_up:
-                # A look-up: its answer says when a reminder is set for, which is no
-                # claim that one was set. It must come from the tool, though.
-                if listed == "ok" or not looks_like_listing(reply):
-                    return result, about_reminder
-                if listed == "none" and used_a_tool(turn):
-                    # It looked somewhere else (a calendar tool, say): not made up.
-                    return result, about_reminder
+            if fix == "list":
                 _LOGGER.warning(
                     "The main agent said which reminders there are without looking them "
                     "up, correcting it"
                 )
-                return self._honest_reply(
-                    user_input, result, log, log_start, DEFAULT_LIST_FAILURE_LINE
-                ), True
-            if cancelled != "none" or is_cancel_turn(user_input.text):
-                # A cancellation: its reply mentions the reminder and when it was set for,
-                # which is no claim that one was set.
-                if not needs_honest_cancel_failure(reply, cancelled):
-                    return result, about_reminder
+                line = DEFAULT_LIST_FAILURE_LINE
+            elif fix == "cancel":
                 _LOGGER.warning(
                     "The main agent confirmed a cancellation it did not make, correcting it"
                 )
-                return self._honest_reply(
-                    user_input, result, log, log_start, DEFAULT_CANCEL_FAILURE_LINE
-                ), True
-            # Only an exchange about a reminder can falsely confirm one. A reply to "what
-            # can you do?" that mentions reminders is not a claim that one was set.
-            recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
-            if outcome == "none" and not is_reminder_exchange(recent):
-                return result, about_reminder
-            passing_on = has_memory_keyword(user_input.text)
-            if not needs_honest_failure(reply, outcome, passing_on):
-                return result, about_reminder
-            _LOGGER.warning("The main agent confirmed a reminder it did not set, correcting it")
-            line = str(self._reminder_settings().get("failure_line") or "").strip()
-            line = line or DEFAULT_FAILURE_LINE
-            return self._honest_reply(user_input, result, log, log_start, line), True
+                line = DEFAULT_CANCEL_FAILURE_LINE
+            else:
+                _LOGGER.warning(
+                    "The main agent confirmed a reminder it did not set, correcting it"
+                )
+                line = str(self._reminder_settings().get("failure_line") or "").strip()
+                line = line or DEFAULT_FAILURE_LINE
+            return self._honest_reply(user_input, result, log, log_start, line), about_reminder
         except Exception:  # noqa: BLE001 - the check must never cost the person their reply
             _LOGGER.exception("Could not check the reminder reply")
             return result, False
@@ -909,26 +586,10 @@ class PersonaRouter(conversation.ConversationEntity):
         except Exception:  # noqa: BLE001 - memory must never block the reply
             _LOGGER.exception("Could not start the memory pass")
 
-    def _last_score(self, device_id: str | None) -> float | None:
-        """Voice match score of the satellite's last request, if it reports one."""
-        if not device_id:
-            return None
-        registry = er.async_get(self.hass)
-        for entity in er.async_entries_for_device(registry, device_id):
-            if entity.entity_id.endswith("_last_speaker_score"):
-                state = self.hass.states.get(entity.entity_id)
-                if state is None:
-                    return None
-                try:
-                    return float(state.state)
-                except (TypeError, ValueError):
-                    return None
-        return None
-
     async def _lookup_from_settings(self, user_input: Input, settings: Settings) -> Lookup:
         """Work out who is speaking and what to do with them, from the settings screen."""
         advanced = settings.get("advanced") or {}
-        who, matched = await self._who_is_speaking(user_input, settings)
+        who, matched = await self._voices.who_is_speaking(user_input, settings)
         rule = str(advanced.get("rule") or "").strip()
 
         if who != "stranger":
@@ -957,7 +618,7 @@ class PersonaRouter(conversation.ConversationEntity):
             }
 
         by_voice = not (user_input.context and user_input.context.user_id)
-        if by_voice and not matched and user_input.device_id in self._no_match:
+        if by_voice and not matched and self._voices.no_match_from(user_input.device_id):
             # Nobody was told apart, so nobody is called unknown: refuse and say why.
             return _refusal("unsure", [UNSURE_LINE], rule)
 
@@ -967,7 +628,7 @@ class PersonaRouter(conversation.ConversationEntity):
         near = settings.get("near_miss") or {}
         kind: str = who
         if matched and near.get("enabled"):
-            score = self._last_score(user_input.device_id)
+            score = self._voices.last_score(user_input.device_id)
             try:
                 lowest = float(near.get("min_score", DEFAULT_MIN_SCORE))
             except (TypeError, ValueError):
@@ -1393,7 +1054,7 @@ class PersonaRouter(conversation.ConversationEntity):
         )
         try:
             result = await self._async_answer(user_input)
-            self._note_reply(user_input, result)
+            self._voices.note_reply(user_input, result)
         finally:
             # The turn is over: nothing may act as this person under its context later.
             forget_asker(self.hass, user_input.context)
@@ -1434,29 +1095,13 @@ class PersonaRouter(conversation.ConversationEntity):
         try:
             if log is None or log_start is None or len(log.content) <= log_start:
                 return None
-            turn = log.content[log_start:]
-            if a_tool_worked(turn) or has_memory_keyword(user_input.text):
-                return None
-            reply = speech_text(result.response)
-            if used_a_tool(turn):
-                # Every call failed: a reply that says it was done is no truer than one
-                # after no call at all. A reminder tool that failed has its own check,
-                # which answers in its own words.
-                if reminders and any(
-                    reminder_tool_outcome(turn, tool) != "none"
-                    for tool in (REMINDER_TOOL, CANCEL_TOOL, LIST_TOOL)
-                ):
-                    return None
-                return "failed" if looks_like_action_claim(reply) else None
-            if reminders:
-                if is_cancel_turn(user_input.text) and looks_like_cancellation(reply):
-                    return "cancel"
-                if is_list_turn(user_input.text) and looks_like_listing(reply):
-                    return "list"
-                recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
-                if is_reminder_exchange(recent) and looks_like_confirmation(reply):
-                    return "reminder"
-            return "action" if looks_like_action_claim(reply) else None
+            return reply_checks.unbacked_claim(
+                user_input.text,
+                result.response,
+                log.content[log_start:],
+                reminders,
+                lambda: _earlier_user_texts(log, log_start, EARLIER_TURNS),
+            )
         except Exception:  # noqa: BLE001 - the reply always goes ahead
             _LOGGER.exception("Could not check the reply for a claim without a tool call")
             return None
@@ -1571,12 +1216,48 @@ class PersonaRouter(conversation.ConversationEntity):
         return result
 
     async def _async_answer(self, user_input: Input) -> Result:
+        """One turn, in stages: who is asking, the chat show, a scripted reply, a shortcut
+        for a known person, the main agent, and the checks on what it answered."""
         if len(user_input.text) > MAX_REQUEST_CHARS:
             _LOGGER.warning(
                 "A request of %d characters is longer than an assistant takes, refusing it",
                 len(user_input.text),
             )
             return self._speak(user_input, TOO_LONG_LINE)
+        resp = await self._lookup(user_input)
+        self._note_asker(user_input, resp)
+        chat_reply = await self._chat_show_answer(user_input, resp)
+        if chat_reply is not None:
+            return chat_reply
+        if not resp:
+            # Nobody could be identified: fail closed, the main agent stays out of reach.
+            return self._speak(user_input, LAST_RESORT_REPLY)
+
+        main_agent = self._main_agent()
+        scripted = await self._scripted_reply(user_input, resp)
+        if scripted is not None:
+            return scripted
+        person = _known_person(resp)
+        emptied = self._start_afresh_for_another_speaker(user_input, str(resp.get("who")))
+        log = self._turn_log(user_input) or current_chat_log.get()
+        text = self._labelled_text(user_input, resp.get("label"))
+        if person is not None:
+            shortcut = await self._shortcut_reply(user_input, person, log, text)
+            if shortcut is not None:
+                return shortcut
+
+        conversation_id = self._main_conversation_id(user_input) if emptied else None
+        log_start = len(log.content) if log is not None else None
+        ask = self._main_agent_asker(user_input, resp, person, main_agent)
+        result = await self._first_answer(ask, text, conversation_id, main_agent)
+        if result is None:
+            return self._speak(user_input, self._agent_down_line())
+        return await self._checked_answer(
+            user_input, resp, result, log, log_start, conversation_id, ask
+        )
+
+    async def _lookup(self, user_input: Input) -> Lookup | None:
+        """Who is speaking and what to do with them, or None when that cannot be told."""
         resp = None
         try:
             settings = self._entry.options
@@ -1589,8 +1270,10 @@ class PersonaRouter(conversation.ConversationEntity):
         except Exception:  # noqa: BLE001 - a failed lookup is refused below
             resp = None
             _LOGGER.exception("Could not work out who is speaking, refusing")
-        self._note_asker(user_input, resp)
+        return resp
 
+    async def _chat_show_answer(self, user_input: Input, resp: Lookup | None) -> Result | None:
+        """The answer when the turn belongs to a chat show, else None."""
         try:
             chat_reply = await self._chat_show_reply(user_input, resp)
         except Exception:  # noqa: BLE001 - a chat show bug must not block every request
@@ -1600,11 +1283,10 @@ class PersonaRouter(conversation.ConversationEntity):
             return chat_reply
         if self._heard_a_chat(user_input, resp):
             return self._chat_turn(user_input, "unrecognised voice elsewhere, no answer", "")
-        if not resp:
-            # Nobody could be identified: fail closed, the main agent stays out of reach.
-            return self._speak(user_input, LAST_RESORT_REPLY)
+        return None
 
-        main_agent = self._main_agent()
+    async def _scripted_reply(self, user_input: Input, resp: Lookup) -> Result | None:
+        """A fixed or reply-agent answer that keeps the main agent out of reach, or None."""
         replies = resp.get("fixed_replies")
         if isinstance(replies, str):
             replies = [replies]
@@ -1627,9 +1309,7 @@ class PersonaRouter(conversation.ConversationEntity):
 
         if replies:
             return self._fixed_reply(user_input, replies)
-        who = resp.get("who")
-        person = _known_person(resp)
-        if "who" in resp and person is None:
+        if "who" in resp and _known_person(resp) is None:
             # Only an older "who is speaking" script gets here: the settings always give
             # someone who is no person a line to speak. Its persona asking the main agent
             # to refuse is no guarantee, so the main agent, and its tools, is not asked.
@@ -1639,22 +1319,27 @@ class PersonaRouter(conversation.ConversationEntity):
                 "but gave no fixed reply and no reply agent, so the request is refused"
             )
             return self._speak(user_input, LAST_RESORT_REPLY)
-        emptied = self._start_afresh_for_another_speaker(user_input, str(who))
-        log = self._turn_log(user_input) or current_chat_log.get()
-        text = self._labelled_text(user_input, resp.get("label"))
-        if person is not None:
-            played = await self._favorite_reply(user_input, person, log, text)
-            if played is not None and played is not NO_PLAYER:
-                return played
-            if played is None and not self._answers_a_question(user_input):
-                handled = await self._local_command(
-                    user_input, log, self._entry.options.get("local") or {}, text
-                )
-                if handled is not None:
-                    return handled
+        return None
 
-        conversation_id = self._main_conversation_id(user_input) if emptied else None
-        log_start = len(log.content) if log is not None else None
+    async def _shortcut_reply(
+        self, user_input: Input, person: Person, log: ChatLog | None, text: str
+    ) -> Result | None:
+        """A favorite played or a local command done for a known person, or None."""
+        played = await self._favorite_reply(user_input, person, log, text)
+        if played is not None and played is not NO_PLAYER:
+            return played
+        if played is None and not self._voices.answers_a_question(user_input):
+            handled = await self._local_command(
+                user_input, log, self._entry.options.get("local") or {}, text
+            )
+            if handled is not None:
+                return handled
+        return None
+
+    def _main_agent_asker(
+        self, user_input: Input, resp: Lookup, person: Person | None, main_agent: str
+    ) -> Callable[[str, str | None], Awaitable[Result]]:
+        """What puts words to the main agent, as this person on this satellite."""
         context_id = user_input.context.id if user_input.context else None
         # Only this request's own record is forgotten: a router whose main agent is this
         # one may have remembered its asker under the same context.
@@ -1689,18 +1374,42 @@ class PersonaRouter(conversation.ConversationEntity):
                 if remembered:
                     forget(self.hass, remembered)
 
+        return ask
+
+    @staticmethod
+    async def _first_answer(
+        ask: Callable[[str, str | None], Awaitable[Result]],
+        text: str,
+        conversation_id: str | None,
+        main_agent: str,
+    ) -> Result | None:
+        """The main agent's answer, or None when it failed or gave an error without words."""
         try:
             result = await ask(text, conversation_id)
         except Exception:  # noqa: BLE001 - the person hears a line, not a failed turn
             _LOGGER.exception("The main agent %s failed, answering with a short line", main_agent)
-            return self._speak(user_input, self._agent_down_line())
+            return None
         if _silent_error(result):
             _LOGGER.error(
                 "The main agent %s answered with an error and no words, answering with a "
                 "short line",
                 main_agent,
             )
-            return self._speak(user_input, self._agent_down_line())
+            return None
+        return result
+
+    async def _checked_answer(
+        self,
+        user_input: Input,
+        resp: Lookup,
+        result: Result,
+        log: ChatLog | None,
+        log_start: int | None,
+        conversation_id: str | None,
+        ask: Callable[[str, str | None], Awaitable[Result]],
+    ) -> Result:
+        """The answer once claims without a tool call and reminder trouble are put right,
+        with the memory pass started unless the turn was about a reminder."""
         asked_in = conversation_id
         if conversation_id != user_input.conversation_id:
             asked_in = result.conversation_id

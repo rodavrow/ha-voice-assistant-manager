@@ -52,7 +52,7 @@ def voice_turn(
 
 async def speaker(hass, entry, turn) -> str:
     entity = hass.data[conversation.DATA_COMPONENT].get_entity(router_entity_id(hass, entry))
-    role, _ = await entity._who_is_speaking(turn, entry.options)
+    role, _ = await entity._voices.who_is_speaking(turn, entry.options)
     return role
 
 
@@ -63,8 +63,8 @@ def asked_a_question(hass, entry, conversation_id: str = CONVERSATION) -> None:
     2026-11-27, S1 of the code review); before, any turn within a minute was.
     """
     entity = hass.data[conversation.DATA_COMPONENT].get_entity(router_entity_id(hass, entry))
-    entity._spoken_by[conversation_id] = dataclasses.replace(
-        entity._spoken_by[conversation_id], asked=True
+    entity._voices._spoken_by[conversation_id] = dataclasses.replace(
+        entity._voices._spoken_by[conversation_id], asked=True
     )
 
 
