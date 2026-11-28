@@ -50,6 +50,7 @@
     "voice_assistant_manager/panel/set_sidebar",
     "voice_assistant_manager/panel/talk/close",
     "voice_assistant_manager/panel/talk/open",
+    "voice_assistant_manager/panel/talk/set_zoom",
     "voice_assistant_manager/panel/voices",
     "voice_assistant_manager/stage/connected",
     "voice_assistant_manager/stage/offer",

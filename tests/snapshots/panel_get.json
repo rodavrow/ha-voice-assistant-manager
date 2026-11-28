@@ -111,6 +111,7 @@
           "text": "No satellite is set up to use this assistant yet."
         }
       ],
+      "talk_zoom": 50,
       "title": "Kitchen assistant"
     }
   ],

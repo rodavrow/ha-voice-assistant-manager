@@ -7,6 +7,10 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Added
 
+- **The upright zoom of the talk page is set per assistant.** A **Zoom when held upright**
+  slider under the **Talk** button says how far the avatar's picture is zoomed in on an
+  upright phone: from the whole picture between black bars to filling the screen. It starts
+  halfway, where it filled the screen before.
 - **Talk to an assistant's avatar on the Voice Manager page.** For administrators: **Talk**
   in an assistant's Avatar section opens the avatar over the page and listens through the
   device's microphone, with no satellite. The reply is streamed to the page's avatar as it

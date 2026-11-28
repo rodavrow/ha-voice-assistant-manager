@@ -259,6 +259,11 @@ details.list > div { padding: 10px 0 0 20px; }
 .cal { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--vpr-line); }
 .cal:first-child { border-top: 0; padding-top: 0; }
 .cal .what { flex: 1; min-width: 0; }
+.cal.talk { flex-wrap: wrap; }
+.cal .zoom { flex-basis: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) 4ch; align-items: center; gap: 4px 12px; }
+.cal .zoom input { width: 100%; min-width: 0; }
+.cal .zoom .zoom-value { text-align: right; font-variant-numeric: tabular-nums; }
+.cal .zoom .sub { grid-column: 1 / -1; }
 .cal .title { font-weight: 500; overflow-wrap: anywhere; }
 .cal .sub { color: var(--vpr-muted); font-size: 13.5px; }
 .editor h3 { margin-bottom: 16px; }
@@ -1629,7 +1634,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
     if (!avatars.some((row) => row.enabled && row.entity_id)) return null;
     return h(
       "div",
-      { class: "cal" },
+      { class: "cal talk" },
       h(
         "div",
         { class: "what" },
@@ -1640,8 +1645,48 @@ class VoicePersonaRouterPanel extends HTMLElement {
           "Opens the avatar on this page and listens through this device's microphone, as a satellite would. You are the Home Assistant user you are logged in as. The microphone needs https or the Home Assistant app."
         )
       ),
-      h("button", { class: "btn primary", disabled: this._talkBusy || !!this._talk, onclick: () => this._openTalk() }, "Talk")
+      h("button", { class: "btn primary", disabled: this._talkBusy || !!this._talk, onclick: () => this._openTalk() }, "Talk"),
+      this._talkZoom()
     );
+  }
+
+  /**
+   * How far this assistant's avatar is zoomed in when the screen is held upright. Saved when
+   * the slider is let go, by itself: it is not one of the settings behind the Save button.
+   */
+  _talkZoom() {
+    const router = this._router;
+    const shown = h("span", { class: "zoom-value" }, `${router.talk_zoom}%`);
+    return h(
+      "label",
+      { class: "zoom" },
+      h("span", { class: "title" }, "Zoom when held upright"),
+      h("input", {
+        type: "range",
+        min: "0",
+        max: "100",
+        step: "5",
+        value: String(router.talk_zoom),
+        oninput: (ev) => (shown.textContent = `${ev.target.value}%`),
+        onchange: (ev) => this._saveTalkZoom(router, Number(ev.target.value)),
+      }),
+      shown,
+      h(
+        "span",
+        { class: "sub" },
+        "0% shows the whole picture with black bars above and below, 100% fills the screen and cuts off the sides. Held sideways the whole picture always shows."
+      )
+    );
+  }
+
+  async _saveTalkZoom(router, zoom) {
+    try {
+      await this._call("talk/set_zoom", { entry_id: router.entry_id, zoom });
+      router.talk_zoom = zoom;
+    } catch (err) {
+      this._toast(reason(err) || "The zoom could not be saved.");
+      this._render();
+    }
   }
 
   /**
@@ -1681,7 +1726,7 @@ class VoicePersonaRouterPanel extends HTMLElement {
       // moment, which ends the talk.
       document.body.append(talk);
       this._talk = talk;
-      talk.open({ hass: this._hass, entryId: router.entry_id, title: router.title, listen });
+      talk.open({ hass: this._hass, entryId: router.entry_id, title: router.title, listen, zoom: router.talk_zoom });
     } catch (err) {
       this._toast(`Talking could not be started: ${reason(err)}`);
     }
