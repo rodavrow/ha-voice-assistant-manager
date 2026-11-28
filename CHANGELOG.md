@@ -145,6 +145,9 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
   `custom_components.voice_assistant_manager.voice_identity`, saving to memory as
   `...memory_store` and deciding what to save as `...memory_extraction`. A logger setting
   for the whole `custom_components.voice_assistant_manager` still covers all of them.
+- **The Voice Manager and My assistant pages share one script for what they have in
+  common.** Nothing on the pages changes. They now need a browser from 2021 or later
+  (iOS 15 or later in the Home Assistant app).
 - **A person can no longer cancel the other person's reminder.** Cancelling through an
   assistant now works for the reminders of the person speaking and the household's only;
   who is speaking comes from the assistant, not the main agent. **Update
