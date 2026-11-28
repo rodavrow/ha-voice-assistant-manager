@@ -8,35 +8,15 @@
 
 const WS = "voice_assistant_manager/panel";
 const ELEMENT = "voice-assistant-manager-panel";
-const PRIVATE_PREFIX = "(private)";
 
-/** Create an element. Children are nodes or strings; strings become text nodes. */
-function h(tag, props, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props || {})) {
-    if (value === undefined || value === null || value === false) continue;
-    if (key === "class") node.className = value;
-    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
-    else if (key in node && key !== "list") node[key] = value;
-    else node.setAttribute(key, value === true ? "" : value);
-  }
-  for (const child of children.flat(Infinity)) {
-    if (child === undefined || child === null || child === false) continue;
-    node.append(child);
-  }
-  return node;
-}
+// Shared with the other page (vam_common.js), loaded with this script's own version.
+const { h, PRIVATE_PREFIX, CHAT_LIMITS, CHAT_POLL_MS, CHAT_ENDED_FINE, STAGE_CARD, STAGE_BOX_STYLE, STAGE_STOP_STYLE, MAX_FAVORITE_NAME, MAX_FAVORITE_URL } = await import(
+  new URL(`vam_common.js${new URL(import.meta.url).search}`, import.meta.url).href
+);
 
 // The element for talking to an avatar (talk.js), next to this script and of the same version.
 const TALK_URL = new URL(`talk.js${new URL(import.meta.url).search}`, import.meta.url).href;
 const TALK_ELEMENT = "vam-talk";
-
-// The stage card (stage.js) as the page shows it for a chat on "This device": over everything.
-const STAGE_CARD = "vam-chat-stage-card";
-const STAGE_BOX_STYLE = "position:fixed;inset:0;z-index:1000;background:#000;";
-const STAGE_STOP_STYLE =
-  "position:absolute;z-index:5;top:calc(12px + env(safe-area-inset-top, 0px));right:12px;padding:10px 18px;" +
-  "border:0;border-radius:999px;background:rgba(255,255,255,0.9);color:#000;font:inherit;font-size:16px;";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -61,20 +41,8 @@ const SECTIONS = [
   // About two assistants at once, so it ignores which assistant is selected.
   { id: "chat", label: "Chat show", icon: "mdi:account-voice", text: "chat.title" },
 ];
-// The chat limits the card edits (chat_text.ChatLimits); "listen" is a checkbox, only for a speaker that can listen.
-const CHAT_LIMITS = [
-  { key: "max_lines", min: 2, max: 50, step: 1 },
-  { key: "words", min: 5, max: 80, step: 1 },
-  { key: "pause", min: 0, max: 10, step: 0.5 },
-  { key: "minutes", min: 1, max: 30, step: 1 },
-];
-const CHAT_POLL_MS = 2000;
-// Reasons a chat ends that are no failure (chat_show.py).
-const CHAT_ENDED_FINE = ["chat_done", "chat_time_up", "chat_stopped"];
-// Favorites (favorites.py): what each kind is called, and the longest name and address.
+// Favorites (favorites.py): what each kind is called.
 const FAVORITE_KINDS = { radio: "Radio", podcast: "Podcast", playlist: "Playlist", album: "Album", track: "Track", stream: "Stream" };
-const MAX_FAVORITE_NAME = 80;
-const MAX_FAVORITE_URL = 2000;
 // The lists of favorites/get, in the order they are shown; the household's last.
 const FAVORITE_LISTS = ["person:owner", "person:wife", "household"];
 

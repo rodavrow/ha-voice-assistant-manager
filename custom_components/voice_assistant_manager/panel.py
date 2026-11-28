@@ -40,6 +40,9 @@ STAGE_SCRIPT_FILE = Path(__file__).parent / "frontend" / "stage.js"
 # The element for talking to an avatar, which the page fetches when Talk is pressed (talk.py).
 TALK_SCRIPT_URL = f"/{DOMAIN}/talk.js"
 TALK_SCRIPT_FILE = Path(__file__).parent / "frontend" / "talk.js"
+# What both pages share, which each imports with its own version (vam_common.js).
+COMMON_SCRIPT_URL = f"/{DOMAIN}/vam_common.js"
+COMMON_SCRIPT_FILE = Path(__file__).parent / "frontend" / "vam_common.js"
 STORAGE_VERSION = 1
 GuideState = Literal["done", "dismissed", "started"]
 GUIDE_STATES: tuple[GuideState, ...] = ("done", "dismissed", "started")
@@ -345,6 +348,7 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             StaticPathConfig(MINE_SCRIPT_URL, str(MINE_SCRIPT_FILE), cache_headers=False),
             StaticPathConfig(STAGE_SCRIPT_URL, str(STAGE_SCRIPT_FILE), cache_headers=False),
             StaticPathConfig(TALK_SCRIPT_URL, str(TALK_SCRIPT_FILE), cache_headers=False),
+            StaticPathConfig(COMMON_SCRIPT_URL, str(COMMON_SCRIPT_FILE), cache_headers=False),
         ]
     )
     _register(hass, state, update=False)

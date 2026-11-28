@@ -10,30 +10,13 @@
 
 const WS = "voice_assistant_manager/me";
 const ELEMENT = "voice-assistant-manager-mine";
-const PRIVATE_PREFIX = "(private)";
-const MAX_PERSONA = 2000; // mine_api.MAX_PERSONA_LENGTH
-const MAX_TITLE = 200; // mine_api.MAX_TITLE_LENGTH
-// Favorites (favorites.py): the longest name and address.
-const MAX_FAVORITE_NAME = 80;
-const MAX_FAVORITE_URL = 2000;
-const DAYS = ["today", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
-/** Create an element. Children are nodes or strings; strings become text nodes. */
-function h(tag, props, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props || {})) {
-    if (value === undefined || value === null || value === false) continue;
-    if (key === "class") node.className = value;
-    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
-    else if (key in node && key !== "list") node[key] = value;
-    else node.setAttribute(key, value === true ? "" : value);
-  }
-  for (const child of children.flat(Infinity)) {
-    if (child === undefined || child === null || child === false) continue;
-    node.append(child);
-  }
-  return node;
-}
+// Shared with the other page (vam_common.js), loaded with this script's own version.
+const { h, PRIVATE_PREFIX, MAX_PERSONA, MAX_TITLE, MAX_FAVORITE_NAME, MAX_FAVORITE_URL, CHAT_LIMITS, CHAT_POLL_MS, CHAT_ENDED_FINE, STAGE_CARD, STAGE_BOX_STYLE, STAGE_STOP_STYLE } = await import(
+  new URL(`vam_common.js${new URL(import.meta.url).search}`, import.meta.url).href
+);
+
+const DAYS = ["today", "tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
 /** A readable reason from a websocket error or an Error. */
 function reason(err) {
@@ -54,23 +37,6 @@ const SECTIONS = [
   { id: "shared", icon: "mdi:home-account" },
 ];
 
-// The chat show: asked for again this often while a chat runs, and the reasons a chat ends
-// that are no failure (chat_show.py).
-const CHAT_POLL_MS = 2000;
-const CHAT_ENDED_FINE = ["chat_done", "chat_time_up", "chat_stopped"];
-// The chat limits the card edits (chat_text.LIMIT_RANGES); "listen" is a checkbox, only for a speaker that can listen.
-const CHAT_LIMITS = [
-  { key: "max_lines", min: 2, max: 50, step: 1 },
-  { key: "words", min: 5, max: 80, step: 1 },
-  { key: "pause", min: 0, max: 10, step: 0.5 },
-  { key: "minutes", min: 1, max: 30, step: 1 },
-];
-// The stage card (stage.js) as the page shows it for a chat on "This device": over everything.
-const STAGE_CARD = "vam-chat-stage-card";
-const STAGE_BOX_STYLE = "position:fixed;inset:0;z-index:1000;background:#000;";
-const STAGE_STOP_STYLE =
-  "position:absolute;z-index:5;top:calc(12px + env(safe-area-inset-top, 0px));right:12px;padding:10px 18px;" +
-  "border:0;border-radius:999px;background:rgba(255,255,255,0.9);color:#000;font:inherit;font-size:16px;";
 
 const STYLE = `
 .pair, .limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding-bottom: 14px; }
