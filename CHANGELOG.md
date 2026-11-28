@@ -140,6 +140,11 @@ All notable changes to Voice Assistant Manager. Versions follow the `version` in
 
 ### Changed
 
+- **The code is split into smaller parts; nothing you use changes.** Some log lines now
+  name a new part of the integration: the voice match check logs as
+  `custom_components.voice_assistant_manager.voice_identity`, saving to memory as
+  `...memory_store` and deciding what to save as `...memory_extraction`. A logger setting
+  for the whole `custom_components.voice_assistant_manager` still covers all of them.
 - **A person can no longer cancel the other person's reminder.** Cancelling through an
   assistant now works for the reminders of the person speaking and the household's only;
   who is speaking comes from the assistant, not the main agent. **Update
