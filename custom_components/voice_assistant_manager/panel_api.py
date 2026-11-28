@@ -31,7 +31,6 @@ from .avatar import SUBENTRY_TYPE as AVATAR
 from .avatar_flow import validate_avatar
 from .calendar_watch import calendar_rows, find_watcher
 from .chat_show import (
-    ChatLimits,
     ChatRefused,
     ChatState,
     can_listen,
@@ -40,6 +39,7 @@ from .chat_show import (
     get_manager,
     voice_satellites,
 )
+from .chat_text import ChatLimits
 from .const import DOMAIN, PERSON_SECTION
 from .favorites import (
     HOUSEHOLD,

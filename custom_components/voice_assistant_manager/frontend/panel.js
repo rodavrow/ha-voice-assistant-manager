@@ -61,7 +61,7 @@ const SECTIONS = [
   // About two assistants at once, so it ignores which assistant is selected.
   { id: "chat", label: "Chat show", icon: "mdi:account-voice", text: "chat.title" },
 ];
-// The chat limits the card edits (chat_show.ChatLimits); "listen" is a checkbox, only for a speaker that can listen.
+// The chat limits the card edits (chat_text.ChatLimits); "listen" is a checkbox, only for a speaker that can listen.
 const CHAT_LIMITS = [
   { key: "max_lines", min: 2, max: 50, step: 1 },
   { key: "words", min: 5, max: 80, step: 1 },

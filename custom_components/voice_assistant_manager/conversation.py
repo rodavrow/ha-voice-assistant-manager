@@ -51,7 +51,8 @@ from homeassistant.util import ulid
 from . import avatar_stream, const, emotion, talk
 from .announce import safe_toolless_agent
 from .avatar import esphome_entity
-from .chat_show import GUEST, get_manager, is_stop_phrase
+from .chat_show import get_manager
+from .chat_text import GUEST, is_stop_phrase
 from .const import (
     DEFAULT_MIN_SCORE,
     PERSON_SECTION,

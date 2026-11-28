@@ -58,7 +58,7 @@ const SECTIONS = [
 // that are no failure (chat_show.py).
 const CHAT_POLL_MS = 2000;
 const CHAT_ENDED_FINE = ["chat_done", "chat_time_up", "chat_stopped"];
-// The chat limits the card edits (chat_show.LIMIT_RANGES); "listen" is a checkbox, only for a speaker that can listen.
+// The chat limits the card edits (chat_text.LIMIT_RANGES); "listen" is a checkbox, only for a speaker that can listen.
 const CHAT_LIMITS = [
   { key: "max_lines", min: 2, max: 50, step: 1 },
   { key: "words", min: 5, max: 80, step: 1 },
