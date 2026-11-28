@@ -328,7 +328,7 @@ async def test_regression_s1_the_time_to_answer_runs_from_the_reply_not_from_the
     turn = voice_turn(kitchen)
     await speaker(hass, router, turn)
     freezer.tick(40)
-    entity._note_reply(turn, SimpleNamespace(continue_conversation=True))
+    entity._voices.note_reply(turn, SimpleNamespace(continue_conversation=True))
 
     freezer.tick(40)
     match(hass, kitchen, "pending")
@@ -368,7 +368,7 @@ async def test_regression_the_answer_to_a_question_does_not_wait_for_a_match(has
     match(hass, kitchen, "owner")
     turn = voice_turn(kitchen)
     await speaker(hass, router, turn)
-    entity._note_reply(turn, SimpleNamespace(continue_conversation=True))
+    entity._voices.note_reply(turn, SimpleNamespace(continue_conversation=True))
     match(hass, kitchen, "pending")
 
     began = time.monotonic()
