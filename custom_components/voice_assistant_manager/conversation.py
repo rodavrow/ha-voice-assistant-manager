@@ -48,7 +48,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ulid
 
-from . import avatar_stream, const, emotion, talk
+from . import avatar_stream, const, emotion, reply_checks, talk
 from .announce import safe_toolless_agent
 from .avatar import esphome_entity
 from .chat_show import get_manager
@@ -92,7 +92,6 @@ from .memory import (
     entry_key,
     get_loaded_memory,
     global_key,
-    has_memory_keyword,
     memory_block,
     router_agent_ids,
     shared_list_ok,
@@ -108,24 +107,13 @@ from .reminders import (
     DEFAULT_LIST_FAILURE_LINE,
     LIST_TOOL,
     PUT_RIGHT,
-    REMINDER_TOOL,
     RETRY_NOTES,
     SPOKE_TOO_SOON,
     a_tool_worked,
     assistant_name,
-    is_cancel_turn,
-    is_list_turn,
-    is_reminder_exchange,
-    is_reminder_turn,
     looks_like_action_claim,
-    looks_like_cancellation,
-    looks_like_confirmation,
-    looks_like_listing,
-    needs_honest_cancel_failure,
-    needs_honest_failure,
     reminder_guidance,
     reminder_tool_outcome,
-    used_a_tool,
 )
 from .speaker import (
     CONVERSATION_LIFETIME,
@@ -789,61 +777,35 @@ class PersonaRouter(conversation.ConversationEntity):
                 log is not None and log_start is not None and len(log.content) > log_start
             )
             turn = log.content[log_start:] if log is not None and visible else []
-            outcome = reminder_tool_outcome(turn)
-            cancelled = reminder_tool_outcome(turn, CANCEL_TOOL)
-            listed = reminder_tool_outcome(turn, LIST_TOOL)
-            looking_up = (
-                outcome == "none"
-                and cancelled == "none"
-                and (listed != "none" or is_list_turn(user_input.text))
+
+            def earlier() -> list[str]:
+                if log is None or log_start is None:
+                    return []
+                return _earlier_user_texts(log, log_start, EARLIER_TURNS)
+
+            fix, about_reminder = reply_checks.reminder_trouble(
+                user_input.text, result.response, turn, visible, earlier
             )
-            about_reminder = (
-                outcome != "none"
-                or cancelled != "none"
-                or looking_up
-                or is_reminder_turn(user_input.text)
-            )
-            if log is None or log_start is None or not visible:
+            if fix is None or log is None or log_start is None:
                 return result, about_reminder
-            reply = speech_text(result.response)
-            if looking_up:
-                # A look-up: its answer says when a reminder is set for, which is no
-                # claim that one was set. It must come from the tool, though.
-                if listed == "ok" or not looks_like_listing(reply):
-                    return result, about_reminder
-                if listed == "none" and used_a_tool(turn):
-                    # It looked somewhere else (a calendar tool, say): not made up.
-                    return result, about_reminder
+            if fix == "list":
                 _LOGGER.warning(
                     "The main agent said which reminders there are without looking them "
                     "up, correcting it"
                 )
-                return self._honest_reply(
-                    user_input, result, log, log_start, DEFAULT_LIST_FAILURE_LINE
-                ), True
-            if cancelled != "none" or is_cancel_turn(user_input.text):
-                # A cancellation: its reply mentions the reminder and when it was set for,
-                # which is no claim that one was set.
-                if not needs_honest_cancel_failure(reply, cancelled):
-                    return result, about_reminder
+                line = DEFAULT_LIST_FAILURE_LINE
+            elif fix == "cancel":
                 _LOGGER.warning(
                     "The main agent confirmed a cancellation it did not make, correcting it"
                 )
-                return self._honest_reply(
-                    user_input, result, log, log_start, DEFAULT_CANCEL_FAILURE_LINE
-                ), True
-            # Only an exchange about a reminder can falsely confirm one. A reply to "what
-            # can you do?" that mentions reminders is not a claim that one was set.
-            recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
-            if outcome == "none" and not is_reminder_exchange(recent):
-                return result, about_reminder
-            passing_on = has_memory_keyword(user_input.text)
-            if not needs_honest_failure(reply, outcome, passing_on):
-                return result, about_reminder
-            _LOGGER.warning("The main agent confirmed a reminder it did not set, correcting it")
-            line = str(self._reminder_settings().get("failure_line") or "").strip()
-            line = line or DEFAULT_FAILURE_LINE
-            return self._honest_reply(user_input, result, log, log_start, line), True
+                line = DEFAULT_CANCEL_FAILURE_LINE
+            else:
+                _LOGGER.warning(
+                    "The main agent confirmed a reminder it did not set, correcting it"
+                )
+                line = str(self._reminder_settings().get("failure_line") or "").strip()
+                line = line or DEFAULT_FAILURE_LINE
+            return self._honest_reply(user_input, result, log, log_start, line), about_reminder
         except Exception:  # noqa: BLE001 - the check must never cost the person their reply
             _LOGGER.exception("Could not check the reminder reply")
             return result, False
@@ -1435,29 +1397,13 @@ class PersonaRouter(conversation.ConversationEntity):
         try:
             if log is None or log_start is None or len(log.content) <= log_start:
                 return None
-            turn = log.content[log_start:]
-            if a_tool_worked(turn) or has_memory_keyword(user_input.text):
-                return None
-            reply = speech_text(result.response)
-            if used_a_tool(turn):
-                # Every call failed: a reply that says it was done is no truer than one
-                # after no call at all. A reminder tool that failed has its own check,
-                # which answers in its own words.
-                if reminders and any(
-                    reminder_tool_outcome(turn, tool) != "none"
-                    for tool in (REMINDER_TOOL, CANCEL_TOOL, LIST_TOOL)
-                ):
-                    return None
-                return "failed" if looks_like_action_claim(reply) else None
-            if reminders:
-                if is_cancel_turn(user_input.text) and looks_like_cancellation(reply):
-                    return "cancel"
-                if is_list_turn(user_input.text) and looks_like_listing(reply):
-                    return "list"
-                recent = [user_input.text, *_earlier_user_texts(log, log_start, EARLIER_TURNS)]
-                if is_reminder_exchange(recent) and looks_like_confirmation(reply):
-                    return "reminder"
-            return "action" if looks_like_action_claim(reply) else None
+            return reply_checks.unbacked_claim(
+                user_input.text,
+                result.response,
+                log.content[log_start:],
+                reminders,
+                lambda: _earlier_user_texts(log, log_start, EARLIER_TURNS),
+            )
         except Exception:  # noqa: BLE001 - the reply always goes ahead
             _LOGGER.exception("Could not check the reply for a claim without a tool call")
             return None
